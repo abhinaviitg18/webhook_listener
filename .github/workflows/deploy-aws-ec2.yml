@@ -27,12 +27,17 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: us-east-1
+      - name: Validate AWS Secrets In Runner
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: us-east-1
+          AWS_REGION: us-east-1
+        run: |
+          set -euo pipefail
+          echo "AWS_ACCESS_KEY_ID length: ${#AWS_ACCESS_KEY_ID}"
+          echo "AWS_SECRET_ACCESS_KEY length: ${#AWS_SECRET_ACCESS_KEY}"
+          aws sts get-caller-identity
 
       - name: Generate ephemeral SSH key
         run: |
@@ -40,6 +45,10 @@ jobs:
 
       - name: Open EC2 Instance Connect window
         env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: us-east-1
+          AWS_REGION: us-east-1
           INSTANCE_ID: ${{ secrets.EC2_INSTANCE_ID }}
           EC2_AZ: ${{ secrets.EC2_AVAILABILITY_ZONE }}
         run: |
