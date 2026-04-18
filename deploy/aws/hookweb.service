@@ -1,0 +1,22 @@
+[Unit]
+Description=hookweb.club API service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ec2-user
+Group=ec2-user
+EnvironmentFile=/opt/hookweb/.env
+ExecStart=/usr/local/bin/hookweb-server
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/hookweb
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target
