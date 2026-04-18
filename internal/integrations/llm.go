@@ -1,0 +1,95 @@
+package integrations
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"strings"
+	"time"
+
+	"hookweb.club/internal/domain"
+)
+
+type LLMClient struct {
+	Provider string
+	APIKey   string
+	BaseURL  string
+	Model    string
+	Client   *http.Client
+}
+
+type chatReq struct {
+	Model    string    `json:"model"`
+	Messages []chatMsg `json:"messages"`
+	Response any       `json:"response_format,omitempty"`
+}
+
+type chatMsg struct {
+	Role    string `json:"role"`
+	Content string `json:"content"`
+}
+
+type chatResp struct {
+	Choices []struct {
+		Message chatMsg `json:"message"`
+	} `json:"choices"`
+}
+
+func NewLLMClient(provider, key, baseURL, model string) *LLMClient {
+	return &LLMClient{Provider: provider, APIKey: strings.TrimSpace(key), BaseURL: strings.TrimSpace(baseURL), Model: model, Client: &http.Client{Timeout: 8 * time.Second}}
+}
+
+func (l *LLMClient) SuggestAction(ctx context.Context, typeKey, payload string, memories []domain.PineconeMemory, available []string) (domain.ProcessDecision, error) {
+	if l.APIKey == "" || l.BaseURL == "" {
+		return domain.ProcessDecision{ActionName: "store_mysql", Reason: "llm not configured", Params: map[string]interface{}{}}, nil
+	}
+	prompt := buildPrompt(typeKey, payload, memories, available)
+	r := chatReq{
+		Model:    l.Model,
+		Messages: []chatMsg{{Role: "system", Content: "Return strict JSON: {\"action_name\": string, \"reason\": string, \"params\": object}. Optional params.memory_write_mode must be one of: update_or_insert, insert_only, none."}, {Role: "user", Content: prompt}},
+	}
+	b, _ := json.Marshal(r)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(l.BaseURL, "/")+"/chat/completions", bytes.NewReader(b))
+	if err != nil {
+		return domain.ProcessDecision{}, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+l.APIKey)
+	resp, err := l.Client.Do(req)
+	if err != nil {
+		return domain.ProcessDecision{}, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		return domain.ProcessDecision{}, fmt.Errorf("llm request failed: %s", resp.Status)
+	}
+	var parsed chatResp
+	if err := json.NewDecoder(resp.Body).Decode(&parsed); err != nil {
+		return domain.ProcessDecision{}, err
+	}
+	if len(parsed.Choices) == 0 {
+		return domain.ProcessDecision{}, fmt.Errorf("empty llm response")
+	}
+	var d domain.ProcessDecision
+	if err := json.Unmarshal([]byte(parsed.Choices[0].Message.Content), &d); err != nil {
+		return domain.ProcessDecision{ActionName: "store_mysql", Reason: "llm parse fallback", Params: map[string]interface{}{}}, nil
+	}
+	if d.ActionName == "" {
+		d.ActionName = "store_mysql"
+		d.Reason = "llm empty action fallback"
+	}
+	if d.Params == nil {
+		d.Params = map[string]interface{}{}
+	}
+	return d, nil
+}
+
+func buildPrompt(typeKey, payload string, memories []domain.PineconeMemory, available []string) string {
+	mem := make([]string, 0, len(memories))
+	for _, m := range memories {
+		mem = append(mem, m.Summary)
+	}
+	return fmt.Sprintf("Type: %s\nPayload: %s\nRelevant context: %s\nAvailable actions: %s\nPick the best action and params. Include params.memory_write_mode if memory behavior should be overridden.", typeKey, payload, strings.Join(mem, " | "), strings.Join(available, ","))
+}

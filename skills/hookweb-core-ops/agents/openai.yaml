@@ -1,0 +1,4 @@
+interface:
+  display_name: "Hookweb Core Ops"
+  short_description: "Operate hookweb webhook APIs safely"
+  default_prompt: "Use $hookweb-core-ops to set up typed webhooks, fetch events, and deploy customer lambdas via APIs."
