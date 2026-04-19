@@ -22,6 +22,7 @@ chown -R ec2-user:ec2-user /opt/hookweb
 aws ssm get-parameter \
   --name "$APP_ENV_SSM_PARAM" \
   --with-decryption \
+  --region "${AWS_REGION:-us-east-1}" \
   --query "Parameter.Value" \
   --output text > "$APP_ENV_FILE"
 chmod 600 "$APP_ENV_FILE"

@@ -70,9 +70,5 @@ jobs:
             cd /opt/hookweb/repo
             git fetch --all --tags
             git checkout ${GITHUB_SHA}
-            sudo -u ec2-user /usr/bin/env bash -lc 'cd /opt/hookweb/repo && go mod download && go build -o /tmp/hookweb-server ./cmd/server'
-            sudo mv /tmp/hookweb-server /usr/local/bin/hookweb-server
-            sudo systemctl restart hookweb
-            sleep 2
-            sudo systemctl --no-pager --full status hookweb | head -n 25
+            sudo APP_ENV_SSM_PARAM=/hookweb/prod/env AWS_REGION=us-east-1 /opt/hookweb/repo/scripts/aws/ec2_deploy.sh
           "
