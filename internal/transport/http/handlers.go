@@ -42,6 +42,7 @@ func NewRouter(h *Handler, verifier auth.RequestVerifier) http.Handler {
 	r.Post("/api/register/email", h.RegisterEmail)
 	r.Get("/auth/scalekit/login", h.ScaleKitLoginRedirect)
 	r.Get("/auth/scalekit/signup", h.ScaleKitSignupRedirect)
+	r.Get("/auth/scalekit/callback", h.ScaleKitCallback)
 
 	r.Group(func(ar chi.Router) {
 		ar.Use(AuthMiddleware(verifier))
@@ -61,6 +62,7 @@ func NewRouter(h *Handler, verifier auth.RequestVerifier) http.Handler {
 		ar.Get("/api/policy/master", h.GetMasterPromptPolicy)
 		ar.Post("/api/policy/skills", h.CreateWebhookSkill)
 		ar.Get("/api/policy/skills", h.ListWebhookSkills)
+		ar.Get("/api/me", h.UserInfo)
 
 		ar.Post("/v1/listeners", h.CreateListener)
 		ar.Get("/v1/listeners", h.ListListeners)
@@ -125,6 +127,36 @@ func (h *Handler) ScaleKitSignupRedirect(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	http.Redirect(w, r, strings.TrimRight(base, "/")+"/signup", http.StatusFound)
+}
+
+func (h *Handler) ScaleKitCallback(w http.ResponseWriter, r *http.Request) {
+	// 1. Get code from query
+	code := r.URL.Query().Get("code")
+	if code == "" {
+		// If no code, maybe it's an error or we're already authenticated
+		http.Redirect(w, r, "/", http.StatusFound)
+		return
+	}
+
+	// 2. Exchange code for token (simplified for now - redirect with code or handle server-side)
+	// In a real app, we'd exchange it here.
+	// For this prototype, we'll redirect back to the frontend with the code
+	// or assume ScaleKit handled the session and we just need to redirect to the UI.
+
+	// Actually, ScaleKit often returns the token directly in the fragment if configured for SPA.
+	// But if we are here, it's a server-side callback.
+
+	// Let's assume we redirect to the frontend which will then call /api/me with the token.
+	http.Redirect(w, r, "/?code="+code, http.StatusFound)
+}
+
+func (h *Handler) UserInfo(w http.ResponseWriter, r *http.Request) {
+	acct, ok := auth.AccountFromContext(r.Context())
+	if !ok {
+		writeErr(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	writeJSON(w, http.StatusOK, acct)
 }
 
 func (h *Handler) scalekitBase() string {
