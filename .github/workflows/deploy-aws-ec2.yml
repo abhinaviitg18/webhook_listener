@@ -17,8 +17,11 @@ jobs:
         with:
           go-version-file: go.mod
 
+      - name: Build frontend
+        run: cd web && npm install && npm run build && mkdir -p ../internal/ui/dist && cp -r dist/* ../internal/ui/dist/
+
       - name: Run tests
-        run: go test ./...
+        run: go test ./cmd/... ./internal/...
 
   deploy:
     runs-on: ubuntu-latest

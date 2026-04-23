@@ -29,6 +29,17 @@ chmod 600 "$APP_ENV_FILE"
 chown ec2-user:ec2-user "$APP_ENV_FILE"
 
 cd "$APP_DIR"
+
+# Build Frontend
+echo "Building frontend..."
+cd web
+sudo -u ec2-user /usr/bin/env bash -lc "npm install && npm run build"
+cd ..
+mkdir -p internal/ui/dist
+cp -r web/dist/* internal/ui/dist/
+
+# Build Backend
+echo "Building backend..."
 export CGO_ENABLED=0
 sudo -u ec2-user /usr/bin/env bash -lc "go mod download"
 sudo -u ec2-user /usr/bin/env bash -lc "go build -o /tmp/hookweb-server ./cmd/server"
