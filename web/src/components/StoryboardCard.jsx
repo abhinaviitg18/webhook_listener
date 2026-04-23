@@ -47,22 +47,29 @@ export const StoryboardCard = ({ event }) => {
         <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
-            className={`glass-card border rounded-2xl p-4 relative overflow-hidden ${borderColors[event.status]}`}
+            whileHover={{ y: -4, boxShadow: '0 8px 30px rgba(0,0,0,0.12)' }}
+            className={`glass-card border rounded-2xl p-4 relative overflow-hidden transition-all duration-300 ${borderColors[event.status]}`}
         >
             <div className={`absolute top-0 left-0 w-1 h-full ${accentColors[event.status]}`} />
             <div className="flex justify-between items-start mb-3">
                 <span className="font-code-snippet text-[11px] text-slate-500">{event.time}</span>
                 <StatusBadge status={event.status} />
             </div>
-            <p className={`font-story-text text-text-story text-sm mb-4 leading-relaxed ${event.status === 'LEARNING' ? 'opacity-80' : ''}`}>
+            <p className={`font-story-text text-text-story text-sm mb-4 leading-relaxed ${event.status === 'LEARNING' ? 'opacity-80 italic' : ''}`}>
                 {event.story}
             </p>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
                 {event.actions.map((action, i) => (
-                    <div key={i} className="flex items-center gap-1.5 bg-slate-900 px-2 py-1 rounded border border-slate-800">
-                        <ActionIcon name={action} />
+                    <motion.div
+                        key={i}
+                        whileHover={{ scale: 1.05 }}
+                        className="flex items-center gap-1.5 bg-slate-900 px-2 py-1 rounded border border-slate-800"
+                    >
+                        <div className={action === 'LLM_PROCESSING' ? 'animate-pulse text-primary' : ''}>
+                            <ActionIcon name={action} />
+                        </div>
                         <span className="font-code-snippet text-[10px] text-slate-300">{action}</span>
-                    </div>
+                    </motion.div>
                 ))}
             </div>
         </motion.div>
