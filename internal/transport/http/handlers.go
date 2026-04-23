@@ -147,7 +147,7 @@ func (h *Handler) ScaleKitCallback(w http.ResponseWriter, r *http.Request) {
 	// But if we are here, it's a server-side callback.
 
 	// Let's assume we redirect to the frontend which will then call /api/me with the token.
-	http.Redirect(w, r, "https://agenthook.store/?code="+code, http.StatusFound)
+	http.Redirect(w, r, "https://app.agenthook.store/?code="+code, http.StatusFound)
 }
 
 func (h *Handler) UserInfo(w http.ResponseWriter, r *http.Request) {
