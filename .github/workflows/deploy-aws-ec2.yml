@@ -72,8 +72,8 @@ jobs:
           set -euo pipefail
           ssh -o StrictHostKeyChecking=no -i /tmp/hookweb_ci_key ec2-user@"${EC2_HOST}" "
             set -euo pipefail
-            cd /opt/hookweb/repo
+            cd /opt/agenthook/repo
             git fetch --all --tags
             git checkout ${GITHUB_SHA}
-            sudo AWS_ACCESS_KEY_ID="${AWS_ACCESS_KEY_ID}" AWS_SECRET_ACCESS_KEY="${AWS_SECRET_ACCESS_KEY}" APP_ENV_SSM_PARAM=/hookweb/prod/env AWS_REGION=us-east-1 /opt/hookweb/repo/scripts/aws/ec2_deploy.sh
+            sudo AWS_ACCESS_KEY_ID="${AWS_ACCESS_KEY_ID}" AWS_SECRET_ACCESS_KEY="${AWS_SECRET_ACCESS_KEY}" APP_ENV_SSM_PARAM=/agenthook/prod/env AWS_REGION=us-east-1 /opt/agenthook/repo/scripts/aws/ec2_deploy.sh
           "
