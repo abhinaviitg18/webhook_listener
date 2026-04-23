@@ -66,6 +66,8 @@ jobs:
         env:
           EC2_HOST: ${{ secrets.EC2_PUBLIC_IP }}
           GITHUB_SHA: ${{ github.sha }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
         run: |
           set -euo pipefail
           ssh -o StrictHostKeyChecking=no -i /tmp/hookweb_ci_key ec2-user@"${EC2_HOST}" "
@@ -73,5 +75,5 @@ jobs:
             cd /opt/hookweb/repo
             git fetch --all --tags
             git checkout ${GITHUB_SHA}
-            sudo APP_ENV_SSM_PARAM=/hookweb/prod/env AWS_REGION=us-east-1 /opt/hookweb/repo/scripts/aws/ec2_deploy.sh
+            sudo AWS_ACCESS_KEY_ID="${AWS_ACCESS_KEY_ID}" AWS_SECRET_ACCESS_KEY="${AWS_SECRET_ACCESS_KEY}" APP_ENV_SSM_PARAM=/hookweb/prod/env AWS_REGION=us-east-1 /opt/hookweb/repo/scripts/aws/ec2_deploy.sh
           "
