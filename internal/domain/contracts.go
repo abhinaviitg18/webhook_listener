@@ -41,6 +41,11 @@ type Store interface {
 	ListWebhookSkills(ctx context.Context, accountID, typeKey string) ([]WebhookSkill, error)
 	UpsertAutoPromoteState(ctx context.Context, state AutoPromoteState) (AutoPromoteState, error)
 	GetAutoPromoteState(ctx context.Context, accountID, typeKey string) (AutoPromoteState, error)
+
+	UpsertBYOKConfig(ctx context.Context, cfg BYOKProviderConfig) (BYOKProviderConfig, error)
+	GetBYOKConfig(ctx context.Context, accountID, provider string) (BYOKProviderConfig, error)
+	GetDefaultBYOKConfig(ctx context.Context, accountID string) (BYOKProviderConfig, error)
+	ListBYOKConfigs(ctx context.Context, accountID string) ([]BYOKProviderConfig, error)
 }
 
 type PineconeClient interface {

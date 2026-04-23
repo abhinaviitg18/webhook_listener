@@ -59,7 +59,16 @@ func main() {
 	tg := integrations.NewTelegramClient(cfg.TelegramBotToken)
 	actions := service.NewActionService(tg)
 
-	processor := &service.Processor{Store: st, Pinecone: pine, LLM: llm, Executor: actions, Resolver: resolver, Transformer: transformer, DeterministicOnly: deterministicOnly}
+	processor := &service.Processor{
+		Store: st, Pinecone: pine, LLM: llm, Executor: actions, Resolver: resolver, Transformer: transformer, DeterministicOnly: deterministicOnly,
+		BYOKResolver: func(ctx context.Context, accountID string) domain.LLMClient {
+			byokCfg, err := st.GetDefaultBYOKConfig(ctx, accountID)
+			if err != nil {
+				return nil // no BYOK config → fall back to global
+			}
+			return integrations.NewLLMClient(byokCfg.Provider, byokCfg.APIKey, byokCfg.BaseURL, byokCfg.Model)
+		},
+	}
 	handler := &httpapi.Handler{
 		Store:              st,
 		Processor:          processor,

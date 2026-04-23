@@ -488,6 +488,62 @@ FROM webhook_autopromote_states WHERE account_id=? AND type_key=? LIMIT 1`, acco
 	return st, nil
 }
 
+func (s *MySQLStore) UpsertBYOKConfig(ctx context.Context, cfg domain.BYOKProviderConfig) (domain.BYOKProviderConfig, error) {
+	if cfg.ID == "" {
+		cfg.ID = uuid.NewString()
+	}
+	_, err := s.db.ExecContext(ctx,
+		`INSERT INTO byok_provider_configs(id, account_id, provider, api_key, base_url, model, is_default, created_at)
+		 VALUES(?,?,?,?,?,?,?,UTC_TIMESTAMP())
+		 ON DUPLICATE KEY UPDATE api_key=VALUES(api_key), base_url=VALUES(base_url), model=VALUES(model), is_default=VALUES(is_default)`,
+		cfg.ID, cfg.AccountID, cfg.Provider, cfg.APIKey, cfg.BaseURL, cfg.Model, cfg.IsDefault)
+	if err != nil {
+		return domain.BYOKProviderConfig{}, err
+	}
+	return s.GetBYOKConfig(ctx, cfg.AccountID, cfg.Provider)
+}
+
+func (s *MySQLStore) GetBYOKConfig(ctx context.Context, accountID, provider string) (domain.BYOKProviderConfig, error) {
+	var cfg domain.BYOKProviderConfig
+	err := s.db.QueryRowContext(ctx,
+		`SELECT id, account_id, provider, api_key, base_url, model, is_default, created_at FROM byok_provider_configs WHERE account_id=? AND provider=?`,
+		accountID, provider).Scan(&cfg.ID, &cfg.AccountID, &cfg.Provider, &cfg.APIKey, &cfg.BaseURL, &cfg.Model, &cfg.IsDefault, &cfg.CreatedAt)
+	if err != nil {
+		return domain.BYOKProviderConfig{}, err
+	}
+	return cfg, nil
+}
+
+func (s *MySQLStore) GetDefaultBYOKConfig(ctx context.Context, accountID string) (domain.BYOKProviderConfig, error) {
+	var cfg domain.BYOKProviderConfig
+	err := s.db.QueryRowContext(ctx,
+		`SELECT id, account_id, provider, api_key, base_url, model, is_default, created_at FROM byok_provider_configs WHERE account_id=? ORDER BY is_default DESC, created_at ASC LIMIT 1`,
+		accountID).Scan(&cfg.ID, &cfg.AccountID, &cfg.Provider, &cfg.APIKey, &cfg.BaseURL, &cfg.Model, &cfg.IsDefault, &cfg.CreatedAt)
+	if err != nil {
+		return domain.BYOKProviderConfig{}, err
+	}
+	return cfg, nil
+}
+
+func (s *MySQLStore) ListBYOKConfigs(ctx context.Context, accountID string) ([]domain.BYOKProviderConfig, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, account_id, provider, api_key, base_url, model, is_default, created_at FROM byok_provider_configs WHERE account_id=? ORDER BY is_default DESC, created_at ASC`,
+		accountID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []domain.BYOKProviderConfig
+	for rows.Next() {
+		var cfg domain.BYOKProviderConfig
+		if err := rows.Scan(&cfg.ID, &cfg.AccountID, &cfg.Provider, &cfg.APIKey, &cfg.BaseURL, &cfg.Model, &cfg.IsDefault, &cfg.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, cfg)
+	}
+	return out, nil
+}
+
 func nullIfEmpty(v string) any {
 	if strings.TrimSpace(v) == "" {
 		return nil

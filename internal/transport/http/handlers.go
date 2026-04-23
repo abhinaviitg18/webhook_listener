@@ -70,6 +70,8 @@ func NewRouter(h *Handler, verifier auth.RequestVerifier) http.Handler {
 		ar.Post("/v1/auth/tokens", h.CreateAPIToken)
 		ar.Post("/v1/presets/webhook-processing", h.ApplyWebhookProcessingPreset)
 		ar.Post("/v1/byok/providers/test", h.TestBYOKProviders)
+		ar.Post("/v1/byok/providers", h.UpsertBYOKProvider)
+		ar.Get("/v1/byok/providers", h.ListBYOKProviders)
 	})
 
 	r.Post("/url/{account}/{type}/{secret}", h.ReceiveWebhook)
@@ -408,6 +410,72 @@ func (h *Handler) TestBYOKProviders(w http.ResponseWriter, r *http.Request) {
 		"note": "Token creation on provider side must be done in provider console; this endpoint validates supplied BYOK keys.",
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+func (h *Handler) UpsertBYOKProvider(w http.ResponseWriter, r *http.Request) {
+	acct, ok := auth.AccountFromContext(r.Context())
+	if !ok {
+		writeErr(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	var body struct {
+		Provider  string `json:"provider"`
+		APIKey    string `json:"api_key"`
+		BaseURL   string `json:"base_url"`
+		Model     string `json:"model"`
+		IsDefault bool   `json:"is_default"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid json")
+		return
+	}
+	provider := strings.TrimSpace(strings.ToLower(body.Provider))
+	if provider == "" || strings.TrimSpace(body.APIKey) == "" {
+		writeErr(w, http.StatusBadRequest, "provider and api_key are required")
+		return
+	}
+	baseURL := strings.TrimSpace(body.BaseURL)
+	if baseURL == "" {
+		switch provider {
+		case "groq":
+			baseURL = "https://api.groq.com/openai/v1"
+		case "cerebras":
+			baseURL = "https://api.cerebras.ai/v1"
+		default:
+			baseURL = "https://openrouter.ai/api/v1"
+		}
+	}
+	model := strings.TrimSpace(body.Model)
+	if model == "" {
+		model = "llama3-70b-8192"
+	}
+	cfg, err := h.Store.UpsertBYOKConfig(r.Context(), domain.BYOKProviderConfig{
+		AccountID: acct.ID,
+		Provider:  provider,
+		APIKey:    strings.TrimSpace(body.APIKey),
+		BaseURL:   baseURL,
+		Model:     model,
+		IsDefault: body.IsDefault,
+	})
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusCreated, cfg)
+}
+
+func (h *Handler) ListBYOKProviders(w http.ResponseWriter, r *http.Request) {
+	acct, ok := auth.AccountFromContext(r.Context())
+	if !ok {
+		writeErr(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	cfgs, err := h.Store.ListBYOKConfigs(r.Context(), acct.ID)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, cfgs)
 }
 
 func (h *Handler) CreateListener(w http.ResponseWriter, r *http.Request) {

@@ -48,7 +48,7 @@ func (l *LLMClient) SuggestAction(ctx context.Context, typeKey, payload string, 
 	prompt := buildPrompt(typeKey, payload, memories, available)
 	r := chatReq{
 		Model:    l.Model,
-		Messages: []chatMsg{{Role: "system", Content: "Return strict JSON: {\"action_name\": string, \"reason\": string, \"params\": object}. Optional params.memory_write_mode must be one of: update_or_insert, insert_only, none."}, {Role: "user", Content: prompt}},
+		Messages: []chatMsg{{Role: "system", Content: "Return strict JSON: {\"action_name\": string, \"reason\": string, \"params\": object, \"processed_text\": string}. The \"processed_text\" should be a concise, human-readable summary of the webhook event based on the user's intent or policy. Optional params.memory_write_mode must be one of: update_or_insert, insert_only, none."}, {Role: "user", Content: prompt}},
 	}
 	b, _ := json.Marshal(r)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(l.BaseURL, "/")+"/chat/completions", bytes.NewReader(b))
@@ -72,8 +72,12 @@ func (l *LLMClient) SuggestAction(ctx context.Context, typeKey, payload string, 
 	if len(parsed.Choices) == 0 {
 		return domain.ProcessDecision{}, fmt.Errorf("empty llm response")
 	}
+	content := parsed.Choices[0].Message.Content
+	// Log for debugging
+	fmt.Printf("LLM Response (%s): %s\n", l.Provider, content)
+
 	var d domain.ProcessDecision
-	if err := json.Unmarshal([]byte(parsed.Choices[0].Message.Content), &d); err != nil {
+	if err := json.Unmarshal([]byte(content), &d); err != nil {
 		return domain.ProcessDecision{ActionName: "store_mysql", Reason: "llm parse fallback", Params: map[string]interface{}{}}, nil
 	}
 	if d.ActionName == "" {

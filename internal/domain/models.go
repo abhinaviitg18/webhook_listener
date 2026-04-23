@@ -109,9 +109,10 @@ type TransformResult struct {
 }
 
 type ProcessDecision struct {
-	ActionName string                 `json:"action_name"`
-	Reason     string                 `json:"reason"`
-	Params     map[string]interface{} `json:"params"`
+	ActionName    string                 `json:"action_name"`
+	Reason        string                 `json:"reason"`
+	Params        map[string]interface{} `json:"params"`
+	ProcessedText string                 `json:"processed_text,omitempty"`
 }
 
 type PineconeMemory struct {
@@ -154,4 +155,15 @@ type AutoPromoteState struct {
 	LastReason     string    `json:"last_reason"`
 	UpdatedAt      time.Time `json:"updated_at"`
 	CreatedAt      time.Time `json:"created_at"`
+}
+
+type BYOKProviderConfig struct {
+	ID        string    `json:"id"`
+	AccountID string    `json:"account_id"`
+	Provider  string    `json:"provider"`
+	APIKey    string    `json:"-"`
+	BaseURL   string    `json:"base_url"`
+	Model     string    `json:"model"`
+	IsDefault bool      `json:"is_default"`
+	CreatedAt time.Time `json:"created_at"`
 }

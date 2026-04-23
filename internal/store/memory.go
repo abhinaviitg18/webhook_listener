@@ -27,8 +27,8 @@ type MemoryStore struct {
 	secretsByID  map[string]domain.WebhookSecret
 	secretByHash map[string]string
 
-	targets map[string]domain.ForwardTarget
-	events  map[string]domain.WebhookEvent
+	targets       map[string]domain.ForwardTarget
+	events        map[string]domain.WebhookEvent
 	eventBySource map[string]string
 
 	signatures map[string]domain.WebhookTypeSignature
@@ -38,6 +38,7 @@ type MemoryStore struct {
 	policiesByAccount map[string]domain.MasterPromptPolicy
 	skills            map[string]domain.WebhookSkill
 	autoStates        map[string]domain.AutoPromoteState
+	byokConfigs       map[string]domain.BYOKProviderConfig
 }
 
 func NewMemoryStore() *MemoryStore {
@@ -580,6 +581,60 @@ func (s *MemoryStore) GetAutoPromoteState(_ context.Context, accountID, typeKey 
 		return domain.AutoPromoteState{}, errors.New("autopromote state not found")
 	}
 	return st, nil
+}
+
+func (s *MemoryStore) UpsertBYOKConfig(_ context.Context, cfg domain.BYOKProviderConfig) (domain.BYOKProviderConfig, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if cfg.ID == "" {
+		cfg.ID = uuid.NewString()
+	}
+	cfg.CreatedAt = time.Now().UTC()
+	if s.byokConfigs == nil {
+		s.byokConfigs = map[string]domain.BYOKProviderConfig{}
+	}
+	key := cfg.AccountID + "::" + cfg.Provider
+	s.byokConfigs[key] = cfg
+	return cfg, nil
+}
+
+func (s *MemoryStore) GetBYOKConfig(_ context.Context, accountID, provider string) (domain.BYOKProviderConfig, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	key := accountID + "::" + provider
+	cfg, ok := s.byokConfigs[key]
+	if !ok {
+		return domain.BYOKProviderConfig{}, errors.New("byok config not found")
+	}
+	return cfg, nil
+}
+
+func (s *MemoryStore) GetDefaultBYOKConfig(_ context.Context, accountID string) (domain.BYOKProviderConfig, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, cfg := range s.byokConfigs {
+		if cfg.AccountID == accountID && cfg.IsDefault {
+			return cfg, nil
+		}
+	}
+	for _, cfg := range s.byokConfigs {
+		if cfg.AccountID == accountID {
+			return cfg, nil
+		}
+	}
+	return domain.BYOKProviderConfig{}, errors.New("no byok config found")
+}
+
+func (s *MemoryStore) ListBYOKConfigs(_ context.Context, accountID string) ([]domain.BYOKProviderConfig, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var out []domain.BYOKProviderConfig
+	for _, cfg := range s.byokConfigs {
+		if cfg.AccountID == accountID {
+			out = append(out, cfg)
+		}
+	}
+	return out, nil
 }
 
 func slugFromEmail(email string) string {

@@ -111,6 +111,7 @@ type Processor struct {
 	Resolver          *TypeResolver
 	Transformer       *TransformService
 	DeterministicOnly map[string]struct{}
+	BYOKResolver      func(ctx context.Context, accountID string) domain.LLMClient
 }
 
 type memoryWriteMode string
@@ -182,16 +183,33 @@ func (p *Processor) ProcessWebhook(ctx context.Context, account domain.Account, 
 	} else if strings.TrimSpace(whType.PlainTextAction) != "" {
 		decision.ActionName = strings.TrimSpace(whType.PlainTextAction)
 		decision.Reason = "type plain text action"
-	} else if whType.UseLLMFallback && p.LLM != nil && !p.IsDeterministicOnlyType(whType.TypeKey) {
-		llmPayload := payload
-		if policyCtx.MasterPrompt != "" || len(policyCtx.Skills) > 0 {
-			llmPayload = buildPolicyAwarePayload(payload, policyCtx)
+	}
+
+	needsLLM := (whType.UseLLMFallback && decision.ActionName == "store_mysql") || policyCtx.MasterPrompt != "" || (matched && skill.SkillPrompt != "")
+	if needsLLM && !p.IsDeterministicOnlyType(whType.TypeKey) {
+		// Resolve LLM client: prefer per-account BYOK key, fall back to global
+		llmClient := p.LLM
+		if p.BYOKResolver != nil {
+			if byokLLM := p.BYOKResolver(ctx, account.ID); byokLLM != nil {
+				llmClient = byokLLM
+			}
 		}
-		d, derr := p.LLM.SuggestAction(ctx, whType.TypeKey, llmPayload, memories, p.Executor.AvailableActions())
-		if derr == nil {
-			decision = d
-		} else {
-			decision.Reason = "llm fallback failed"
+		if llmClient != nil {
+			llmPayload := payload
+			if policyCtx.MasterPrompt != "" || len(policyCtx.Skills) > 0 {
+				llmPayload = buildPolicyAwarePayload(payload, policyCtx)
+			}
+			d, derr := llmClient.SuggestAction(ctx, whType.TypeKey, llmPayload, memories, p.Executor.AvailableActions())
+			if derr == nil {
+				if matched && strings.TrimSpace(skill.ForcedAction) != "" {
+					// Deterministic action wins, but use LLM's processed text
+					decision.ProcessedText = d.ProcessedText
+				} else {
+					decision = d
+				}
+			} else {
+				decision.Reason = "llm processing failed: " + derr.Error()
+			}
 		}
 	}
 
@@ -218,7 +236,11 @@ func (p *Processor) ProcessWebhook(ctx context.Context, account domain.Account, 
 	event.ActionSelected = decision.ActionName
 	event.RawPayloadJSON = rawPayload
 	event.PayloadJSON = payload
-	event.ProcessedText = payloadToText(payload)
+	if strings.TrimSpace(decision.ProcessedText) != "" {
+		event.ProcessedText = decision.ProcessedText
+	} else {
+		event.ProcessedText = payloadToText(payload)
+	}
 	event.CreatedAt = time.Now().UTC()
 	return event, decision, nil
 }
