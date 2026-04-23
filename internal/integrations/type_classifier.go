@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"hookweb.club/internal/domain"
+	"agenthook.store/internal/domain"
 )
 
 type ProviderTypeClassifier struct {

@@ -1,4 +1,4 @@
-module hookweb.club
+module agenthook.store
 
 go 1.24.0
 

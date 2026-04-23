@@ -1,7 +1,7 @@
-# hookweb.club Master Plan
+# agenthook.store Master Plan
 
 ## 1. Vision
-`hookweb.club` is a no-code webhook platform for non-technical users and teams to:
+`agenthook.store` is a no-code webhook platform for non-technical users and teams to:
 - Register and operate via email and MCP.
 - Create deterministic inbound webhook endpoints with typed routes.
 - Forward events to destinations (HTTP, MySQL, integrations).
@@ -65,13 +65,13 @@ Compatibility support:
 ## 4. High-Level Architecture
 ### Components
 1. API Gateway (public ingress).
-2. Ingest Lambda (`hookweb-ingest`) for request validation + normalization.
-3. Rules Lambda (`hookweb-rules`) for deterministic routing/forwarding decisions.
-4. Worker Lambda (`hookweb-forwarder`) for outbound forwarding/retries.
-5. Memory Lambda (`hookweb-memory`) for summarization/embeddings/vector upsert.
-6. Search Lambda (`hookweb-search-enterprise`) for enterprise vector query API.
-7. Registration Lambda (`hookweb-auth`) for email registration/token lifecycle.
-8. MCP API Lambda (`hookweb-mcp`) exposing tooling endpoints.
+2. Ingest Lambda (`agenthook-ingest`) for request validation + normalization.
+3. Rules Lambda (`agenthook-rules`) for deterministic routing/forwarding decisions.
+4. Worker Lambda (`agenthook-forwarder`) for outbound forwarding/retries.
+5. Memory Lambda (`agenthook-memory`) for summarization/embeddings/vector upsert.
+6. Search Lambda (`agenthook-search-enterprise`) for enterprise vector query API.
+7. Registration Lambda (`agenthook-auth`) for email registration/token lifecycle.
+8. MCP API Lambda (`agenthook-mcp`) exposing tooling endpoints.
 9. MySQL (RDS Aurora MySQL or MySQL-compatible service).
 10. Pinecone (vector DB for summaries/semantic memory).
 11. Queue layer (SQS standard + DLQ).
@@ -226,12 +226,12 @@ Non-standard integrations:
 
 ## 10. Skill Strategy
 ### Open-source core skill
-Name: `hookweb-core-ops`
+Name: `agenthook-core-ops`
 Purpose:
 - Setup account, webhook types/secrets, rules, memory filters, and deployments via APIs.
 
 ### Private integration skill (not open-source)
-Name: `hookweb-integration-ops-private`
+Name: `agenthook-integration-ops-private`
 Purpose:
 - Enterprise integrations, internal adapter generation, privileged deployment actions.
 
@@ -240,10 +240,10 @@ Compatibility rule:
 
 ### Skill import/export repository design (Claude/Cursor/Codex compatibility)
 Goal:
-- Import skills from external repositories and normalize them into hookweb skill records.
-- Export hookweb skills back into repository formats for Claude Code, Cursor, and Codex.
+- Import skills from external repositories and normalize them into agenthook skill records.
+- Export agenthook skills back into repository formats for Claude Code, Cursor, and Codex.
 
-Canonical skill package (`hookweb-skill.json`):
+Canonical skill package (`agenthook-skill.json`):
 - `skill_key`, `type_key`, `skill_prompt`, `match_contains`, `forced_action`, `memory_write_mode`, `priority`, `enabled`.
 - Optional `metadata` (`source_platform`, `source_repo`, `version`, `hash`).
 

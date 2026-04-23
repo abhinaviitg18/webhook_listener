@@ -1,13 +1,13 @@
 ---
-name: hookweb-core-ops
-description: Manage hookweb.club webhook operations through APIs and MCP, including account bootstrap, token lifecycle, typed webhook URL setup, secret management, deterministic forwarding rules, event fetch/replay, and AWS Lambda deployment flows. Use this skill when users ask to set up webhooks for non-technical teams, automate webhook management, troubleshoot webhook delivery, or deploy shared and customer-dedicated lambda stacks.
+name: agenthook-core-ops
+description: Manage agenthook.store webhook operations through APIs and MCP, including account bootstrap, token lifecycle, typed webhook URL setup, secret management, deterministic forwarding rules, event fetch/replay, and AWS Lambda deployment flows. Use this skill when users ask to set up webhooks for non-technical teams, automate webhook management, troubleshoot webhook delivery, or deploy shared and customer-dedicated lambda stacks.
 ---
 
 # Hookweb Core Ops
 
 ## Overview
 
-Use this skill to operate `hookweb.club` end to end through API-first workflows. Focus on deterministic webhook behavior with URL format `/url/{account}/{type}/{secret}`, secure secret handling, MySQL-first persistence, and optional Pinecone-backed memory search for processed summaries.
+Use this skill to operate `agenthook.store` end to end through API-first workflows. Focus on deterministic webhook behavior with URL format `/url/{account}/{type}/{secret}`, secure secret handling, MySQL-first persistence, and optional Pinecone-backed memory search for processed summaries.
 
 ## Core Workflow
 

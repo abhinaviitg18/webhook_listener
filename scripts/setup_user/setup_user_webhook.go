@@ -5,11 +5,11 @@ import (
 	"fmt"
 	"log"
 
-	"hookweb.club/internal/store"
+	"agenthook.store/internal/store"
 )
 
 func main() {
-	dsn := "htcadmin:u2VyDeEsqv53I2QFCLC9LmfTI23A@tcp(airecruiter-prod-mysql.c25ue0icgcva.us-east-1.rds.amazonaws.com:3306)/hookweb?parseTime=true&tls=skip-verify"
+	dsn := "htcadmin:u2VyDeEsqv53I2QFCLC9LmfTI23A@tcp(airecruiter-prod-mysql.c25ue0icgcva.us-east-1.rds.amazonaws.com:3306)/agenthook?parseTime=true&tls=skip-verify"
 	st, err := store.NewMySQLStore(dsn)
 	if err != nil {
 		log.Fatal(err)
@@ -54,5 +54,5 @@ func main() {
 	fmt.Printf("Provider: app-message\n")
 	fmt.Printf("WebhookID: 7204909316\n")
 	fmt.Printf("Secret: %s\n", rawSecret)
-	fmt.Printf("ALB URL: http://hookweb-perm-164731-alb-1352842696.us-east-1.elb.amazonaws.com/ingest/%s/app-message/7204909316/%s\n", acct.Slug, rawSecret)
+	fmt.Printf("ALB URL: http://agenthook-perm-164731-alb-1352842696.us-east-1.elb.amazonaws.com/ingest/%s/app-message/7204909316/%s\n", acct.Slug, rawSecret)
 }

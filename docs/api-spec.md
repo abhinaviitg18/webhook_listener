@@ -1,10 +1,10 @@
-# hookweb.club API Spec (Current Build)
+# agenthook.store API Spec (Current Build)
 
 ## Auth model
 - Registration returns account-scoped bearer token.
 - Admin endpoints require `Authorization: Bearer <token>`.
 - Auth supports two bearer token modes:
-  - Local hookweb token (`/api/register/email` output).
+  - Local agenthook token (`/api/register/email` output).
   - ScaleKit bearer token (verified via OIDC discovery + `userinfo`), with auto-provisioned local account by email slug.
 
 ## 1) Register
@@ -193,7 +193,7 @@ Master prompt request:
 ```json
 {
   "prompt_text":"Use skills first, then LLM fallback.",
-  "updated_by":"ops@hookweb.club"
+  "updated_by":"ops@agenthook.store"
 }
 ```
 

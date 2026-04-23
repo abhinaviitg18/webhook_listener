@@ -6,18 +6,18 @@ if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
   exit 1
 fi
 
-APP_DIR="${APP_DIR:-/opt/hookweb/repo}"
-APP_ENV_FILE="${APP_ENV_FILE:-/opt/hookweb/.env}"
-APP_ENV_SSM_PARAM="${APP_ENV_SSM_PARAM:-/hookweb/prod/env}"
-APP_BIN="${APP_BIN:-/usr/local/bin/hookweb-server}"
+APP_DIR="${APP_DIR:-/opt/agenthook/repo}"
+APP_ENV_FILE="${APP_ENV_FILE:-/opt/agenthook/.env}"
+APP_ENV_SSM_PARAM="${APP_ENV_SSM_PARAM:-/agenthook/prod/env}"
+APP_BIN="${APP_BIN:-/usr/local/bin/agenthook-server}"
 
 if [[ ! -d "$APP_DIR" ]]; then
   echo "APP_DIR not found: $APP_DIR"
   exit 1
 fi
 
-mkdir -p /opt/hookweb
-chown -R ec2-user:ec2-user /opt/hookweb
+mkdir -p /opt/agenthook
+chown -R ec2-user:ec2-user /opt/agenthook
 
 aws ssm get-parameter \
   --name "$APP_ENV_SSM_PARAM" \
@@ -34,12 +34,12 @@ cd "$APP_DIR"
 echo "Building backend..."
 export CGO_ENABLED=0
 sudo -u ec2-user /usr/bin/env bash -lc "go mod download"
-sudo -u ec2-user /usr/bin/env bash -lc "go build -o /tmp/hookweb-server ./cmd/server"
-mv /tmp/hookweb-server "$APP_BIN"
+sudo -u ec2-user /usr/bin/env bash -lc "go build -o /tmp/agenthook-server ./cmd/server"
+mv /tmp/agenthook-server "$APP_BIN"
 chmod 755 "$APP_BIN"
 
-install -m 644 deploy/aws/hookweb.service /etc/systemd/system/hookweb.service
+install -m 644 deploy/aws/agenthook.service /etc/systemd/system/agenthook.service
 systemctl daemon-reload
-systemctl enable hookweb
-systemctl restart hookweb
-systemctl --no-pager --full status hookweb | head -n 30
+systemctl enable agenthook
+systemctl restart agenthook
+systemctl --no-pager --full status agenthook | head -n 30

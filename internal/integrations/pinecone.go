@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"hookweb.club/internal/domain"
+	"agenthook.store/internal/domain"
 )
 
 type PineconeClient struct {
@@ -105,7 +105,7 @@ func (p *PineconeClient) UpsertOrUpdate(ctx context.Context, accountID, typeKey,
 		"type_key":    typeKey,
 		"event_id":    eventID,
 		"updated_at":  time.Now().UTC().Format(time.RFC3339),
-		"source":      "hookweb-auto",
+		"source":      "agenthook-auto",
 	}
 	line, _ := json.Marshal(record)
 	url := strings.TrimRight(p.IndexURL, "/") + "/records/namespaces/" + p.Namespace + "/upsert"

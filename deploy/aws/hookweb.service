@@ -1,5 +1,5 @@
 [Unit]
-Description=hookweb.club API service
+Description=agenthook.store API service
 After=network-online.target
 Wants=network-online.target
 
@@ -7,15 +7,15 @@ Wants=network-online.target
 Type=simple
 User=ec2-user
 Group=ec2-user
-EnvironmentFile=/opt/hookweb/.env
-ExecStart=/usr/local/bin/hookweb-server
+EnvironmentFile=/opt/agenthook/.env
+ExecStart=/usr/local/bin/agenthook-server
 Restart=always
 RestartSec=5
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/opt/hookweb
+ReadWritePaths=/opt/agenthook
 LimitNOFILE=65536
 
 [Install]

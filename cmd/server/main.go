@@ -7,13 +7,13 @@ import (
 	"strings"
 	"time"
 
-	"hookweb.club/internal/auth"
-	"hookweb.club/internal/config"
-	"hookweb.club/internal/domain"
-	"hookweb.club/internal/integrations"
-	"hookweb.club/internal/service"
-	"hookweb.club/internal/store"
-	httpapi "hookweb.club/internal/transport/http"
+	"agenthook.store/internal/auth"
+	"agenthook.store/internal/config"
+	"agenthook.store/internal/domain"
+	"agenthook.store/internal/integrations"
+	"agenthook.store/internal/service"
+	"agenthook.store/internal/store"
+	httpapi "agenthook.store/internal/transport/http"
 )
 
 func main() {
@@ -83,7 +83,7 @@ func main() {
 	router := httpapi.NewRouter(handler, verifier)
 
 	srv := &http.Server{Addr: ":" + cfg.Port, Handler: router, ReadTimeout: 10 * time.Second, WriteTimeout: 15 * time.Second, IdleTimeout: 60 * time.Second}
-	log.Printf("hookweb server listening on :%s", cfg.Port)
+	log.Printf("agenthook server listening on :%s", cfg.Port)
 	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Fatal(err)
 	}

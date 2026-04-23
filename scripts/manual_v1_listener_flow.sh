@@ -3,7 +3,7 @@ set -euo pipefail
 
 BASE_URL="${BASE_URL:-http://localhost:19082}"
 EMAIL="${EMAIL:-techhiring@agentmail.to}"
-OUT_DIR="${OUT_DIR:-/tmp/hookweb-v1-snapshots}"
+OUT_DIR="${OUT_DIR:-/tmp/agenthook-v1-snapshots}"
 
 mkdir -p "$OUT_DIR"
 

@@ -8,10 +8,10 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"hookweb.club/internal/auth"
-	"hookweb.club/internal/domain"
-	"hookweb.club/internal/service"
-	"hookweb.club/internal/store"
+	"agenthook.store/internal/auth"
+	"agenthook.store/internal/domain"
+	"agenthook.store/internal/service"
+	"agenthook.store/internal/store"
 )
 
 type policyPineconeSpy struct {

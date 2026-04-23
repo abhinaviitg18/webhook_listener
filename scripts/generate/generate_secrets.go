@@ -6,11 +6,11 @@ import (
 	"log"
 
 	_ "github.com/go-sql-driver/mysql"
-	"hookweb.club/internal/store"
+	"agenthook.store/internal/store"
 )
 
 func main() {
-	dsn := "htcadmin:u2VyDeEsqv53I2QFCLC9LmfTI23A@tcp(airecruiter-prod-mysql.c25ue0icgcva.us-east-1.rds.amazonaws.com:3306)/hookweb?parseTime=true&tls=skip-verify"
+	dsn := "htcadmin:u2VyDeEsqv53I2QFCLC9LmfTI23A@tcp(airecruiter-prod-mysql.c25ue0icgcva.us-east-1.rds.amazonaws.com:3306)/agenthook?parseTime=true&tls=skip-verify"
 	st, err := store.NewMySQLStore(dsn)
 	if err != nil {
 		log.Fatal(err)
@@ -27,7 +27,7 @@ func main() {
 		log.Fatal(err)
 	}
 	_, slackRaw, _ := st.CreateSecret(ctx, accountID, slackType.ID)
-	fmt.Printf("SLACK URL: http://hookweb-perm-164731-alb-1352842696.us-east-1.elb.amazonaws.com/ingest/%s/slack/7204909316/%s\n", accountSlug, slackRaw)
+	fmt.Printf("SLACK URL: http://agenthook-perm-164731-alb-1352842696.us-east-1.elb.amazonaws.com/ingest/%s/slack/7204909316/%s\n", accountSlug, slackRaw)
 
 	// 2. Secret for Jira
 	jiraTypeKey := "lis::jira::7204909316::multitenant"
@@ -36,5 +36,5 @@ func main() {
 		log.Fatal(err)
 	}
 	_, jiraRaw, _ := st.CreateSecret(ctx, accountID, jiraType.ID)
-	fmt.Printf("JIRA URL: http://hookweb-perm-164731-alb-1352842696.us-east-1.elb.amazonaws.com/ingest/%s/jira/7204909316/%s\n", accountSlug, jiraRaw)
+	fmt.Printf("JIRA URL: http://agenthook-perm-164731-alb-1352842696.us-east-1.elb.amazonaws.com/ingest/%s/jira/7204909316/%s\n", accountSlug, jiraRaw)
 }

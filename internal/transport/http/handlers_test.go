@@ -7,10 +7,10 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"hookweb.club/internal/auth"
-	"hookweb.club/internal/integrations"
-	"hookweb.club/internal/service"
-	"hookweb.club/internal/store"
+	"agenthook.store/internal/auth"
+	"agenthook.store/internal/integrations"
+	"agenthook.store/internal/service"
+	"agenthook.store/internal/store"
 )
 
 func TestEndToEndLocalFlow(t *testing.T) {

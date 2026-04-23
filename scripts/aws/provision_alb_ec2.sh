@@ -2,10 +2,10 @@
 set -euo pipefail
 
 AWS_REGION="${AWS_REGION:-us-east-1}"
-NAME_PREFIX="${NAME_PREFIX:-hookweb-prod}"
+NAME_PREFIX="${NAME_PREFIX:-agenthook-prod}"
 INSTANCE_TYPE="${INSTANCE_TYPE:-t3.micro}"
 APP_PORT="${APP_PORT:-8080}"
-APP_ENV_SSM_PARAM="${APP_ENV_SSM_PARAM:-/hookweb/prod/env}"
+APP_ENV_SSM_PARAM="${APP_ENV_SSM_PARAM:-/agenthook/prod/env}"
 REPO_URL="${REPO_URL:-https://github.com/abhinaviitg18/webhook_listener.git}"
 KEY_NAME="${KEY_NAME:-}"
 
@@ -126,12 +126,12 @@ cat >"$USER_DATA" <<EOF
 set -euo pipefail
 dnf update -y
 dnf install -y git golang
-mkdir -p /opt/hookweb
-chown -R ec2-user:ec2-user /opt/hookweb
-if [[ ! -d /opt/hookweb/repo/.git ]]; then
-  sudo -u ec2-user git clone ${REPO_URL} /opt/hookweb/repo
+mkdir -p /opt/agenthook
+chown -R ec2-user:ec2-user /opt/agenthook
+if [[ ! -d /opt/agenthook/repo/.git ]]; then
+  sudo -u ec2-user git clone ${REPO_URL} /opt/agenthook/repo
 fi
-echo "APP_ENV_SSM_PARAM=${APP_ENV_SSM_PARAM}" >/etc/default/hookweb
+echo "APP_ENV_SSM_PARAM=${APP_ENV_SSM_PARAM}" >/etc/default/agenthook
 EOF
 
 echo "==> launching EC2 instance"
@@ -202,4 +202,4 @@ echo "ALB_DNS=$ALB_DNS"
 echo "APP_ENV_SSM_PARAM=$APP_ENV_SSM_PARAM"
 echo
 echo "Next step:"
-echo "  aws ssm send-command --region $AWS_REGION --instance-ids $INSTANCE_ID --document-name AWS-RunShellScript --parameters commands='[\"cd /opt/hookweb/repo\",\"sudo APP_ENV_SSM_PARAM=$APP_ENV_SSM_PARAM bash scripts/aws/ec2_deploy.sh\"]'"
+echo "  aws ssm send-command --region $AWS_REGION --instance-ids $INSTANCE_ID --document-name AWS-RunShellScript --parameters commands='[\"cd /opt/agenthook/repo\",\"sudo APP_ENV_SSM_PARAM=$APP_ENV_SSM_PARAM bash scripts/aws/ec2_deploy.sh\"]'"

@@ -1,4 +1,4 @@
-# hookweb.club Local Build and Test Report
+# agenthook.store Local Build and Test Report
 
 ## What was built
 - Go API platform with typed webhook ingestion endpoint: `/url/{account}/{type}/{secret}`.
@@ -133,19 +133,19 @@ Observed results:
 
 CLI utility:
 ```bash
-echo '{\"repository\":{\"full_name\":\"org/repo\"},\"head_commit\":{\"id\":\"abc\"}}' | ./scripts/hookweb_cli.sh classify --account <account_id>
-echo '{\"repository\":{\"full_name\":\"org/repo\"},\"head_commit\":{\"id\":\"abc\"}}' | ./scripts/hookweb_cli.sh transform --account <account_id> --type github-push
+echo '{\"repository\":{\"full_name\":\"org/repo\"},\"head_commit\":{\"id\":\"abc\"}}' | ./scripts/agenthook_cli.sh classify --account <account_id>
+echo '{\"repository\":{\"full_name\":\"org/repo\"},\"head_commit\":{\"id\":\"abc\"}}' | ./scripts/agenthook_cli.sh transform --account <account_id> --type github-push
 ```
 
 ## Browser test run
 Command:
 ```bash
-npx -y playwright@1.52.0 screenshot --device='Desktop Chrome' http://localhost:8081/ /tmp/hookweb-home.png
+npx -y playwright@1.52.0 screenshot --device='Desktop Chrome' http://localhost:8081/ /tmp/agenthook-home.png
 ```
 
 Result:
 - Sample website loaded successfully in a real browser engine and screenshot captured.
-- Updated regression screenshot after auto-promote changes: `/tmp/hookweb-home-autopromote.png`.
+- Updated regression screenshot after auto-promote changes: `/tmp/agenthook-home-autopromote.png`.
 - Mobile screenshot run with Playwright iPhone profile could not complete because WebKit runtime was not installed in this environment.
 
 ## TiDB / ScaleKit / Pinecone setup status
@@ -155,8 +155,8 @@ Result:
 
 ## Live Pinecone setup (April 8, 2026)
 - Configured a fresh Pinecone API key in project `.env`.
-- Created index `hookweb-club` in serverless AWS `us-east-1` with dimension `8` and metric `cosine`.
-- Updated `PINECONE_INDEX_URL` to the created index host and namespace `hookweb`.
+- Created index `agenthook.store` in serverless AWS `us-east-1` with dimension `8` and metric `cosine`.
+- Updated `PINECONE_INDEX_URL` to the created index host and namespace `agenthook`.
 - Verified index readiness and query response (`matches: []` on empty namespace).
 
 Validation commands run:
@@ -171,28 +171,28 @@ End-to-end API flow (with Pinecone configured) run on local server:
 
 Browser smoke check:
 ```bash
-npx -y playwright@1.52.0 screenshot --device='Desktop Chrome' http://localhost:<port>/ /tmp/hookweb-home-after-pinecone.png
+npx -y playwright@1.52.0 screenshot --device='Desktop Chrome' http://localhost:<port>/ /tmp/agenthook-home-after-pinecone.png
 ```
 - Result: homepage loaded and screenshot captured successfully.
 
 Listener v1 flow snapshots (April 14, 2026):
-- API JSON snapshots directory: `/tmp/hookweb-v1-snapshots`
+- API JSON snapshots directory: `/tmp/agenthook-v1-snapshots`
 - API screenshot snapshots:
-  - `/tmp/hookweb-api-ingest-v1.png`
-  - `/tmp/hookweb-api-events-v1.png`
+  - `/tmp/agenthook-api-ingest-v1.png`
+  - `/tmp/agenthook-api-events-v1.png`
 - Website screenshots:
-  - `/tmp/hookweb-home-v1.png`
-  - `/tmp/hookweb-app-v1.png`
+  - `/tmp/agenthook-home-v1.png`
+  - `/tmp/agenthook-app-v1.png`
 
 ScaleKit + grouped secret dashboard update (April 14, 2026):
 - Added ScaleKit bearer auth fallback in middleware (OIDC userinfo path).
 - Added listener event payload field `secret_id` and grouped-by-secret dashboard UI on `/app`.
 - New snapshot set:
-  - JSON: `/tmp/hookweb-v1-snapshots-2`
-  - UI grouped view: `/tmp/hookweb-app-grouped-secrets.png`
-  - UI empty state: `/tmp/hookweb-app-blank.png`
-  - API screenshot (second secret ingest): `/tmp/hookweb-api-second-secret-ingest.png`
-  - API screenshot (list events with secret ids): `/tmp/hookweb-api-list-events-grouped.png`
+  - JSON: `/tmp/agenthook-v1-snapshots-2`
+  - UI grouped view: `/tmp/agenthook-app-grouped-secrets.png`
+  - UI empty state: `/tmp/agenthook-app-blank.png`
+  - API screenshot (second secret ingest): `/tmp/agenthook-api-second-secret-ingest.png`
+  - API screenshot (list events with secret ids): `/tmp/agenthook-api-list-events-grouped.png`
 
 Provider account creation note:
 - Automated account creation for Pinecone/ScaleKit/TiDB cloud using only email is provider-controlled and usually requires captcha/manual verification in browser.

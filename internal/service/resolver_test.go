@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"testing"
 
-	"hookweb.club/internal/domain"
-	"hookweb.club/internal/store"
+	"agenthook.store/internal/domain"
+	"agenthook.store/internal/store"
 )
 
 type fakeClassifier struct{ out domain.TypeResolution }

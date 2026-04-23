@@ -7,11 +7,11 @@ import (
 
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/google/uuid"
-	"hookweb.club/internal/security"
+	"agenthook.store/internal/security"
 )
 
 func main() {
-	dsn := "htcadmin:u2VyDeEsqv53I2QFCLC9LmfTI23A@tcp(airecruiter-prod-mysql.c25ue0icgcva.us-east-1.rds.amazonaws.com:3306)/hookweb?parseTime=true&tls=skip-verify"
+	dsn := "htcadmin:u2VyDeEsqv53I2QFCLC9LmfTI23A@tcp(airecruiter-prod-mysql.c25ue0icgcva.us-east-1.rds.amazonaws.com:3306)/agenthook?parseTime=true&tls=skip-verify"
 	db, err := sql.Open("mysql", dsn)
 	if err != nil {
 		log.Fatal(err)

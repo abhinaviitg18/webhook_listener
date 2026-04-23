@@ -11,10 +11,10 @@ import (
 	"testing"
 	"time"
 
-	"hookweb.club/internal/auth"
-	"hookweb.club/internal/integrations"
-	"hookweb.club/internal/service"
-	"hookweb.club/internal/store"
+	"agenthook.store/internal/auth"
+	"agenthook.store/internal/integrations"
+	"agenthook.store/internal/service"
+	"agenthook.store/internal/store"
 )
 
 func TestReceiveWebhook_VerifiesHTCSignatureWhenPresent(t *testing.T) {

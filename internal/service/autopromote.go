@@ -6,7 +6,7 @@ import (
 	"errors"
 	"strings"
 
-	"hookweb.club/internal/domain"
+	"agenthook.store/internal/domain"
 )
 
 type AutoPromoteConfig struct {

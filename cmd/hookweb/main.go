@@ -8,16 +8,16 @@ import (
 	"os"
 	"strings"
 
-	"hookweb.club/internal/config"
-	"hookweb.club/internal/domain"
-	"hookweb.club/internal/integrations"
-	"hookweb.club/internal/service"
-	"hookweb.club/internal/store"
+	"agenthook.store/internal/config"
+	"agenthook.store/internal/domain"
+	"agenthook.store/internal/integrations"
+	"agenthook.store/internal/service"
+	"agenthook.store/internal/store"
 )
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: hookweb <classify|transform> [flags]")
+		fmt.Fprintln(os.Stderr, "usage: agenthook <classify|transform> [flags]")
 		os.Exit(2)
 	}
 	cmd := os.Args[1]

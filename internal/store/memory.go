@@ -10,8 +10,8 @@ import (
 
 	"github.com/google/uuid"
 
-	"hookweb.club/internal/domain"
-	"hookweb.club/internal/security"
+	"agenthook.store/internal/domain"
+	"agenthook.store/internal/security"
 )
 
 type MemoryStore struct {

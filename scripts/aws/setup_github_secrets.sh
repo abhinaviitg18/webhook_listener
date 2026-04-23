@@ -13,7 +13,7 @@ AWS_ACCESS_KEY_ID="${AWS_ACCESS_KEY_ID:-$(awk -F= '/^AWS_ACCESS_KEY_ID=/{print $
 AWS_SECRET_ACCESS_KEY="${AWS_SECRET_ACCESS_KEY:-$(awk -F= '/^AWS_SECRET_ACCESS_KEY=/{print $2;exit}' .env 2>/dev/null || true)}"
 AWS_REGION="${AWS_REGION:-$(awk -F= '/^AWS_REGION=/{print $2;exit}' .env 2>/dev/null || true)}"
 EC2_INSTANCE_ID="${EC2_INSTANCE_ID:-}"
-APP_ENV_SSM_PARAM="${APP_ENV_SSM_PARAM:-/hookweb/prod/env}"
+APP_ENV_SSM_PARAM="${APP_ENV_SSM_PARAM:-/agenthook/prod/env}"
 
 if [[ -z "$AWS_ACCESS_KEY_ID" || -z "$AWS_SECRET_ACCESS_KEY" || -z "$AWS_REGION" ]]; then
   echo "missing AWS credentials (AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY/AWS_REGION)"

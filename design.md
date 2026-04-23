@@ -1,4 +1,4 @@
-# 🪝 HookWeb Design: The Perfect Webhook Experience
+# 🪝 AgentHook Design: The Perfect Webhook Experience
 
 ## 1. Design Philosophy: "Webhook Zen"
 A perfect webhook listener should be **Zero-Config**, **Human-Readable**, and **Action-Oriented**.
@@ -12,7 +12,7 @@ A perfect webhook listener should be **Zero-Config**, **Human-Readable**, and **
 
 ## 2. The Ingress: "Magic URLs"
 Inbound webhooks use a simple, predictable structure:
-`https://hookweb.club/url/{account_slug}/{webhook_type}/{secret}`
+`https://agenthook.store/url/{account_slug}/{webhook_type}/{secret}`
 
 -   **Auto-Provisioning**: Sending a request to a new `webhook_type` automatically registers it in "Learning Mode".
 -   **Secret Rotation**: Support for multiple active secrets per type for zero-downtime rotation.

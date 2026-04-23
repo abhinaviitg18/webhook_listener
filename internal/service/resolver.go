@@ -8,7 +8,7 @@ import (
 	"strings"
 	"sync"
 
-	"hookweb.club/internal/domain"
+	"agenthook.store/internal/domain"
 )
 
 type TypeResolver struct {

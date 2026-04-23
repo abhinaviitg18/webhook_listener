@@ -20,8 +20,8 @@ From repo root:
 ```bash
 chmod +x scripts/aws/*.sh
 AWS_REGION=us-east-1 \
-NAME_PREFIX=hookweb-prod \
-APP_ENV_SSM_PARAM=/hookweb/prod/env \
+NAME_PREFIX=agenthook-prod \
+APP_ENV_SSM_PARAM=/agenthook/prod/env \
 REPO_URL=https://github.com/abhinaviitg18/webhook_listener.git \
 ./scripts/aws/provision_alb_ec2.sh
 ```
@@ -40,7 +40,7 @@ RDS_HOST=<existing-rds-endpoint> \
 RDS_PORT=3306 \
 RDS_USER=<user> \
 RDS_PASSWORD=<password> \
-DB_NAME=hookweb \
+DB_NAME=agenthook \
 ./scripts/aws/apply_rds_schema.sh
 ```
 
@@ -90,7 +90,7 @@ The deploy job runs tests, then executes `scripts/aws/ec2_deploy.sh` on EC2 thro
 aws ssm send-command \
   --instance-ids <INSTANCE_ID> \
   --document-name AWS-RunShellScript \
-  --parameters commands='["sudo systemctl status hookweb --no-pager","curl -sS http://127.0.0.1:8080/ | head -c 200"]'
+  --parameters commands='["sudo systemctl status agenthook --no-pager","curl -sS http://127.0.0.1:8080/ | head -c 200"]'
 ```
 
 ## 7) IAM permissions needed

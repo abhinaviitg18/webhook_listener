@@ -13,9 +13,9 @@ if [[ -z "${SCALEKIT_BASE_URL:-}" || -z "${SCALEKIT_API_KEY:-}" ]]; then
   exit 1
 fi
 
-code=$(curl -sS -o /tmp/hookweb_scalekit_health.json -w "%{http_code}" \
+code=$(curl -sS -o /tmp/agenthook_scalekit_health.json -w "%{http_code}" \
   -H "Authorization: Bearer ${SCALEKIT_API_KEY}" \
   "${SCALEKIT_BASE_URL%/}/.well-known/openid-configuration")
 
 echo "scalekit_status=$code"
-cat /tmp/hookweb_scalekit_health.json
+cat /tmp/agenthook_scalekit_health.json

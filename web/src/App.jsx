@@ -38,7 +38,7 @@ function App() {
   };
 
   const copyUrl = () => {
-    const ingress = user ? `hookweb.club/url/${user.slug}/...` : 'hookweb.club/login';
+    const ingress = user ? `agenthook.store/url/${user.slug}/...` : 'agenthook.store/login';
     navigator.clipboard.writeText(ingress);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
@@ -56,7 +56,7 @@ function App() {
     return (
       <div className="min-h-screen bg-surface flex flex-col items-center justify-center p-6 text-center space-y-8">
         <div className="space-y-2">
-          <h1 className="text-4xl font-h1 text-white grad-text">HookWeb</h1>
+          <h1 className="text-4xl font-h1 text-white grad-text">AgentHook</h1>
           <p className="text-slate-400 max-w-[280px]">Automate your webhook workflows with Webhook Zen.</p>
         </div>
         <button
@@ -97,7 +97,7 @@ function App() {
                   </div>
                   <div className="flex items-center gap-2 bg-slate-950/50 px-3 py-2 rounded-lg border border-slate-800">
                     <code className="text-indigo-300 font-code-snippet text-xs truncate">
-                      hookweb.club/url/{user.slug}/[secret]
+                      agenthook.store/url/{user.slug}/[secret]
                     </code>
                     <button onClick={copyUrl} className="ml-auto text-slate-500 hover:text-white">
                       {copied ? <Check size={14} className="text-green-500" /> : <Copy size={14} />}
@@ -266,7 +266,7 @@ const UrlsTab = ({ token, user }) => {
         <div key={i} className="glass-card border border-slate-800 rounded-2xl p-4 flex items-center justify-between">
           <div>
             <p className="text-white text-sm font-medium">{l.listener_id}</p>
-            <p className="text-slate-500 text-[10px] break-all">hookweb.club/url/{user.slug}/{l.type_key}/[secret]</p>
+            <p className="text-slate-500 text-[10px] break-all">agenthook.store/url/{user.slug}/{l.type_key}/[secret]</p>
           </div>
           <StatusBadge status="ACTIVE" />
         </div>

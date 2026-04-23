@@ -10,8 +10,8 @@ import (
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/google/uuid"
 
-	"hookweb.club/internal/domain"
-	"hookweb.club/internal/security"
+	"agenthook.store/internal/domain"
+	"agenthook.store/internal/security"
 )
 
 type MySQLStore struct {

@@ -8,7 +8,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"hookweb.club/internal/store"
+	"agenthook.store/internal/store"
 )
 
 func TestTokenVerifier_LocalToken(t *testing.T) {

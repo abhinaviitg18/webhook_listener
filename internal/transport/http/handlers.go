@@ -19,10 +19,10 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
-	"hookweb.club/internal/auth"
-	"hookweb.club/internal/domain"
-	"hookweb.club/internal/service"
-	"hookweb.club/internal/ui"
+	"agenthook.store/internal/auth"
+	"agenthook.store/internal/domain"
+	"agenthook.store/internal/service"
+	"agenthook.store/internal/ui"
 )
 
 type Handler struct {
@@ -147,7 +147,7 @@ func (h *Handler) ScaleKitCallback(w http.ResponseWriter, r *http.Request) {
 	// But if we are here, it's a server-side callback.
 
 	// Let's assume we redirect to the frontend which will then call /api/me with the token.
-	http.Redirect(w, r, "/?code="+code, http.StatusFound)
+	http.Redirect(w, r, "https://agenthook.store/?code="+code, http.StatusFound)
 }
 
 func (h *Handler) UserInfo(w http.ResponseWriter, r *http.Request) {

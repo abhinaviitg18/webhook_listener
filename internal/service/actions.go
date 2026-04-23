@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"hookweb.club/internal/domain"
-	"hookweb.club/internal/integrations"
+	"agenthook.store/internal/domain"
+	"agenthook.store/internal/integrations"
 )
 
 type processorCtxKey string

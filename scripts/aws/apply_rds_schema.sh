@@ -2,7 +2,7 @@
 set -euo pipefail
 
 AWS_REGION="${AWS_REGION:-us-east-1}"
-DB_NAME="${DB_NAME:-hookweb}"
+DB_NAME="${DB_NAME:-agenthook}"
 MIGRATION_FILE="${MIGRATION_FILE:-db/migrations/001_init.sql}"
 
 need() {
@@ -20,7 +20,7 @@ resolve_from_secret() {
   export RDS_PORT="${RDS_PORT:-$(echo "$secret_json" | jq -r '.port // 3306')}"
   export RDS_USER="${RDS_USER:-$(echo "$secret_json" | jq -r '.username // empty')}"
   export RDS_PASSWORD="${RDS_PASSWORD:-$(echo "$secret_json" | jq -r '.password // empty')}"
-  export DB_NAME="${DB_NAME:-$(echo "$secret_json" | jq -r '.dbname // "hookweb"')}"
+  export DB_NAME="${DB_NAME:-$(echo "$secret_json" | jq -r '.dbname // "agenthook"')}"
 }
 
 if [[ -n "${RDS_SECRET_ARN:-}" ]]; then

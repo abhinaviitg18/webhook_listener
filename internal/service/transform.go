@@ -17,7 +17,7 @@ import (
 	"github.com/tetratelabs/wazero"
 	"github.com/tetratelabs/wazero/imports/wasi_snapshot_preview1"
 
-	"hookweb.club/internal/domain"
+	"agenthook.store/internal/domain"
 )
 
 type TransformService struct {
