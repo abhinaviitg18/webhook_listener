@@ -64,7 +64,7 @@ function App() {
           className="flex items-center gap-2 bg-primary text-on-primary px-8 py-4 rounded-2xl font-bold active:scale-95 transition-transform"
         >
           <LogIn size={20} />
-          SIGN IN WITH SCALEKIT
+          SIGN IN
         </button>
       </div>
     );
