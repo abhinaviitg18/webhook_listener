@@ -16,12 +16,6 @@ export default {
       return Response.redirect(signupURL.toString(), 302)
     }
 
-    if (reqURL.pathname === '/auth/scalekit/callback') {
-      const appURL = new URL(`${appRedirectBase}/`)
-      const code = reqURL.searchParams.get('code')
-      if (code) appURL.searchParams.set('code', code)
-      return Response.redirect(appURL.toString(), 302)
-    }
 
     const response = await env.ASSETS.fetch(request)
     const out = new Response(response.body, response)

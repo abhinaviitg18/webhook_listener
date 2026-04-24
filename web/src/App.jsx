@@ -10,7 +10,7 @@ import { useAuth } from './context/AuthContext';
 const VALID_TABS = new Set(['storyboard', 'skills', 'urls', 'settings']);
 
 function App() {
-  const { user, token, loading, login } = useAuth();
+  const { user, token, loading, error, login } = useAuth();
   const tabParam = new URLSearchParams(window.location.search).get('tab');
   const [activeTab, setActiveTab] = useState(VALID_TABS.has(tabParam) ? tabParam : 'storyboard');
   const [copied, setCopied] = useState(false);
@@ -84,6 +84,11 @@ function App() {
           <h1 className="text-4xl font-h1 text-white grad-text">AgentHook</h1>
           <p className="text-slate-400 max-w-[280px]">Automate your webhook workflows with Webhook Zen.</p>
         </div>
+        {error && (
+          <div className="bg-red-500/10 border border-red-500/20 text-red-400 px-4 py-2 rounded-lg text-xs font-medium">
+            Authentication failed: {error}
+          </div>
+        )}
         <button
           onClick={login}
           className="flex items-center gap-2 bg-primary text-on-primary px-8 py-4 rounded-2xl font-bold active:scale-95 transition-transform"

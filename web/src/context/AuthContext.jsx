@@ -6,12 +6,18 @@ const PENDING_CODE_KEY = 'htc_pending_code';
 export function AuthProvider({ children }) {
     const [user, setUser] = useState(null);
     const [loading, setLoading] = useState(true);
+    const [error, setError] = useState(null);
     const [token, setToken] = useState(localStorage.getItem('htc_token'));
 
     useEffect(() => {
         // Keep existing logged-in session if present. Only fall back to the callback code when needed.
         const params = new URLSearchParams(window.location.search);
         const code = params.get('code');
+        const authError = params.get('auth_error');
+
+        if (authError) {
+            setError(authError);
+        }
         if (!code) return;
 
         sessionStorage.setItem(PENDING_CODE_KEY, code);
@@ -68,10 +74,11 @@ export function AuthProvider({ children }) {
         localStorage.removeItem('htc_token');
         setToken(null);
         setUser(null);
+        setError(null);
     };
 
     return (
-        <AuthContext.Provider value={{ user, token, loading, login, logout }}>
+        <AuthContext.Provider value={{ user, token, loading, error, login, logout }}>
             {children}
         </AuthContext.Provider>
     );

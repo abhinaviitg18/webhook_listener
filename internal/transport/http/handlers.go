@@ -188,16 +188,17 @@ func (h *Handler) scalekitBase() string {
 		base = strings.TrimSpace(os.Getenv("SCALEKIT_BASE_URL"))
 	}
 	if base == "" {
-		base = "https://www.scalekit.com"
+		base = "https://agenthook.scalekit.com"
 	}
 	if parsed, err := url.Parse(base); err == nil && parsed.Scheme != "" && parsed.Host != "" {
-		if strings.EqualFold(parsed.Host, "hookweb.scalekit.dev") {
-			parsed.Host = "hookweb.scalekit.com"
+		// Ensure consistently using .com vs .dev if specified by ScaleKit best practices
+		if strings.HasSuffix(parsed.Host, ".scalekit.dev") {
+			parsed.Host = strings.TrimSuffix(parsed.Host, ".dev") + ".com"
 			return strings.TrimRight(parsed.String(), "/")
 		}
 		return strings.TrimRight(base, "/")
 	}
-	return "https://www.scalekit.com"
+	return base
 }
 
 func (h *Handler) isScaleKitConfigured() bool {
