@@ -43,7 +43,7 @@ function App() {
 
   const accountSlug = user?.slug || '[account]';
   const ingressTemplate = listeners.length > 0
-    ? `agenthook.store/ingest/${accountSlug}/${listeners[0].provider}/${listeners[0].listener_id}/[secret]`
+    ? (listeners[0].webhook_url_template || `agenthook.store/ingest/${accountSlug}/${listeners[0].provider}/${listeners[0].listener_id}/[secret]`)
     : `agenthook.store/ingest/${accountSlug}/[provider]/[listener_id]/[secret]`;
 
   const fetchEvents = async () => {
@@ -148,6 +148,12 @@ function App() {
                     {fetching ? 'Syncing...' : 'Live'}
                   </span>
                 </div>
+
+                {!fetching && (listeners.length > 0 || events.length > 0) && (
+                  <p className="px-1 text-slate-500 text-xs">
+                    Showing {events.length} recent events across {listeners.length} configured hooks.
+                  </p>
+                )}
 
                 {events.length === 0 && !fetching && (
                   <div className="py-12 text-center space-y-3">
@@ -282,7 +288,7 @@ const UrlsTab = ({ listeners, user }) => {
   const accountSlug = user?.slug || '[account]';
 
   const copyListenerUrl = (listener) => {
-    const value = `agenthook.store/ingest/${accountSlug}/${listener.provider}/${listener.listener_id}/[secret]`;
+    const value = listener.webhook_url_template || `agenthook.store/ingest/${accountSlug}/${listener.provider}/${listener.listener_id}/[secret]`;
     navigator.clipboard.writeText(value);
     setCopiedListener(listener.listener_id);
     setTimeout(() => setCopiedListener(''), 1200);
@@ -300,8 +306,8 @@ const UrlsTab = ({ listeners, user }) => {
       {listeners.map((l, i) => (
         <div key={i} className="glass-card border border-slate-800 rounded-2xl p-4 flex items-center justify-between gap-3">
           <div className="min-w-0">
-            <p className="text-white text-sm font-medium truncate">{l.provider} · {l.listener_id}</p>
-            <p className="text-slate-500 text-[10px] break-all">agenthook.store/ingest/{accountSlug}/{l.provider}/{l.listener_id}/[secret]</p>
+            <p className="text-white text-sm font-medium truncate">{l.listener_display_name || `${l.provider} · ${l.listener_id}`}</p>
+            <p className="text-slate-500 text-[10px] break-all">{l.webhook_url_template || `agenthook.store/ingest/${accountSlug}/${l.provider}/${l.listener_id}/[secret]`}</p>
           </div>
           <div className="flex items-center gap-2 shrink-0">
             <button

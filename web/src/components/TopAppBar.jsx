@@ -24,12 +24,8 @@ export const TopAppBar = ({ user, onLogout }) => {
         >
           <LogOut size={18} />
         </button>
-        <div className="w-8 h-8 rounded-full border border-slate-700 overflow-hidden">
-          <img
-            alt="User Profile"
-            className="w-full h-full object-cover"
-            src="https://lh3.googleusercontent.com/aida-public/AB6AXuD276aLI1NbBR4KyTuqgZrkG6sllO8BC4RXKemo6vbCSEjQXlfgREzMyfO477SlTdd1ZKSdPpUgllVuhvbd9yXuP3_351dsx3prsUhZ_ypYoHEWNVVF7sii5gAXyAXuuGhZcK07XGZN2zJrZNTY7Xm1NVSeu1FpBdRH28CYOTq4iwyEKpzIkv4amL7RlCRDRKOOQkKsY-zLno6aU753F2UznZF8U4BIK7KPHbEL9M26l6v8DdevELBZwWbvFlI2FrR_6Zg8uEXKNTxP"
-          />
+        <div className="w-8 h-8 rounded-full border border-slate-700 bg-slate-900 text-slate-200 flex items-center justify-center text-xs font-semibold">
+          {(user?.owner_email || 'A').slice(0, 1).toUpperCase()}
         </div>
       </div>
     </header>

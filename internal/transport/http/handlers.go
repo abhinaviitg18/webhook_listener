@@ -903,17 +903,32 @@ func (h *Handler) ListListeners(w http.ResponseWriter, r *http.Request) {
 	resp := make([]map[string]any, 0, len(items))
 	for _, item := range items {
 		ref, ok := parseListenerTypeKey(item.TypeKey)
-		if !ok {
+		if ok {
+			resp = append(resp, map[string]any{
+				"listener_id":           ref.ListenerID,
+				"provider":              ref.Provider,
+				"deployment_mode":       ref.DeploymentMode,
+				"type_key":              item.TypeKey,
+				"plain_text_action":     item.PlainTextAction,
+				"use_llm_fallback":      item.UseLLMFallback,
+				"created_at":            item.CreatedAt,
+				"webhook_url_template":  "agenthook.store/ingest/" + acct.Slug + "/" + ref.Provider + "/" + ref.ListenerID + "/[secret]",
+				"legacy_webhook_url":    "/url/" + acct.Slug + "/" + item.TypeKey + "/[secret]",
+				"listener_display_name": ref.Provider + " · " + ref.ListenerID,
+			})
 			continue
 		}
 		resp = append(resp, map[string]any{
-			"listener_id":       ref.ListenerID,
-			"provider":          ref.Provider,
-			"deployment_mode":   ref.DeploymentMode,
-			"type_key":          item.TypeKey,
-			"plain_text_action": item.PlainTextAction,
-			"use_llm_fallback":  item.UseLLMFallback,
-			"created_at":        item.CreatedAt,
+			"listener_id":           item.TypeKey,
+			"provider":              "legacy",
+			"deployment_mode":       "legacy",
+			"type_key":              item.TypeKey,
+			"plain_text_action":     item.PlainTextAction,
+			"use_llm_fallback":      item.UseLLMFallback,
+			"created_at":            item.CreatedAt,
+			"webhook_url_template":  "agenthook.store/url/" + acct.Slug + "/" + item.TypeKey + "/[secret]",
+			"legacy_webhook_url":    "/url/" + acct.Slug + "/" + item.TypeKey + "/[secret]",
+			"listener_display_name": item.TypeKey,
 		})
 	}
 	writeJSON(w, http.StatusOK, resp)

@@ -54,6 +54,7 @@ func Load() Config {
 	if tidbDSN == "" {
 		tidbDSN = getenv("COMMERCE_MYSQL_DSN", "")
 	}
+	defaultInMemoryStore := strings.TrimSpace(tidbDSN) == ""
 
 	llmKey := getenv("LLM_API_KEY", "")
 	if llmKey == "" {
@@ -92,7 +93,7 @@ func Load() Config {
 
 		TelegramBotToken: getenv("TELEGRAM_BOT_TOKEN", ""),
 
-		UseInMemoryStore:             getbool("USE_IN_MEMORY_STORE", true),
+		UseInMemoryStore:             getbool("USE_IN_MEMORY_STORE", defaultInMemoryStore),
 		VerifyHTCSignature:           getbool("VERIFY_HTC_SIGNATURE", false),
 		DeterministicOnlyTypeKeys:    splitCSV(getenv("DETERMINISTIC_ONLY_TYPE_KEYS", "ai-recruiter-inbox-message")),
 		AutoPromoteEnabled:           getbool("AUTOPROMOTE_ENABLED", true),
