@@ -114,7 +114,7 @@ func (h *Handler) ScaleKitLoginRedirect(w http.ResponseWriter, r *http.Request) 
 	base := h.scalekitBase()
 	redirectURI := h.scalekitCallbackURL(r)
 	if strings.Contains(base, "scalekit.dev") {
-		u, _ := url.Parse(base)
+		u, _ := url.Parse(strings.TrimRight(base, "/") + "/oauth/authorize")
 		q := u.Query()
 		q.Set("prompt", "login")
 		q.Set("redirect_uri", redirectURI)
@@ -200,6 +200,10 @@ func (h *Handler) scalekitBase() string {
 		base = "https://www.scalekit.com"
 	}
 	if parsed, err := url.Parse(base); err == nil && parsed.Scheme != "" && parsed.Host != "" {
+		if strings.EqualFold(parsed.Host, "hookweb.scalekit.dev") {
+			parsed.Host = "hookweb.scalekit.com"
+			return strings.TrimRight(parsed.String(), "/")
+		}
 		return strings.TrimRight(base, "/")
 	}
 	return "https://www.scalekit.com"

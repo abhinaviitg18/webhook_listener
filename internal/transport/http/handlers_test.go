@@ -3,9 +3,10 @@ package httpapi
 import (
 	"bytes"
 	"encoding/json"
+	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"net/http"
+	"strings"
 	"testing"
 
 	"agenthook.store/internal/auth"
@@ -33,6 +34,17 @@ func TestScaleKitLoginRedirectIncludesFixedCallback(t *testing.T) {
 	}
 	if got := u.Query().Get("prompt"); got != "login" {
 		t.Fatalf("unexpected prompt: %s", got)
+	}
+	if !strings.Contains(u.Path, "/oauth/authorize") {
+		t.Fatalf("expected /oauth/authorize login endpoint, got %s", u.Path)
+	}
+}
+
+func TestScaleKitBaseNormalizesHookwebDevToCom(t *testing.T) {
+	h := &Handler{ScaleKitBaseURL: "https://hookweb.scalekit.dev"}
+	got := h.scalekitBase()
+	if got != "https://hookweb.scalekit.com" {
+		t.Fatalf("unexpected normalized base: %s", got)
 	}
 }
 
