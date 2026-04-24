@@ -70,10 +70,15 @@ func main() {
 		},
 	}
 	handler := &httpapi.Handler{
-		Store:              st,
-		Processor:          processor,
-		VerifyHTCSignature: cfg.VerifyHTCSignature,
-		ScaleKitBaseURL:    cfg.ScaleKitBaseURL,
+		Store:                st,
+		Processor:            processor,
+		VerifyHTCSignature:   cfg.VerifyHTCSignature,
+		ScaleKitBaseURL:      cfg.ScaleKitBaseURL,
+		ScaleKitClientID:     cfg.ScaleKitClientID,
+		ScaleKitClientSecret: cfg.ScaleKitClientSecret,
+		ScaleKitRedirectURI:  cfg.ScaleKitRedirectURI,
+		AppSessionSecret:     cfg.AppSessionSecret,
+		PublicBaseURL:        cfg.PublicBaseURL,
 	}
 	verifier := auth.TokenVerifier{
 		Store:           st,

@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -27,10 +28,15 @@ import (
 )
 
 type Handler struct {
-	Store              domain.Store
-	Processor          *service.Processor
-	VerifyHTCSignature bool
-	ScaleKitBaseURL    string
+	Store                domain.Store
+	Processor            *service.Processor
+	VerifyHTCSignature   bool
+	ScaleKitBaseURL      string
+	ScaleKitClientID     string
+	ScaleKitClientSecret string
+	ScaleKitRedirectURI  string
+	AppSessionSecret     string
+	PublicBaseURL        string
 }
 
 func NewRouter(h *Handler, verifier auth.RequestVerifier) http.Handler {
@@ -41,9 +47,11 @@ func NewRouter(h *Handler, verifier auth.RequestVerifier) http.Handler {
 	})
 
 	r.Post("/api/register/email", h.RegisterEmail)
+	r.Get("/auth/scalekit/start", h.ScaleKitStart)
 	r.Get("/auth/scalekit/login", h.ScaleKitLoginRedirect)
 	r.Get("/auth/scalekit/signup", h.ScaleKitSignupRedirect)
 	r.Get("/auth/scalekit/callback", h.ScaleKitCallback)
+	r.Get("/auth/logout", h.ScaleKitLogout)
 
 	r.Group(func(ar chi.Router) {
 		ar.Use(AuthMiddleware(verifier))
@@ -111,27 +119,49 @@ func (h *Handler) RegisterEmail(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (h *Handler) ScaleKitStart(w http.ResponseWriter, r *http.Request) {
+	if h.hasScaleKitOAuthConfig() {
+		authURL, err := h.scaleKitAuthorizationURL(r)
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		http.Redirect(w, r, authURL, http.StatusFound)
+		return
+	}
+
+	intent := strings.TrimSpace(strings.ToLower(r.URL.Query().Get("intent")))
+	if intent == "signup" {
+		h.redirectToHostedScaleKitPage(w, r, "/a/auth/signup")
+		return
+	}
+	h.redirectToHostedScaleKitPage(w, r, "/a/auth/login")
+}
+
 func (h *Handler) ScaleKitLoginRedirect(w http.ResponseWriter, r *http.Request) {
-	base := h.scalekitBase()
-	redirectURI := h.scalekitCallbackURL(r)
-	u, _ := url.Parse(strings.TrimRight(base, "/") + "/a/auth/login")
-	q := u.Query()
-	q.Set("redirect_uri", redirectURI)
-	u.RawQuery = q.Encode()
-	http.Redirect(w, r, u.String(), http.StatusFound)
+	q := r.URL.Query()
+	q.Set("intent", "signin")
+	r.URL.RawQuery = q.Encode()
+	h.ScaleKitStart(w, r)
 }
 
 func (h *Handler) ScaleKitSignupRedirect(w http.ResponseWriter, r *http.Request) {
-	base := h.scalekitBase()
-	redirectURI := h.scalekitCallbackURL(r)
-	u, _ := url.Parse(strings.TrimRight(base, "/") + "/a/auth/signup")
-	q := u.Query()
-	q.Set("redirect_uri", redirectURI)
-	u.RawQuery = q.Encode()
-	http.Redirect(w, r, u.String(), http.StatusFound)
+	q := r.URL.Query()
+	q.Set("intent", "signup")
+	r.URL.RawQuery = q.Encode()
+	h.ScaleKitStart(w, r)
 }
 
 func (h *Handler) ScaleKitCallback(w http.ResponseWriter, r *http.Request) {
+	if errCode := strings.TrimSpace(r.URL.Query().Get("error")); errCode != "" {
+		target := h.appRedirectURL(r, "")
+		q := target.Query()
+		q.Set("auth_error", errCode)
+		target.RawQuery = q.Encode()
+		http.Redirect(w, r, target.String(), http.StatusFound)
+		return
+	}
+
 	// 1. Get code from query
 	code := r.URL.Query().Get("code")
 	if code == "" {
@@ -139,17 +169,25 @@ func (h *Handler) ScaleKitCallback(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/", http.StatusFound)
 		return
 	}
-	target := url.URL{
-		Scheme: "https",
-		Host:   "app.agenthook.store",
-		Path:   "/",
+	returnTo := ""
+	if h.hasScaleKitOAuthConfig() {
+		parsedReturnTo, err := h.parseScaleKitState(r.URL.Query().Get("state"))
+		if err != nil {
+			target := h.appRedirectURL(r, "")
+			q := target.Query()
+			q.Set("auth_error", "invalid_state")
+			target.RawQuery = q.Encode()
+			http.Redirect(w, r, target.String(), http.StatusFound)
+			return
+		}
+		returnTo = parsedReturnTo
 	}
+	target := h.appRedirectURL(r, returnTo)
 	q := target.Query()
 
 	// 2. Exchange ScaleKit auth code server-side and mint a real app token.
 	if localToken, err := h.exchangeScaleKitCodeToLocalToken(r.Context(), code); err == nil && localToken != "" {
-		q.Set("code", localToken)
-		target.RawQuery = q.Encode()
+		h.writeSessionCookie(w, localToken, 3600*24*30)
 		http.Redirect(w, r, target.String(), http.StatusFound)
 		return
 	}
@@ -170,6 +208,12 @@ func (h *Handler) ScaleKitCallback(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) scalekitCallbackURL(r *http.Request) string {
+	if v := strings.TrimSpace(h.ScaleKitRedirectURI); v != "" {
+		return v
+	}
+	if base := strings.TrimRight(strings.TrimSpace(h.PublicBaseURL), "/"); base != "" {
+		return base + "/auth/scalekit/callback"
+	}
 	return "https://app.agenthook.store/auth/scalekit/callback"
 }
 
@@ -188,7 +232,7 @@ func (h *Handler) scalekitBase() string {
 		base = strings.TrimSpace(os.Getenv("SCALEKIT_BASE_URL"))
 	}
 	if base == "" {
-		base = "https://agenthook.scalekit.com"
+		base = "https://hookweb.scalekit.com"
 	}
 	if parsed, err := url.Parse(base); err == nil && parsed.Scheme != "" && parsed.Host != "" {
 		// Ensure consistently using .com vs .dev if specified by ScaleKit best practices
@@ -203,6 +247,164 @@ func (h *Handler) scalekitBase() string {
 
 func (h *Handler) isScaleKitConfigured() bool {
 	return strings.TrimSpace(h.ScaleKitBaseURL) != "" || strings.TrimSpace(os.Getenv("SCALEKIT_BASE_URL")) != ""
+}
+
+func (h *Handler) hasScaleKitOAuthConfig() bool {
+	return strings.TrimSpace(h.ScaleKitClientID) != "" && strings.TrimSpace(h.ScaleKitClientSecret) != "" && h.isScaleKitConfigured()
+}
+
+func (h *Handler) ScaleKitLogout(w http.ResponseWriter, r *http.Request) {
+	h.writeSessionCookie(w, "", -1)
+	target := "/"
+	if r.URL.Query().Get("return_to") != "" {
+		target = r.URL.Query().Get("return_to")
+	}
+	http.Redirect(w, r, target, http.StatusFound)
+}
+
+func (h *Handler) writeSessionCookie(w http.ResponseWriter, token string, maxAge int) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     "htc_token",
+		Value:    token,
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   true,
+		SameSite: http.SameSiteLaxMode,
+		MaxAge:   maxAge,
+	})
+}
+
+func (h *Handler) redirectToHostedScaleKitPage(w http.ResponseWriter, r *http.Request, path string) {
+	base := h.scalekitBase()
+	redirectURI := h.scalekitCallbackURL(r)
+	u, _ := url.Parse(strings.TrimRight(base, "/") + path)
+	q := u.Query()
+	q.Set("redirect_uri", redirectURI)
+	u.RawQuery = q.Encode()
+	http.Redirect(w, r, u.String(), http.StatusFound)
+}
+
+func (h *Handler) scaleKitAuthorizationURL(r *http.Request) (string, error) {
+	state, err := h.mintScaleKitState(r.URL.Query().Get("return_to"))
+	if err != nil {
+		return "", err
+	}
+	u, err := url.Parse(strings.TrimRight(h.scalekitBase(), "/") + "/oauth/authorize")
+	if err != nil {
+		return "", err
+	}
+	q := u.Query()
+	q.Set("response_type", "code")
+	q.Set("client_id", strings.TrimSpace(h.ScaleKitClientID))
+	q.Set("redirect_uri", h.scalekitCallbackURL(r))
+	q.Set("scope", "openid profile email")
+	q.Set("state", state)
+	if loginHint := strings.TrimSpace(r.URL.Query().Get("login_hint")); loginHint != "" {
+		q.Set("login_hint", loginHint)
+	}
+	if strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("intent")), "signup") {
+		q.Set("screen_hint", "signup")
+	}
+	u.RawQuery = q.Encode()
+	return u.String(), nil
+}
+
+type scaleKitStatePayload struct {
+	ReturnTo string `json:"return_to"`
+	ExpUnix  int64  `json:"exp_unix"`
+}
+
+func (h *Handler) mintScaleKitState(returnTo string) (string, error) {
+	secret := strings.TrimSpace(h.AppSessionSecret)
+	if secret == "" {
+		return "", errors.New("APP_SESSION_SECRET is required")
+	}
+	payload := scaleKitStatePayload{
+		ReturnTo: h.sanitizeReturnTo(returnTo),
+		ExpUnix:  time.Now().Add(15 * time.Minute).Unix(),
+	}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return "", err
+	}
+	body := base64.RawURLEncoding.EncodeToString(raw)
+	mac := hmac.New(sha256.New, []byte(secret))
+	_, _ = mac.Write([]byte(body))
+	sig := base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
+	return body + "." + sig, nil
+}
+
+func (h *Handler) parseScaleKitState(state string) (string, error) {
+	secret := strings.TrimSpace(h.AppSessionSecret)
+	if secret == "" {
+		return "", errors.New("APP_SESSION_SECRET is required")
+	}
+	parts := strings.Split(strings.TrimSpace(state), ".")
+	if len(parts) != 2 {
+		return "", errors.New("invalid auth state")
+	}
+	mac := hmac.New(sha256.New, []byte(secret))
+	_, _ = mac.Write([]byte(parts[0]))
+	expected := base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
+	if !hmac.Equal([]byte(expected), []byte(parts[1])) {
+		return "", errors.New("invalid auth state signature")
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(parts[0])
+	if err != nil {
+		return "", err
+	}
+	var payload scaleKitStatePayload
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return "", err
+	}
+	if payload.ExpUnix <= time.Now().Unix() {
+		return "", errors.New("auth state expired")
+	}
+	return h.sanitizeReturnTo(payload.ReturnTo), nil
+}
+
+func (h *Handler) sanitizeReturnTo(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "/"
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return "/"
+	}
+	if u.IsAbs() {
+		base, err := url.Parse(strings.TrimSpace(h.publicBaseURL()))
+		if err != nil || base.Hostname() == "" || !strings.EqualFold(base.Hostname(), u.Hostname()) {
+			return "/"
+		}
+		return u.RequestURI()
+	}
+	if !strings.HasPrefix(u.Path, "/") {
+		return "/"
+	}
+	return u.RequestURI()
+}
+
+func (h *Handler) appRedirectURL(r *http.Request, returnTo string) url.URL {
+	base, err := url.Parse(h.publicBaseURL())
+	if err != nil || base.Scheme == "" || base.Host == "" {
+		base = &url.URL{Scheme: "https", Host: "app.agenthook.store"}
+	}
+	if path := strings.TrimSpace(returnTo); path != "" {
+		base.Path = path
+		base.RawQuery = ""
+		return *base
+	}
+	base.Path = "/"
+	base.RawQuery = ""
+	return *base
+}
+
+func (h *Handler) publicBaseURL() string {
+	if v := strings.TrimRight(strings.TrimSpace(h.PublicBaseURL), "/"); v != "" {
+		return v
+	}
+	return "https://app.agenthook.store"
 }
 
 func (h *Handler) exchangeScaleKitCodeToLocalToken(ctx context.Context, code string) (string, error) {
@@ -223,6 +425,12 @@ func (h *Handler) exchangeScaleKitCodeToLocalToken(ctx context.Context, code str
 	form.Set("grant_type", "authorization_code")
 	form.Set("code", code)
 	form.Set("redirect_uri", redirectURI)
+	if strings.TrimSpace(h.ScaleKitClientID) != "" {
+		form.Set("client_id", strings.TrimSpace(h.ScaleKitClientID))
+	}
+	if strings.TrimSpace(h.ScaleKitClientSecret) != "" {
+		form.Set("client_secret", strings.TrimSpace(h.ScaleKitClientSecret))
+	}
 
 	tokenReq, err := http.NewRequestWithContext(ctx, http.MethodPost, base+"/oauth/token", strings.NewReader(form.Encode()))
 	if err != nil {

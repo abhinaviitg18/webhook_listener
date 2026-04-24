@@ -10,7 +10,7 @@ import { useAuth } from './context/AuthContext';
 const VALID_TABS = new Set(['storyboard', 'skills', 'urls', 'settings']);
 
 function App() {
-  const { user, token, loading, error, login } = useAuth();
+  const { user, isAuthenticated, loading, error, login, logout } = useAuth();
   const tabParam = new URLSearchParams(window.location.search).get('tab');
   const [activeTab, setActiveTab] = useState(VALID_TABS.has(tabParam) ? tabParam : 'storyboard');
   const [copied, setCopied] = useState(false);
@@ -19,17 +19,18 @@ function App() {
   const [fetching, setFetching] = useState(false);
 
   useEffect(() => {
-    if (!token) return;
+    if (!isAuthenticated) return;
     fetchListeners();
     if (activeTab === 'storyboard') {
       fetchEvents();
     }
-  }, [token, activeTab]);
+  }, [isAuthenticated, activeTab]);
 
   const fetchListeners = async () => {
     try {
       const res = await fetch('/v1/listeners', {
-        headers: { 'Authorization': `Bearer ${token}` }
+        headers: { 'Accept': 'application/json' },
+        credentials: 'include'
       });
       if (res.ok) {
         const data = await res.json();
@@ -49,7 +50,8 @@ function App() {
     setFetching(true);
     try {
       const res = await fetch('/api/events', {
-        headers: { 'Authorization': `Bearer ${token}` }
+        headers: { 'Accept': 'application/json' },
+        credentials: 'include'
       });
       if (res.ok) {
         const data = await res.json();
@@ -102,7 +104,7 @@ function App() {
 
   return (
     <div className="min-h-screen pb-24 bg-surface text-on-surface">
-      <TopAppBar />
+      <TopAppBar user={user} onLogout={logout} />
 
       <main className="pt-20 px-4 max-w-md mx-auto">
         <AnimatePresence mode="wait">
@@ -113,7 +115,7 @@ function App() {
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: 20 }}
             >
-              <Metrics token={token} />
+              <Metrics isAuthenticated={isAuthenticated} />
 
               <section className="mb-8">
                 <div className="bg-indigo-500/5 border border-indigo-500/20 rounded-xl p-4">
@@ -177,7 +179,7 @@ function App() {
               className="space-y-6"
             >
               <h2 className="px-1 text-white">Settings</h2>
-              <BYOKSettings token={token} />
+              <BYOKSettings />
             </motion.div>
           )}
 
@@ -213,7 +215,7 @@ function App() {
 }
 
 // Sub-components moved for clarity or can stay here
-const BYOKSettings = ({ token }) => {
+const BYOKSettings = () => {
   const [provider, setProvider] = useState('groq');
   const [apiKey, setApiKey] = useState('');
   const [saving, setSaving] = useState(false);
@@ -224,9 +226,9 @@ const BYOKSettings = ({ token }) => {
       await fetch('/v1/byok/providers', {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
         },
+        credentials: 'include',
         body: JSON.stringify({ provider, api_key: apiKey, is_default: true })
       });
       alert('Config saved!');

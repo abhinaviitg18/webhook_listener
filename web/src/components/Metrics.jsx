@@ -1,21 +1,22 @@
 import React, { useState, useEffect } from 'react';
 
-export const Metrics = ({ token }) => {
+export const Metrics = ({ isAuthenticated }) => {
     const [stats, setStats] = useState({ active: 0, accuracy: 99.8 });
 
     useEffect(() => {
-        if (!token) return;
+        if (!isAuthenticated) return;
 
         // Fetch listeners for active hooks count
         fetch('/v1/listeners', {
-            headers: { 'Authorization': `Bearer ${token}` }
+            headers: { 'Accept': 'application/json' },
+            credentials: 'include'
         })
             .then(res => res.json())
             .then(data => {
                 setStats(prev => ({ ...prev, active: data.length }));
             })
             .catch(err => console.error(err));
-    }, [token]);
+    }, [isAuthenticated]);
 
     return (
         <section className="grid grid-cols-2 gap-3 mb-6">

@@ -25,10 +25,15 @@ type TokenVerifier struct {
 
 func (v TokenVerifier) VerifyRequest(r *http.Request) (domain.Account, error) {
 	authz := strings.TrimSpace(r.Header.Get("Authorization"))
-	if !strings.HasPrefix(authz, "Bearer ") {
-		return domain.Account{}, errors.New("missing bearer token")
+	token := ""
+	if strings.HasPrefix(authz, "Bearer ") {
+		token = strings.TrimSpace(strings.TrimPrefix(authz, "Bearer "))
 	}
-	token := strings.TrimSpace(strings.TrimPrefix(authz, "Bearer "))
+	if token == "" {
+		if cookie, err := r.Cookie("htc_token"); err == nil {
+			token = strings.TrimSpace(cookie.Value)
+		}
+	}
 	if token == "" {
 		return domain.Account{}, errors.New("empty token")
 	}

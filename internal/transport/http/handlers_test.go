@@ -41,6 +41,42 @@ func TestScaleKitLoginRedirectIncludesFixedCallback(t *testing.T) {
 	}
 }
 
+func TestScaleKitStartUsesOAuthAuthorizeWhenClientConfigured(t *testing.T) {
+	h := &Handler{
+		ScaleKitBaseURL:      "https://hookweb.scalekit.com",
+		ScaleKitClientID:     "client_123",
+		ScaleKitClientSecret: "secret_123",
+		AppSessionSecret:     "session_secret",
+		PublicBaseURL:        "https://app.agenthook.store",
+	}
+	req := httptest.NewRequest(http.MethodGet, "/auth/scalekit/start?return_to=%2Fsettings&login_hint=techhiring%40agentmail.to", nil)
+	rr := httptest.NewRecorder()
+
+	h.ScaleKitStart(rr, req)
+	if rr.Code != http.StatusFound {
+		t.Fatalf("expected status 302, got %d", rr.Code)
+	}
+	u, err := url.Parse(rr.Header().Get("Location"))
+	if err != nil {
+		t.Fatalf("parse redirect url: %v", err)
+	}
+	if u.Path != "/oauth/authorize" {
+		t.Fatalf("expected /oauth/authorize endpoint, got %s", u.Path)
+	}
+	if got := u.Query().Get("client_id"); got != "client_123" {
+		t.Fatalf("unexpected client_id: %s", got)
+	}
+	if got := u.Query().Get("redirect_uri"); got != "https://app.agenthook.store/auth/scalekit/callback" {
+		t.Fatalf("unexpected redirect_uri: %s", got)
+	}
+	if got := u.Query().Get("login_hint"); got != "techhiring@agentmail.to" {
+		t.Fatalf("unexpected login_hint: %s", got)
+	}
+	if got := u.Query().Get("state"); got == "" {
+		t.Fatalf("expected signed state")
+	}
+}
+
 func TestScaleKitBaseNormalizesHookwebDevToCom(t *testing.T) {
 	h := &Handler{ScaleKitBaseURL: "https://hookweb.scalekit.dev"}
 	got := h.scalekitBase()
@@ -107,9 +143,21 @@ func TestScaleKitCallbackExchangesCodeAndIssuesLocalToken(t *testing.T) {
 	if u.Host != "app.agenthook.store" {
 		t.Fatalf("unexpected redirect host: %s", u.Host)
 	}
-	localToken := u.Query().Get("code")
+	if got := u.Query().Get("code"); got != "" {
+		t.Fatalf("expected callback redirect without code query param, got %s", got)
+	}
+	sessionCookie := rr.Result().Cookies()
+	if len(sessionCookie) == 0 {
+		t.Fatalf("expected session cookie to be issued")
+	}
+	var localToken string
+	for _, c := range sessionCookie {
+		if c.Name == "htc_token" {
+			localToken = c.Value
+		}
+	}
 	if localToken == "" {
-		t.Fatalf("expected local token in code query param")
+		t.Fatalf("expected htc_token cookie to be set")
 	}
 	if localToken == "auth_code_123" {
 		t.Fatalf("expected exchanged local token, got raw code")
@@ -152,6 +200,73 @@ func TestScaleKitCallbackExchangeFailureReturnsAuthError(t *testing.T) {
 	}
 	if got := u.Query().Get("code"); got != "" {
 		t.Fatalf("expected no raw code passthrough on exchange failure, got %s", got)
+	}
+}
+
+func TestScaleKitCallbackUsesSignedStateReturnTo(t *testing.T) {
+	mockScaleKit := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/oauth/token":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"access_token":"scale_access_123"}`))
+		case "/userinfo":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"email":"techhiring@agentmail.to"}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer mockScaleKit.Close()
+
+	st := store.NewMemoryStore()
+	h := &Handler{
+		Store:                st,
+		ScaleKitBaseURL:      mockScaleKit.URL,
+		ScaleKitClientID:     "client_123",
+		ScaleKitClientSecret: "secret_123",
+		AppSessionSecret:     "session_secret",
+		PublicBaseURL:        "https://app.agenthook.store",
+	}
+	state, err := h.mintScaleKitState("/settings")
+	if err != nil {
+		t.Fatalf("mint state: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/auth/scalekit/callback?code=auth_code_123&state="+url.QueryEscape(state), nil)
+	rr := httptest.NewRecorder()
+
+	h.ScaleKitCallback(rr, req)
+	if rr.Code != http.StatusFound {
+		t.Fatalf("expected status 302, got %d", rr.Code)
+	}
+	u, err := url.Parse(rr.Header().Get("Location"))
+	if err != nil {
+		t.Fatalf("parse redirect url: %v", err)
+	}
+	if u.Path != "/settings" {
+		t.Fatalf("expected return_to redirect, got %s", u.Path)
+	}
+}
+
+func TestScaleKitLogoutClearsSessionCookie(t *testing.T) {
+	h := &Handler{}
+	req := httptest.NewRequest(http.MethodGet, "/auth/logout?return_to=%2Flogin", nil)
+	rr := httptest.NewRecorder()
+
+	h.ScaleKitLogout(rr, req)
+	if rr.Code != http.StatusFound {
+		t.Fatalf("expected status 302, got %d", rr.Code)
+	}
+	if got := rr.Header().Get("Location"); got != "/login" {
+		t.Fatalf("unexpected logout redirect: %s", got)
+	}
+	var cleared bool
+	for _, c := range rr.Result().Cookies() {
+		if c.Name == "htc_token" && c.MaxAge < 0 {
+			cleared = true
+		}
+	}
+	if !cleared {
+		t.Fatalf("expected htc_token cookie to be cleared")
 	}
 }
 

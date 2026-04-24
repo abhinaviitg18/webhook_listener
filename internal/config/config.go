@@ -10,8 +10,13 @@ import (
 type Config struct {
 	Port string
 
-	ScaleKitBaseURL string
-	ScaleKitAPIKey  string
+	ScaleKitBaseURL      string
+	ScaleKitAPIKey       string
+	ScaleKitClientID     string
+	ScaleKitClientSecret string
+	ScaleKitRedirectURI  string
+	AppSessionSecret     string
+	PublicBaseURL        string
 
 	TiDBDSN string
 
@@ -59,8 +64,13 @@ func Load() Config {
 	return Config{
 		Port: getenv("PORT", "8080"),
 
-		ScaleKitBaseURL: getenv("SCALEKIT_BASE_URL", ""),
-		ScaleKitAPIKey:  getenv("SCALEKIT_API_KEY", ""),
+		ScaleKitBaseURL:      getenv("SCALEKIT_BASE_URL", ""),
+		ScaleKitAPIKey:       getenv("SCALEKIT_API_KEY", ""),
+		ScaleKitClientID:     getenv("SCALEKIT_CLIENT_ID", ""),
+		ScaleKitClientSecret: getenv("SCALEKIT_CLIENT_SECRET", ""),
+		ScaleKitRedirectURI:  getenv("SCALEKIT_REDIRECT_URI", ""),
+		AppSessionSecret:     getenv("APP_SESSION_SECRET", getenv("SCALEKIT_CLIENT_SECRET", "")),
+		PublicBaseURL:        getenv("PUBLIC_BASE_URL", "https://app.agenthook.store"),
 
 		TiDBDSN: tidbDSN,
 

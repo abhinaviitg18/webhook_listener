@@ -29,6 +29,24 @@ func TestTokenVerifier_LocalToken(t *testing.T) {
 	}
 }
 
+func TestTokenVerifier_LocalTokenFromCookie(t *testing.T) {
+	st := store.NewMemoryStore()
+	acct, token, err := st.CreateAccount(context.Background(), "techhiring@agentmail.to")
+	if err != nil {
+		t.Fatal(err)
+	}
+	v := TokenVerifier{Store: st}
+	req := httptest.NewRequest(http.MethodGet, "/x", nil)
+	req.AddCookie(&http.Cookie{Name: "htc_token", Value: token})
+	got, err := v.VerifyRequest(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ID != acct.ID {
+		t.Fatalf("expected account %s got %s", acct.ID, got.ID)
+	}
+}
+
 func TestTokenVerifier_ScaleKitFallbackProvisioning(t *testing.T) {
 	st := store.NewMemoryStore()
 	var bearerSeen string
