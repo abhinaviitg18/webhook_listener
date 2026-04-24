@@ -112,21 +112,41 @@ func (h *Handler) RegisterEmail(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) ScaleKitLoginRedirect(w http.ResponseWriter, r *http.Request) {
 	base := h.scalekitBase()
+	redirectURI := h.scalekitCallbackURL(r)
 	if strings.Contains(base, "scalekit.dev") {
-		http.Redirect(w, r, base, http.StatusFound)
+		u, _ := url.Parse(base)
+		q := u.Query()
+		q.Set("prompt", "login")
+		q.Set("redirect_uri", redirectURI)
+		u.RawQuery = q.Encode()
+		http.Redirect(w, r, u.String(), http.StatusFound)
 		return
 	}
-	http.Redirect(w, r, strings.TrimRight(base, "/")+"/login", http.StatusFound)
+	u, _ := url.Parse(strings.TrimRight(base, "/") + "/login")
+	q := u.Query()
+	q.Set("prompt", "login")
+	q.Set("redirect_uri", redirectURI)
+	u.RawQuery = q.Encode()
+	http.Redirect(w, r, u.String(), http.StatusFound)
 }
 
 func (h *Handler) ScaleKitSignupRedirect(w http.ResponseWriter, r *http.Request) {
 	base := h.scalekitBase()
+	redirectURI := h.scalekitCallbackURL(r)
 	if strings.Contains(base, "scalekit.dev") {
-		u := strings.TrimRight(base, "/") + "/oauth/authorize?screen_hint=signup"
-		http.Redirect(w, r, u, http.StatusFound)
+		u, _ := url.Parse(strings.TrimRight(base, "/") + "/oauth/authorize")
+		q := u.Query()
+		q.Set("screen_hint", "signup")
+		q.Set("redirect_uri", redirectURI)
+		u.RawQuery = q.Encode()
+		http.Redirect(w, r, u.String(), http.StatusFound)
 		return
 	}
-	http.Redirect(w, r, strings.TrimRight(base, "/")+"/signup", http.StatusFound)
+	u, _ := url.Parse(strings.TrimRight(base, "/") + "/signup")
+	q := u.Query()
+	q.Set("redirect_uri", redirectURI)
+	u.RawQuery = q.Encode()
+	http.Redirect(w, r, u.String(), http.StatusFound)
 }
 
 func (h *Handler) ScaleKitCallback(w http.ResponseWriter, r *http.Request) {
@@ -147,7 +167,19 @@ func (h *Handler) ScaleKitCallback(w http.ResponseWriter, r *http.Request) {
 	// But if we are here, it's a server-side callback.
 
 	// Let's assume we redirect to the frontend which will then call /api/me with the token.
-	http.Redirect(w, r, "https://app.agenthook.store/?code="+code, http.StatusFound)
+	target := url.URL{
+		Scheme: "https",
+		Host:   "app.agenthook.store",
+		Path:   "/",
+	}
+	q := target.Query()
+	q.Set("code", code)
+	target.RawQuery = q.Encode()
+	http.Redirect(w, r, target.String(), http.StatusFound)
+}
+
+func (h *Handler) scalekitCallbackURL(r *http.Request) string {
+	return "https://app.agenthook.store/auth/scalekit/callback"
 }
 
 func (h *Handler) UserInfo(w http.ResponseWriter, r *http.Request) {

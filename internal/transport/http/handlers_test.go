@@ -3,8 +3,9 @@ package httpapi
 import (
 	"bytes"
 	"encoding/json"
-	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"net/http"
 	"testing"
 
 	"agenthook.store/internal/auth"
@@ -12,6 +13,50 @@ import (
 	"agenthook.store/internal/service"
 	"agenthook.store/internal/store"
 )
+
+func TestScaleKitLoginRedirectIncludesFixedCallback(t *testing.T) {
+	h := &Handler{ScaleKitBaseURL: "https://hiddentalentclub.scalekit.dev"}
+	req := httptest.NewRequest(http.MethodGet, "/auth/scalekit/login", nil)
+	rr := httptest.NewRecorder()
+
+	h.ScaleKitLoginRedirect(rr, req)
+	if rr.Code != http.StatusFound {
+		t.Fatalf("expected status 302, got %d", rr.Code)
+	}
+	loc := rr.Header().Get("Location")
+	u, err := url.Parse(loc)
+	if err != nil {
+		t.Fatalf("parse redirect url: %v", err)
+	}
+	if got := u.Query().Get("redirect_uri"); got != "https://app.agenthook.store/auth/scalekit/callback" {
+		t.Fatalf("unexpected redirect_uri: %s", got)
+	}
+	if got := u.Query().Get("prompt"); got != "login" {
+		t.Fatalf("unexpected prompt: %s", got)
+	}
+}
+
+func TestScaleKitCallbackRedirectsToAppDomain(t *testing.T) {
+	h := &Handler{}
+	req := httptest.NewRequest(http.MethodGet, "/auth/scalekit/callback?code=abc123", nil)
+	rr := httptest.NewRecorder()
+
+	h.ScaleKitCallback(rr, req)
+	if rr.Code != http.StatusFound {
+		t.Fatalf("expected status 302, got %d", rr.Code)
+	}
+	loc := rr.Header().Get("Location")
+	u, err := url.Parse(loc)
+	if err != nil {
+		t.Fatalf("parse redirect url: %v", err)
+	}
+	if u.Scheme != "https" || u.Host != "app.agenthook.store" {
+		t.Fatalf("unexpected redirect target: %s", loc)
+	}
+	if got := u.Query().Get("code"); got != "abc123" {
+		t.Fatalf("unexpected code value: %s", got)
+	}
+}
 
 func TestEndToEndLocalFlow(t *testing.T) {
 	st := store.NewMemoryStore()
