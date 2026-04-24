@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 
 const AuthContext = createContext();
+const PENDING_CODE_KEY = 'htc_pending_code';
 
 export function AuthProvider({ children }) {
     const [user, setUser] = useState(null);
@@ -8,16 +9,19 @@ export function AuthProvider({ children }) {
     const [token, setToken] = useState(localStorage.getItem('htc_token'));
 
     useEffect(() => {
-        // Handle ScaleKit code in URL
+        // Keep existing logged-in session if present. Only fall back to the callback code when needed.
         const params = new URLSearchParams(window.location.search);
         const code = params.get('code');
-        if (code) {
-            // In a real app we'd exchange it, but for now we use it as a token mock
-            // or assume the backend handled it and we just need to fetch /api/me
+        if (!code) return;
+
+        sessionStorage.setItem(PENDING_CODE_KEY, code);
+        const existingToken = localStorage.getItem('htc_token');
+        if (!existingToken) {
             localStorage.setItem('htc_token', code);
             setToken(code);
-            window.history.replaceState({}, document.title, "/");
         }
+
+        window.history.replaceState({}, document.title, window.location.pathname);
     }, []);
 
     useEffect(() => {
@@ -39,6 +43,14 @@ export function AuthProvider({ children }) {
                 setUser(data);
             })
             .catch(() => {
+                const pendingCode = sessionStorage.getItem(PENDING_CODE_KEY);
+                if (pendingCode && pendingCode !== token) {
+                    sessionStorage.removeItem(PENDING_CODE_KEY);
+                    localStorage.setItem('htc_token', pendingCode);
+                    setToken(pendingCode);
+                    return;
+                }
+                sessionStorage.removeItem(PENDING_CODE_KEY);
                 setUser(null);
                 localStorage.removeItem('htc_token');
                 setToken(null);
