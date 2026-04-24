@@ -1,0 +1,51 @@
+name: Deploy AWS Lambda
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ "master" ]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: us-east-1
+      AWS_REGION: us-east-1
+      LAMBDA_FUNCTION_NAME: ${{ secrets.LAMBDA_FUNCTION_NAME }}
+      APP_ENV_SSM_PARAM: ${{ secrets.APP_ENV_SSM_PARAM }}
+      LAMBDA_ORIGIN_SHARED_SECRET: ${{ secrets.LAMBDA_ORIGIN_SHARED_SECRET }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Deploy Lambda
+        id: lambda_deploy
+        run: |
+          set -euo pipefail
+          FUNCTION_URL="$(bash scripts/aws/lambda_deploy.sh | tail -n 1)"
+          echo "function_url=${FUNCTION_URL}" >> "$GITHUB_OUTPUT"
+
+      - name: Sync Cloudflare app origin and deploy worker
+        env:
+          APP_ORIGIN_URL: ${{ steps.lambda_deploy.outputs.function_url }}
+        run: |
+          set -euo pipefail
+          cd cloudflare-worker-root
+          printf '%s' "${APP_ORIGIN_URL}" | npx -y wrangler secret put APP_ORIGIN_URL
+          printf '%s' "${LAMBDA_ORIGIN_SHARED_SECRET}" | npx -y wrangler secret put APP_ORIGIN_SHARED_SECRET
+          npx -y wrangler deploy
