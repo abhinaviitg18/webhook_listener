@@ -4,3 +4,9 @@
 tmp/
 .tmp/
 node_modules/
+.playwright-cli/
+.wrangler/
+artifacts/
+output/
+cloudflare-pages/.wrangler/
+cloudflare-worker-root/.wrangler/
