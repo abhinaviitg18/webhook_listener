@@ -35,8 +35,8 @@ func TestScaleKitLoginRedirectIncludesFixedCallback(t *testing.T) {
 	if got := u.Query().Get("prompt"); got != "login" {
 		t.Fatalf("unexpected prompt: %s", got)
 	}
-	if !strings.Contains(u.Path, "/oauth/authorize") {
-		t.Fatalf("expected /oauth/authorize login endpoint, got %s", u.Path)
+	if !strings.Contains(u.Path, "/a/auth/login") {
+		t.Fatalf("expected /a/auth/login endpoint, got %s", u.Path)
 	}
 }
 
