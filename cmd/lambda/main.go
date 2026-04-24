@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"crypto/subtle"
+	"encoding/base64"
 	"fmt"
 	"log"
 	"net/http"
@@ -24,6 +25,7 @@ import (
 const (
 	defaultRegion          = "us-east-1"
 	defaultEnvParameter    = "/agenthook/prod/env"
+	inlineEnvVarName       = "APP_ENV_INLINE_B64"
 	originSecretHeader     = "x-agenthook-origin-secret"
 	lambdaEnvParameterName = "APP_ENV_SSM_PARAM"
 	lambdaRegionEnvName    = "AWS_REGION"
@@ -115,6 +117,13 @@ func subtleCompare(actual, expected string) bool {
 }
 
 func loadEnvFromSSM(ctx context.Context) error {
+	if err := loadInlineEnv(); err != nil {
+		return err
+	}
+	if os.Getenv("TIDB_DSN") != "" || os.Getenv("COMMERCE_MYSQL_DSN") != "" || os.Getenv("SCALEKIT_BASE_URL") != "" {
+		return nil
+	}
+
 	paramName := strings.TrimSpace(os.Getenv(lambdaEnvParameterName))
 	if paramName == "" {
 		paramName = defaultEnvParameter
@@ -144,6 +153,20 @@ func loadEnvFromSSM(ctx context.Context) error {
 	}
 
 	return applyEnvFile(*resp.Parameter.Value)
+}
+
+func loadInlineEnv() error {
+	encoded := strings.TrimSpace(os.Getenv(inlineEnvVarName))
+	if encoded == "" {
+		return nil
+	}
+
+	decoded, err := base64.StdEncoding.DecodeString(encoded)
+	if err != nil {
+		return fmt.Errorf("decode inline env: %w", err)
+	}
+
+	return applyEnvFile(string(decoded))
 }
 
 func applyEnvFile(contents string) error {

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/base64"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -70,5 +71,18 @@ func TestWithOriginSecretRejectsUnexpectedSecret(t *testing.T) {
 
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("expected forbidden, got %d", rec.Code)
+	}
+}
+
+func TestLoadInlineEnvAppliesValues(t *testing.T) {
+	encoded := base64.StdEncoding.EncodeToString([]byte("INLINE_KEY=inline-value\n"))
+	t.Setenv(inlineEnvVarName, encoded)
+
+	if err := loadInlineEnv(); err != nil {
+		t.Fatalf("loadInlineEnv returned error: %v", err)
+	}
+
+	if got := os.Getenv("INLINE_KEY"); got != "inline-value" {
+		t.Fatalf("expected INLINE_KEY to be loaded, got %q", got)
 	}
 }
