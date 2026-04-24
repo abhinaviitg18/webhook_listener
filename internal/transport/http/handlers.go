@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -138,22 +139,31 @@ func (h *Handler) ScaleKitCallback(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/", http.StatusFound)
 		return
 	}
-
-	// 2. Exchange code for token (simplified for now - redirect with code or handle server-side)
-	// In a real app, we'd exchange it here.
-	// For this prototype, we'll redirect back to the frontend with the code
-	// or assume ScaleKit handled the session and we just need to redirect to the UI.
-
-	// Actually, ScaleKit often returns the token directly in the fragment if configured for SPA.
-	// But if we are here, it's a server-side callback.
-
-	// Let's assume we redirect to the frontend which will then call /api/me with the token.
 	target := url.URL{
 		Scheme: "https",
 		Host:   "app.agenthook.store",
 		Path:   "/",
 	}
 	q := target.Query()
+
+	// 2. Exchange ScaleKit auth code server-side and mint a real app token.
+	if localToken, err := h.exchangeScaleKitCodeToLocalToken(r.Context(), code); err == nil && localToken != "" {
+		q.Set("code", localToken)
+		target.RawQuery = q.Encode()
+		http.Redirect(w, r, target.String(), http.StatusFound)
+		return
+	}
+
+	// 3. If ScaleKit is configured but exchange failed, avoid recycling the raw code
+	// (which can trigger a callback/login loop on the frontend).
+	if h.isScaleKitConfigured() {
+		q.Set("auth_error", "scalekit_exchange_failed")
+		target.RawQuery = q.Encode()
+		http.Redirect(w, r, target.String(), http.StatusFound)
+		return
+	}
+
+	// 4. Compatibility fallback for local/dev tests without ScaleKit config.
 	q.Set("code", code)
 	target.RawQuery = q.Encode()
 	http.Redirect(w, r, target.String(), http.StatusFound)
@@ -188,6 +198,96 @@ func (h *Handler) scalekitBase() string {
 		return strings.TrimRight(base, "/")
 	}
 	return "https://www.scalekit.com"
+}
+
+func (h *Handler) isScaleKitConfigured() bool {
+	return strings.TrimSpace(h.ScaleKitBaseURL) != "" || strings.TrimSpace(os.Getenv("SCALEKIT_BASE_URL")) != ""
+}
+
+func (h *Handler) exchangeScaleKitCodeToLocalToken(ctx context.Context, code string) (string, error) {
+	if !h.isScaleKitConfigured() {
+		return "", errors.New("scalekit not configured")
+	}
+
+	base := strings.TrimRight(h.scalekitBase(), "/")
+	redirectURI := "https://app.agenthook.store/auth/scalekit/callback"
+	client := &http.Client{
+		Timeout: 8 * time.Second,
+		Transport: &http.Transport{
+			DialContext: (&net.Dialer{Timeout: 5 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
+		},
+	}
+
+	form := url.Values{}
+	form.Set("grant_type", "authorization_code")
+	form.Set("code", code)
+	form.Set("redirect_uri", redirectURI)
+
+	tokenReq, err := http.NewRequestWithContext(ctx, http.MethodPost, base+"/oauth/token", strings.NewReader(form.Encode()))
+	if err != nil {
+		return "", err
+	}
+	tokenReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	tokenResp, err := client.Do(tokenReq)
+	if err != nil {
+		return "", err
+	}
+	defer tokenResp.Body.Close()
+
+	var tokenOut struct {
+		AccessToken string `json:"access_token"`
+	}
+	if err := json.NewDecoder(tokenResp.Body).Decode(&tokenOut); err != nil {
+		return "", err
+	}
+	if tokenResp.StatusCode >= 300 || strings.TrimSpace(tokenOut.AccessToken) == "" {
+		return "", errors.New("failed to exchange scalekit code")
+	}
+
+	userReq, err := http.NewRequestWithContext(ctx, http.MethodGet, base+"/userinfo", nil)
+	if err != nil {
+		return "", err
+	}
+	userReq.Header.Set("Authorization", "Bearer "+strings.TrimSpace(tokenOut.AccessToken))
+
+	userResp, err := client.Do(userReq)
+	if err != nil {
+		return "", err
+	}
+	defer userResp.Body.Close()
+	if userResp.StatusCode >= 300 {
+		return "", errors.New("failed to fetch scalekit userinfo")
+	}
+
+	var userOut map[string]interface{}
+	if err := json.NewDecoder(userResp.Body).Decode(&userOut); err != nil {
+		return "", err
+	}
+	email := strings.TrimSpace(strings.ToLower(asString(userOut["email"])))
+	if email == "" {
+		if profile, ok := userOut["profile"].(map[string]interface{}); ok {
+			email = strings.TrimSpace(strings.ToLower(asString(profile["email"])))
+		}
+	}
+	if email == "" {
+		return "", errors.New("missing email in scalekit userinfo")
+	}
+
+	_, localToken, err := h.Store.CreateAccount(ctx, email)
+	if err != nil {
+		return "", err
+	}
+	return localToken, nil
+}
+
+func asString(v interface{}) string {
+	switch t := v.(type) {
+	case string:
+		return t
+	default:
+		return ""
+	}
 }
 
 func (h *Handler) CreateType(w http.ResponseWriter, r *http.Request) {

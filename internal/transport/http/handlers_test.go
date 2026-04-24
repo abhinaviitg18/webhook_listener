@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -67,6 +68,90 @@ func TestScaleKitCallbackRedirectsToAppDomain(t *testing.T) {
 	}
 	if got := u.Query().Get("code"); got != "abc123" {
 		t.Fatalf("unexpected code value: %s", got)
+	}
+}
+
+func TestScaleKitCallbackExchangesCodeAndIssuesLocalToken(t *testing.T) {
+	mockScaleKit := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/oauth/token":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"access_token":"scale_access_123"}`))
+		case "/userinfo":
+			if got := r.Header.Get("Authorization"); got != "Bearer scale_access_123" {
+				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"email":"techhiring@agentmail.to"}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer mockScaleKit.Close()
+
+	st := store.NewMemoryStore()
+	h := &Handler{Store: st, ScaleKitBaseURL: mockScaleKit.URL}
+	req := httptest.NewRequest(http.MethodGet, "/auth/scalekit/callback?code=auth_code_123", nil)
+	rr := httptest.NewRecorder()
+
+	h.ScaleKitCallback(rr, req)
+	if rr.Code != http.StatusFound {
+		t.Fatalf("expected status 302, got %d", rr.Code)
+	}
+	loc := rr.Header().Get("Location")
+	u, err := url.Parse(loc)
+	if err != nil {
+		t.Fatalf("parse redirect url: %v", err)
+	}
+	if u.Host != "app.agenthook.store" {
+		t.Fatalf("unexpected redirect host: %s", u.Host)
+	}
+	localToken := u.Query().Get("code")
+	if localToken == "" {
+		t.Fatalf("expected local token in code query param")
+	}
+	if localToken == "auth_code_123" {
+		t.Fatalf("expected exchanged local token, got raw code")
+	}
+	acct, err := st.GetAccountByToken(context.Background(), localToken)
+	if err != nil {
+		t.Fatalf("expected local token to resolve account: %v", err)
+	}
+	if acct.OwnerEmail != "techhiring@agentmail.to" {
+		t.Fatalf("unexpected account email: %s", acct.OwnerEmail)
+	}
+}
+
+func TestScaleKitCallbackExchangeFailureReturnsAuthError(t *testing.T) {
+	mockScaleKit := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/oauth/token" {
+			http.Error(w, `{"error":"invalid_grant"}`, http.StatusBadRequest)
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer mockScaleKit.Close()
+
+	st := store.NewMemoryStore()
+	h := &Handler{Store: st, ScaleKitBaseURL: mockScaleKit.URL}
+	req := httptest.NewRequest(http.MethodGet, "/auth/scalekit/callback?code=bad_code", nil)
+	rr := httptest.NewRecorder()
+
+	h.ScaleKitCallback(rr, req)
+	if rr.Code != http.StatusFound {
+		t.Fatalf("expected status 302, got %d", rr.Code)
+	}
+	loc := rr.Header().Get("Location")
+	u, err := url.Parse(loc)
+	if err != nil {
+		t.Fatalf("parse redirect url: %v", err)
+	}
+	if u.Query().Get("auth_error") == "" {
+		t.Fatalf("expected auth_error query param on exchange failure")
+	}
+	if got := u.Query().Get("code"); got != "" {
+		t.Fatalf("expected no raw code passthrough on exchange failure, got %s", got)
 	}
 }
 
