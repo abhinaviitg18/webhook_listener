@@ -32,8 +32,8 @@ func TestScaleKitLoginRedirectIncludesFixedCallback(t *testing.T) {
 	if got := u.Query().Get("redirect_uri"); got != "https://app.agenthook.store/auth/scalekit/callback" {
 		t.Fatalf("unexpected redirect_uri: %s", got)
 	}
-	if got := u.Query().Get("prompt"); got != "login" {
-		t.Fatalf("unexpected prompt: %s", got)
+	if got := u.Query().Get("prompt"); got != "" {
+		t.Fatalf("prompt should be empty for hosted login flow, got %s", got)
 	}
 	if !strings.Contains(u.Path, "/a/auth/login") {
 		t.Fatalf("expected /a/auth/login endpoint, got %s", u.Path)

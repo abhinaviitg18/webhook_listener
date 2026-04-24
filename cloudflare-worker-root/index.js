@@ -6,7 +6,6 @@ export default {
 
     if (reqURL.pathname === '/auth/scalekit/login') {
       const loginURL = new URL(`${scalekitBase}/a/auth/login`)
-      loginURL.searchParams.set('prompt', 'login')
       loginURL.searchParams.set('redirect_uri', `${appRedirectBase}/auth/scalekit/callback`)
       return Response.redirect(loginURL.toString(), 302)
     }
