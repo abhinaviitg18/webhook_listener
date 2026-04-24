@@ -7,18 +7,42 @@ import { Plus, RefreshCw, Copy, Check, Brain, LogIn } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from './context/AuthContext';
 
+const VALID_TABS = new Set(['storyboard', 'skills', 'urls', 'settings']);
+
 function App() {
   const { user, token, loading, login } = useAuth();
-  const [activeTab, setActiveTab] = useState('storyboard');
+  const tabParam = new URLSearchParams(window.location.search).get('tab');
+  const [activeTab, setActiveTab] = useState(VALID_TABS.has(tabParam) ? tabParam : 'storyboard');
   const [copied, setCopied] = useState(false);
   const [events, setEvents] = useState([]);
+  const [listeners, setListeners] = useState([]);
   const [fetching, setFetching] = useState(false);
 
   useEffect(() => {
-    if (token && activeTab === 'storyboard') {
+    if (!token) return;
+    fetchListeners();
+    if (activeTab === 'storyboard') {
       fetchEvents();
     }
   }, [token, activeTab]);
+
+  const fetchListeners = async () => {
+    try {
+      const res = await fetch('/v1/listeners', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setListeners(data || []);
+      }
+    } catch (err) {
+      console.error('Failed to fetch listeners', err);
+    }
+  };
+
+  const ingressTemplate = listeners.length > 0
+    ? `agenthook.store/ingest/${user.slug}/${listeners[0].provider}/${listeners[0].listener_id}/[secret]`
+    : `agenthook.store/ingest/${user.slug}/[provider]/[listener_id]/[secret]`;
 
   const fetchEvents = async () => {
     setFetching(true);
@@ -38,7 +62,7 @@ function App() {
   };
 
   const copyUrl = () => {
-    const ingress = user ? `agenthook.store/url/${user.slug}/...` : 'agenthook.store/login';
+    const ingress = user ? ingressTemplate : 'agenthook.store/login';
     navigator.clipboard.writeText(ingress);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
@@ -92,12 +116,15 @@ function App() {
                     <RefreshCw
                       size={14}
                       className={`text-indigo-400 cursor-pointer ${fetching ? 'animate-spin' : ''}`}
-                      onClick={fetchEvents}
+                      onClick={() => {
+                        fetchEvents();
+                        fetchListeners();
+                      }}
                     />
                   </div>
                   <div className="flex items-center gap-2 bg-slate-950/50 px-3 py-2 rounded-lg border border-slate-800">
                     <code className="text-indigo-300 font-code-snippet text-xs truncate">
-                      agenthook.store/url/{user.slug}/[secret]
+                      {ingressTemplate}
                     </code>
                     <button onClick={copyUrl} className="ml-auto text-slate-500 hover:text-white">
                       {copied ? <Check size={14} className="text-green-500" /> : <Copy size={14} />}
@@ -159,14 +186,14 @@ function App() {
               <div className="bg-slate-900 p-6 rounded-full border border-slate-800">
                 <Brain size={48} className="text-primary" />
               </div>
-              <h2 className="text-xl text-white">AI Skills coming soon</h2>
+              <h2 className="text-xl text-white">AI Skills</h2>
               <p className="text-slate-500 text-sm max-w-[240px]">
-                Define complex logic using natural language instructions.
+                Skill policies are available through the API and appear here once configured.
               </p>
             </motion.div>
           )}
 
-          {activeTab === 'urls' && <UrlsTab token={token} user={user} />}
+          {activeTab === 'urls' && <UrlsTab listeners={listeners} user={user} />}
         </AnimatePresence>
       </main>
 
@@ -242,16 +269,15 @@ const BYOKSettings = ({ token }) => {
   );
 };
 
-const UrlsTab = ({ token, user }) => {
-  const [listeners, setListeners] = useState([]);
+const UrlsTab = ({ listeners, user }) => {
+  const [copiedListener, setCopiedListener] = useState('');
 
-  useEffect(() => {
-    fetch('/v1/listeners', {
-      headers: { 'Authorization': `Bearer ${token}` }
-    })
-      .then(res => res.json())
-      .then(data => setListeners(data || []));
-  }, [token]);
+  const copyListenerUrl = (listener) => {
+    const value = `agenthook.store/ingest/${user.slug}/${listener.provider}/${listener.listener_id}/[secret]`;
+    navigator.clipboard.writeText(value);
+    setCopiedListener(listener.listener_id);
+    setTimeout(() => setCopiedListener(''), 1200);
+  };
 
   return (
     <motion.div
@@ -263,12 +289,21 @@ const UrlsTab = ({ token, user }) => {
     >
       <h2 className="px-1 text-white">Webhook URLs</h2>
       {listeners.map((l, i) => (
-        <div key={i} className="glass-card border border-slate-800 rounded-2xl p-4 flex items-center justify-between">
-          <div>
-            <p className="text-white text-sm font-medium">{l.listener_id}</p>
-            <p className="text-slate-500 text-[10px] break-all">agenthook.store/url/{user.slug}/{l.type_key}/[secret]</p>
+        <div key={i} className="glass-card border border-slate-800 rounded-2xl p-4 flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-white text-sm font-medium truncate">{l.provider} · {l.listener_id}</p>
+            <p className="text-slate-500 text-[10px] break-all">agenthook.store/ingest/{user.slug}/{l.provider}/{l.listener_id}/[secret]</p>
           </div>
-          <StatusBadge status="ACTIVE" />
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              onClick={() => copyListenerUrl(l)}
+              className="text-slate-500 hover:text-white"
+              title="Copy ingress template"
+            >
+              {copiedListener === l.listener_id ? <Check size={14} className="text-green-500" /> : <Copy size={14} />}
+            </button>
+            <StatusBadge status="ACTIVE" />
+          </div>
         </div>
       ))}
       {listeners.length === 0 && <p className="text-slate-500 text-center py-10">No specific URLs configured yet.</p>}
