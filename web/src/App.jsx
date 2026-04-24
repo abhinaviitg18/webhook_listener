@@ -40,9 +40,10 @@ function App() {
     }
   };
 
+  const accountSlug = user?.slug || '[account]';
   const ingressTemplate = listeners.length > 0
-    ? `agenthook.store/ingest/${user.slug}/${listeners[0].provider}/${listeners[0].listener_id}/[secret]`
-    : `agenthook.store/ingest/${user.slug}/[provider]/[listener_id]/[secret]`;
+    ? `agenthook.store/ingest/${accountSlug}/${listeners[0].provider}/${listeners[0].listener_id}/[secret]`
+    : `agenthook.store/ingest/${accountSlug}/[provider]/[listener_id]/[secret]`;
 
   const fetchEvents = async () => {
     setFetching(true);
@@ -271,9 +272,10 @@ const BYOKSettings = ({ token }) => {
 
 const UrlsTab = ({ listeners, user }) => {
   const [copiedListener, setCopiedListener] = useState('');
+  const accountSlug = user?.slug || '[account]';
 
   const copyListenerUrl = (listener) => {
-    const value = `agenthook.store/ingest/${user.slug}/${listener.provider}/${listener.listener_id}/[secret]`;
+    const value = `agenthook.store/ingest/${accountSlug}/${listener.provider}/${listener.listener_id}/[secret]`;
     navigator.clipboard.writeText(value);
     setCopiedListener(listener.listener_id);
     setTimeout(() => setCopiedListener(''), 1200);
@@ -292,7 +294,7 @@ const UrlsTab = ({ listeners, user }) => {
         <div key={i} className="glass-card border border-slate-800 rounded-2xl p-4 flex items-center justify-between gap-3">
           <div className="min-w-0">
             <p className="text-white text-sm font-medium truncate">{l.provider} · {l.listener_id}</p>
-            <p className="text-slate-500 text-[10px] break-all">agenthook.store/ingest/{user.slug}/{l.provider}/{l.listener_id}/[secret]</p>
+            <p className="text-slate-500 text-[10px] break-all">agenthook.store/ingest/{accountSlug}/{l.provider}/{l.listener_id}/[secret]</p>
           </div>
           <div className="flex items-center gap-2 shrink-0">
             <button
