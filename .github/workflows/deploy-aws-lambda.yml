@@ -15,8 +15,8 @@ jobs:
       AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
       AWS_DEFAULT_REGION: us-east-1
       AWS_REGION: us-east-1
-      LAMBDA_FUNCTION_NAME: ${{ secrets.LAMBDA_FUNCTION_NAME }}
-      APP_ENV_SSM_PARAM: ${{ secrets.APP_ENV_SSM_PARAM }}
+      LAMBDA_FUNCTION_NAME: agenthook-app
+      APP_ENV_SSM_PARAM: /agenthook/prod/env
       LAMBDA_ORIGIN_SHARED_SECRET: ${{ secrets.LAMBDA_ORIGIN_SHARED_SECRET }}
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
     steps:
