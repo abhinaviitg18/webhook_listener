@@ -15,7 +15,9 @@ import (
 )
 
 type MySQLStore struct {
-	db *sql.DB
+	db                *sql.DB
+	hasRawPayloadJSON bool
+	hasProcessedText  bool
 }
 
 func NewMySQLStore(dsn string) (*MySQLStore, error) {
@@ -26,10 +28,24 @@ func NewMySQLStore(dsn string) (*MySQLStore, error) {
 	db.SetMaxOpenConns(50)
 	db.SetMaxIdleConns(20)
 	db.SetConnMaxLifetime(30 * time.Minute)
-	return &MySQLStore{db: db}, nil
+	s := &MySQLStore{db: db}
+	s.hasRawPayloadJSON = s.columnExists("webhook_events", "raw_payload_json")
+	s.hasProcessedText = s.columnExists("webhook_events", "processed_text")
+	return s, nil
 }
 
 func (s *MySQLStore) Ping(ctx context.Context) error { return s.db.PingContext(ctx) }
+
+func (s *MySQLStore) columnExists(tableName, columnName string) bool {
+	var exists int
+	err := s.db.QueryRow(`
+SELECT COUNT(*)
+FROM information_schema.columns
+WHERE table_schema = DATABASE() AND table_name = ? AND column_name = ?`,
+		tableName, columnName,
+	).Scan(&exists)
+	return err == nil && exists > 0
+}
 
 func (s *MySQLStore) CreateAccount(ctx context.Context, email string) (domain.Account, string, error) {
 	slug := slugFromEmail(email)
@@ -199,7 +215,13 @@ func (s *MySQLStore) ListForwardTargets(ctx context.Context, accountID string) (
 func (s *MySQLStore) CreateEvent(ctx context.Context, e domain.WebhookEvent) (domain.WebhookEvent, error) {
 	e.ID = uuid.NewString()
 	e.CreatedAt = time.Now().UTC()
-	_, err := s.db.ExecContext(ctx, `INSERT INTO webhook_events(id, account_id, type_id, secret_id, request_id, source_event_id, type_key, raw_payload_json, payload_json, processed_text, action_selected, status, created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?, ?,UTC_TIMESTAMP())`, e.ID, e.AccountID, e.TypeID, e.SecretID, e.RequestID, nullIfEmpty(e.SourceEventID), e.TypeKey, nullIfEmpty(e.RawPayloadJSON), e.PayloadJSON, nullIfEmpty(e.ProcessedText), e.ActionSelected, e.Status)
+	query := `INSERT INTO webhook_events(id, account_id, type_id, secret_id, request_id, source_event_id, type_key, payload_json, action_selected, status, created_at) VALUES(?,?,?,?,?,?,?,?,?, ?,UTC_TIMESTAMP())`
+	args := []interface{}{e.ID, e.AccountID, e.TypeID, e.SecretID, e.RequestID, nullIfEmpty(e.SourceEventID), e.TypeKey, e.PayloadJSON, e.ActionSelected, e.Status}
+	if s.hasRawPayloadJSON && s.hasProcessedText {
+		query = `INSERT INTO webhook_events(id, account_id, type_id, secret_id, request_id, source_event_id, type_key, raw_payload_json, payload_json, processed_text, action_selected, status, created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?, ?,UTC_TIMESTAMP())`
+		args = []interface{}{e.ID, e.AccountID, e.TypeID, e.SecretID, e.RequestID, nullIfEmpty(e.SourceEventID), e.TypeKey, nullIfEmpty(e.RawPayloadJSON), e.PayloadJSON, nullIfEmpty(e.ProcessedText), e.ActionSelected, e.Status}
+	}
+	_, err := s.db.ExecContext(ctx, query, args...)
 	if err != nil {
 		return domain.WebhookEvent{}, err
 	}
@@ -215,7 +237,11 @@ func (s *MySQLStore) ListEvents(ctx context.Context, accountID string, limit int
 	if limit <= 0 {
 		limit = 50
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT id, account_id, type_id, secret_id, request_id, COALESCE(source_event_id,''), type_key, COALESCE(raw_payload_json,''), payload_json, COALESCE(processed_text,''), action_selected, status, created_at FROM webhook_events WHERE account_id=? ORDER BY created_at DESC LIMIT ?`, accountID, limit)
+	query := `SELECT id, account_id, type_id, secret_id, request_id, COALESCE(source_event_id,''), type_key, '', payload_json, '', action_selected, status, created_at FROM webhook_events WHERE account_id=? ORDER BY created_at DESC LIMIT ?`
+	if s.hasRawPayloadJSON && s.hasProcessedText {
+		query = `SELECT id, account_id, type_id, secret_id, request_id, COALESCE(source_event_id,''), type_key, COALESCE(raw_payload_json,''), payload_json, COALESCE(processed_text,''), action_selected, status, created_at FROM webhook_events WHERE account_id=? ORDER BY created_at DESC LIMIT ?`
+	}
+	rows, err := s.db.QueryContext(ctx, query, accountID, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -236,7 +262,11 @@ func (s *MySQLStore) FindEventBySourceEventID(ctx context.Context, accountID, so
 		return domain.WebhookEvent{}, errors.New("source event id required")
 	}
 	var e domain.WebhookEvent
-	err := s.db.QueryRowContext(ctx, `SELECT id, account_id, type_id, secret_id, request_id, COALESCE(source_event_id,''), type_key, COALESCE(raw_payload_json,''), payload_json, COALESCE(processed_text,''), action_selected, status, created_at FROM webhook_events WHERE account_id=? AND source_event_id=? LIMIT 1`, accountID, sourceEventID).
+	query := `SELECT id, account_id, type_id, secret_id, request_id, COALESCE(source_event_id,''), type_key, '', payload_json, '', action_selected, status, created_at FROM webhook_events WHERE account_id=? AND source_event_id=? LIMIT 1`
+	if s.hasRawPayloadJSON && s.hasProcessedText {
+		query = `SELECT id, account_id, type_id, secret_id, request_id, COALESCE(source_event_id,''), type_key, COALESCE(raw_payload_json,''), payload_json, COALESCE(processed_text,''), action_selected, status, created_at FROM webhook_events WHERE account_id=? AND source_event_id=? LIMIT 1`
+	}
+	err := s.db.QueryRowContext(ctx, query, accountID, sourceEventID).
 		Scan(&e.ID, &e.AccountID, &e.TypeID, &e.SecretID, &e.RequestID, &e.SourceEventID, &e.TypeKey, &e.RawPayloadJSON, &e.PayloadJSON, &e.ProcessedText, &e.ActionSelected, &e.Status, &e.CreatedAt)
 	if err != nil {
 		return domain.WebhookEvent{}, err
