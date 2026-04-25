@@ -9,14 +9,200 @@
   </head>
   <body>
     <main class="page">
-      <section class="hero">
-        <p class="eyebrow">AgentHook</p>
-        <h1>Secure webhook automation, with ScaleKit sign-in</h1>
-        <p class="lead">
-          We are building a clean webhook control plane for teams. Sign in with ScaleKit to continue in the app experience and manage your webhook workflows safely.
-        </p>
-        <a class="signin" href="/auth/scalekit/login">Sign in with ScaleKit</a>
+      <section class="shell">
+        <section class="hero" id="marketing-view">
+          <p class="eyebrow">AgentHook</p>
+          <h1>Secure webhook automation, with ScaleKit sign-in</h1>
+          <p class="lead">
+            We are building a clean webhook control plane for teams. Sign in with ScaleKit to continue in the app
+            experience and manage your webhook workflows safely.
+          </p>
+          <p class="error-banner" id="auth-error" hidden></p>
+          <div class="hero-actions">
+            <a class="signin" href="/auth/scalekit/login">Sign in with ScaleKit</a>
+          </div>
+        </section>
+
+        <section class="dashboard" id="dashboard-view" hidden>
+          <div class="dashboard-header">
+            <div>
+              <p class="eyebrow">AgentHook</p>
+              <h1 id="welcome-title">Dashboard</h1>
+              <p class="lead" id="welcome-subtitle">Your webhook control plane is ready.</p>
+            </div>
+            <a class="secondary-action" href="/auth/logout">Sign out</a>
+          </div>
+
+          <div class="metrics">
+            <article class="metric-card">
+              <span class="metric-label">Account</span>
+              <strong class="metric-value" id="metric-account">-</strong>
+            </article>
+            <article class="metric-card">
+              <span class="metric-label">Active Hooks</span>
+              <strong class="metric-value" id="metric-listeners">0</strong>
+            </article>
+            <article class="metric-card">
+              <span class="metric-label">Recent Events</span>
+              <strong class="metric-value" id="metric-events">0</strong>
+            </article>
+          </div>
+
+          <section class="panel">
+            <div class="panel-head">
+              <h2>Ingress URL</h2>
+              <button class="copy-button" id="copy-ingress" type="button">Copy</button>
+            </div>
+            <code class="code-block" id="ingress-url">Loading...</code>
+          </section>
+
+          <section class="panel">
+            <div class="panel-head">
+              <h2>Configured Hooks</h2>
+            </div>
+            <ul class="list" id="listeners-list">
+              <li class="empty">No listener configuration found yet.</li>
+            </ul>
+          </section>
+
+          <section class="panel">
+            <div class="panel-head">
+              <h2>Recent Events</h2>
+            </div>
+            <ul class="list" id="events-list">
+              <li class="empty">No events detected yet.</li>
+            </ul>
+          </section>
+        </section>
       </section>
     </main>
+
+    <script>
+      const appHost = "app.agenthook.store";
+      const marketingView = document.getElementById("marketing-view");
+      const dashboardView = document.getElementById("dashboard-view");
+      const authError = document.getElementById("auth-error");
+
+      function showMarketing(message) {
+        dashboardView.hidden = true;
+        marketingView.hidden = false;
+        if (message) {
+          authError.hidden = false;
+          authError.textContent = message;
+        }
+      }
+
+      function showDashboard() {
+        marketingView.hidden = true;
+        dashboardView.hidden = false;
+        authError.hidden = true;
+      }
+
+      function ingressTemplate(user, listeners) {
+        if (!user) return "agenthook.store/ingest/[account]/[provider]/[listener_id]/[secret]";
+        if (listeners.length > 0 && listeners[0].webhook_url_template) return listeners[0].webhook_url_template;
+        return `agenthook.store/ingest/${user.slug}/[provider]/[listener_id]/[secret]`;
+      }
+
+      function renderListeners(listeners) {
+        const root = document.getElementById("listeners-list");
+        if (!listeners.length) {
+          root.innerHTML = '<li class="empty">No listener configuration found yet.</li>';
+          return;
+        }
+        root.innerHTML = listeners
+          .map((listener) => {
+            const label = listener.provider || listener.name || listener.listener_id || "listener";
+            const url = listener.webhook_url_template || "";
+            return `<li><strong>${label}</strong><span>${url || "Webhook template available after secret creation."}</span></li>`;
+          })
+          .join("");
+      }
+
+      function renderEvents(events) {
+        const root = document.getElementById("events-list");
+        if (!events.length) {
+          root.innerHTML = '<li class="empty">No events detected yet.</li>';
+          return;
+        }
+        root.innerHTML = events
+          .slice(0, 10)
+          .map((event) => {
+            const when = event.created_at ? new Date(event.created_at).toLocaleString() : "Unknown time";
+            const label = event.type_key || event.status || "webhook";
+            const detail = event.processed_text || event.action_selected || "Received payload";
+            return `<li><strong>${label}</strong><span>${detail}</span><small>${when}</small></li>`;
+          })
+          .join("");
+      }
+
+      async function fetchJSON(path) {
+        const response = await fetch(path, {
+          headers: { Accept: "application/json" },
+          credentials: "include",
+        });
+        const text = await response.text();
+        let data = null;
+        try {
+          data = text ? JSON.parse(text) : null;
+        } catch (_) {
+          data = null;
+        }
+        return { ok: response.ok, status: response.status, data };
+      }
+
+      async function bootstrapAppRoot() {
+        const params = new URLSearchParams(window.location.search);
+        const error = params.get("auth_error");
+        if (error) {
+          showMarketing(`Authentication failed: ${error}`);
+          window.history.replaceState({}, document.title, window.location.pathname);
+          return;
+        }
+
+        const me = await fetchJSON("/api/me");
+        if (!me.ok || !me.data) {
+          showMarketing("");
+          return;
+        }
+
+        const [listenersResp, eventsResp] = await Promise.all([
+          fetchJSON("/v1/listeners"),
+          fetchJSON("/api/events"),
+        ]);
+
+        const listeners = Array.isArray(listenersResp.data) ? listenersResp.data : [];
+        const events = Array.isArray(eventsResp.data) ? eventsResp.data : [];
+        const user = me.data;
+
+        document.getElementById("welcome-title").textContent = `Welcome back, ${user.slug || "there"}`;
+        document.getElementById("welcome-subtitle").textContent = user.owner_email || "Your webhook control plane is ready.";
+        document.getElementById("metric-account").textContent = user.slug || "-";
+        document.getElementById("metric-listeners").textContent = String(listeners.length);
+        document.getElementById("metric-events").textContent = String(events.length);
+
+        const ingress = ingressTemplate(user, listeners);
+        const ingressNode = document.getElementById("ingress-url");
+        ingressNode.textContent = ingress;
+
+        document.getElementById("copy-ingress").addEventListener("click", async () => {
+          try {
+            await navigator.clipboard.writeText(ingress);
+            document.getElementById("copy-ingress").textContent = "Copied";
+            setTimeout(() => {
+              document.getElementById("copy-ingress").textContent = "Copy";
+            }, 1600);
+          } catch (_) {}
+        });
+
+        renderListeners(listeners);
+        renderEvents(events);
+        showDashboard();
+      }
+
+      if (window.location.hostname === appHost) {
+        bootstrapAppRoot().catch(() => showMarketing("Unable to load the dashboard right now."));
+      }
+    </script>
   </body>
 </html>
