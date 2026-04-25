@@ -53,7 +53,6 @@ lambda_update_configuration_with_retry() {
       --region "$AWS_REGION" \
       --function-name "$LAMBDA_FUNCTION_NAME" \
       --runtime provided.al2023 \
-      --architectures "$LAMBDA_ARCHITECTURE" \
       --handler bootstrap \
       --memory-size "$LAMBDA_MEMORY_SIZE" \
       --timeout "$LAMBDA_TIMEOUT" \
