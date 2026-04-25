@@ -20,6 +20,63 @@ TRUST_POLICY_PATH="${TRUST_POLICY_PATH:-$BUILD_DIR/lambda-trust-policy.json}"
 mkdir -p "$BUILD_DIR"
 rm -f "$BUILD_DIR/bootstrap" "$ZIP_PATH"
 
+lambda_wait_until_idle() {
+  local attempts="${1:-20}"
+  local sleep_sec="${2:-10}"
+  local state last_status
+
+  for ((i=1; i<=attempts; i++)); do
+    state="$(aws lambda get-function-configuration \
+      --region "$AWS_REGION" \
+      --function-name "$LAMBDA_FUNCTION_NAME" \
+      --query 'State' \
+      --output text 2>/dev/null || true)"
+    last_status="$(aws lambda get-function-configuration \
+      --region "$AWS_REGION" \
+      --function-name "$LAMBDA_FUNCTION_NAME" \
+      --query 'LastUpdateStatus' \
+      --output text 2>/dev/null || true)"
+
+    if [[ "$state" == "Active" && "$last_status" != "InProgress" ]]; then
+      return 0
+    fi
+
+    sleep "$sleep_sec"
+  done
+
+  return 1
+}
+
+lambda_update_configuration_with_retry() {
+  local attempts="${1:-12}"
+  local sleep_sec="${2:-10}"
+  local output
+
+  for ((i=1; i<=attempts; i++)); do
+    if output="$(aws lambda update-function-configuration \
+      --region "$AWS_REGION" \
+      --function-name "$LAMBDA_FUNCTION_NAME" \
+      --runtime provided.al2023 \
+      --handler bootstrap \
+      --memory-size "$LAMBDA_MEMORY_SIZE" \
+      --timeout "$LAMBDA_TIMEOUT" \
+      --environment "Variables={APP_ENV_SSM_PARAM=$APP_ENV_SSM_PARAM,APP_ENV_INLINE_B64=$APP_ENV_INLINE_B64,LAMBDA_ORIGIN_SHARED_SECRET=$LAMBDA_ORIGIN_SHARED_SECRET,APP_RUNTIME_ENV=$LAMBDA_ENVIRONMENT}" 2>&1)"; then
+      return 0
+    fi
+
+    if [[ "$output" == *"ResourceConflictException"* ]]; then
+      sleep "$sleep_sec"
+      continue
+    fi
+
+    echo "$output" >&2
+    return 1
+  done
+
+  echo "$output" >&2
+  return 1
+}
+
 resolve_lambda_role() {
   if [[ -n "$LAMBDA_ROLE_ARN" ]]; then
     return
@@ -145,6 +202,8 @@ if [[ "$function_exists" -eq 0 ]]; then
     --zip-file "fileb://$ZIP_PATH" \
     --environment "Variables={APP_ENV_SSM_PARAM=$APP_ENV_SSM_PARAM,APP_ENV_INLINE_B64=$APP_ENV_INLINE_B64,LAMBDA_ORIGIN_SHARED_SECRET=$LAMBDA_ORIGIN_SHARED_SECRET,APP_RUNTIME_ENV=$LAMBDA_ENVIRONMENT}"
 else
+  lambda_wait_until_idle 30 10 || true
+
   echo "Updating lambda code..."
   aws lambda update-function-code \
     --region "$AWS_REGION" \
@@ -152,14 +211,7 @@ else
     --zip-file "fileb://$ZIP_PATH" >/dev/null
 
   echo "Updating lambda configuration..."
-  aws lambda update-function-configuration \
-    --region "$AWS_REGION" \
-    --function-name "$LAMBDA_FUNCTION_NAME" \
-    --runtime provided.al2023 \
-    --handler bootstrap \
-    --memory-size "$LAMBDA_MEMORY_SIZE" \
-    --timeout "$LAMBDA_TIMEOUT" \
-    --environment "Variables={APP_ENV_SSM_PARAM=$APP_ENV_SSM_PARAM,APP_ENV_INLINE_B64=$APP_ENV_INLINE_B64,LAMBDA_ORIGIN_SHARED_SECRET=$LAMBDA_ORIGIN_SHARED_SECRET,APP_RUNTIME_ENV=$LAMBDA_ENVIRONMENT}" >/dev/null
+  lambda_update_configuration_with_retry 18 10
 fi
 
 echo "Waiting for function to become active..."
