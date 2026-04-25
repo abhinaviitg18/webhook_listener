@@ -8,7 +8,7 @@ LAMBDA_ROLE_NAME="${LAMBDA_ROLE_NAME:-${LAMBDA_FUNCTION_NAME}-execution-role}"
 LAMBDA_SOURCE_FUNCTION_NAME="${LAMBDA_SOURCE_FUNCTION_NAME:-processor}"
 APP_ENV_SSM_PARAM="${APP_ENV_SSM_PARAM:-/agenthook/prod/env}"
 APP_ENV_INLINE_B64="${APP_ENV_INLINE_B64:-}"
-LAMBDA_ARCHITECTURE="${LAMBDA_ARCHITECTURE:-arm64}"
+LAMBDA_ARCHITECTURE="${LAMBDA_ARCHITECTURE:-x86_64}"
 LAMBDA_MEMORY_SIZE="${LAMBDA_MEMORY_SIZE:-1024}"
 LAMBDA_TIMEOUT="${LAMBDA_TIMEOUT:-30}"
 LAMBDA_ENVIRONMENT="${LAMBDA_ENVIRONMENT:-production}"
@@ -107,7 +107,11 @@ go test ./cmd/... ./internal/...
 
 echo "Building lambda binary..."
 export CGO_ENABLED=0
-GOOS=linux GOARCH="${LAMBDA_ARCHITECTURE/arm64/arm64}" go build -tags lambda.norpc -o "$BUILD_DIR/bootstrap" ./cmd/lambda
+GOARCH_VALUE="amd64"
+if [[ "$LAMBDA_ARCHITECTURE" == "arm64" ]]; then
+  GOARCH_VALUE="arm64"
+fi
+GOOS=linux GOARCH="$GOARCH_VALUE" go build -tags lambda.norpc -o "$BUILD_DIR/bootstrap" ./cmd/lambda
 
 echo "Packaging lambda..."
 (cd "$BUILD_DIR" && zip -q -j "$ZIP_PATH" bootstrap)
@@ -135,7 +139,6 @@ if [[ "$function_exists" -eq 0 ]]; then
     --function-name "$LAMBDA_FUNCTION_NAME" \
     --runtime provided.al2023 \
     --handler bootstrap \
-    --architectures "$LAMBDA_ARCHITECTURE" \
     --memory-size "$LAMBDA_MEMORY_SIZE" \
     --timeout "$LAMBDA_TIMEOUT" \
     --role "$LAMBDA_ROLE_ARN" \
@@ -154,7 +157,6 @@ else
     --function-name "$LAMBDA_FUNCTION_NAME" \
     --runtime provided.al2023 \
     --handler bootstrap \
-    --architectures "$LAMBDA_ARCHITECTURE" \
     --memory-size "$LAMBDA_MEMORY_SIZE" \
     --timeout "$LAMBDA_TIMEOUT" \
     --environment "Variables={APP_ENV_SSM_PARAM=$APP_ENV_SSM_PARAM,APP_ENV_INLINE_B64=$APP_ENV_INLINE_B64,LAMBDA_ORIGIN_SHARED_SECRET=$LAMBDA_ORIGIN_SHARED_SECRET,APP_RUNTIME_ENV=$LAMBDA_ENVIRONMENT}" >/dev/null
