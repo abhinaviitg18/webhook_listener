@@ -1,74 +1,202 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { TopAppBar } from './components/TopAppBar';
 import { BottomNavBar } from './components/BottomNavBar';
 import { Metrics } from './components/Metrics';
 import { StoryboardCard } from './components/StoryboardCard';
-import { Plus, RefreshCw, Copy, Check, Brain, LogIn } from 'lucide-react';
+import {
+  Plus,
+  RefreshCw,
+  Copy,
+  Check,
+  Brain,
+  LogIn,
+  Link2,
+  KeyRound,
+  Wand2,
+  TestTube2,
+  Sparkles,
+} from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from './context/AuthContext';
 
 const VALID_TABS = new Set(['storyboard', 'skills', 'urls', 'settings']);
 
+const PROVIDER_OPTIONS = [
+  'github',
+  'stripe',
+  'slack',
+  'resend',
+  'shopify',
+  'openai',
+  'generic-json',
+];
+
+const MEMORY_WRITE_MODES = ['update_or_insert', 'insert_only', 'disabled'];
+
+const FORCED_ACTION_OPTIONS = ['store_mysql', 'forward_http', 'log_only'];
+
+function safeJSONParse(text, fallback = null) {
+  try {
+    return text ? JSON.parse(text) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+async function apiRequest(path, options = {}) {
+  const response = await fetch(path, {
+    credentials: 'include',
+    headers: {
+      Accept: 'application/json',
+      ...(options.body ? { 'Content-Type': 'application/json' } : {}),
+      ...(options.headers || {}),
+    },
+    ...options,
+  });
+
+  const text = await response.text();
+  const data = safeJSONParse(text, null);
+  if (!response.ok) {
+    const errorMessage = data?.error || text || `Request failed with status ${response.status}`;
+    throw new Error(errorMessage);
+  }
+  return data;
+}
+
+function prettyJSON(value) {
+  return JSON.stringify(value, null, 2);
+}
+
+function inferTypeKey(listener) {
+  if (!listener) return '';
+  return listener.type_key || '';
+}
+
+function listenerIngressTemplate(listener, accountSlug) {
+  if (!listener) return `agenthook.store/ingest/${accountSlug}/[provider]/[listener_id]/[secret]`;
+  return listener.webhook_url_template || `agenthook.store/ingest/${accountSlug}/${listener.provider}/${listener.listener_id}/[secret]`;
+}
+
+function Panel({ title, subtitle, action, children }) {
+  return (
+    <section className="glass-card border border-slate-800 rounded-2xl p-4 space-y-4">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h3 className="text-white font-semibold">{title}</h3>
+          {subtitle && <p className="text-slate-500 text-xs mt-1">{subtitle}</p>}
+        </div>
+        {action}
+      </div>
+      {children}
+    </section>
+  );
+}
+
+function FormField({ label, children, hint }) {
+  return (
+    <label className="space-y-1 block">
+      <span className="text-[10px] text-slate-500 font-label-caps">{label}</span>
+      {children}
+      {hint && <span className="block text-[11px] text-slate-500">{hint}</span>}
+    </label>
+  );
+}
+
+function TextInput(props) {
+  return (
+    <input
+      {...props}
+      className={`w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-primary ${props.className || ''}`}
+    />
+  );
+}
+
+function TextArea(props) {
+  return (
+    <textarea
+      {...props}
+      className={`w-full min-h-28 bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-primary ${props.className || ''}`}
+    />
+  );
+}
+
+function Select(props) {
+  return (
+    <select
+      {...props}
+      className={`w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-primary ${props.className || ''}`}
+    />
+  );
+}
+
+function InlineNotice({ tone = 'info', children }) {
+  const classes = {
+    info: 'bg-slate-900/70 border-slate-800 text-slate-300',
+    success: 'bg-green-500/10 border-green-500/20 text-green-300',
+    error: 'bg-red-500/10 border-red-500/20 text-red-300',
+  };
+  return (
+    <div className={`rounded-xl border px-3 py-2 text-xs ${classes[tone] || classes.info}`}>
+      {children}
+    </div>
+  );
+}
+
+function CopyButton({ value, copiedKey, setCopiedKey, copyKey, title = 'Copy' }) {
+  return (
+    <button
+      onClick={async () => {
+        await navigator.clipboard.writeText(value);
+        setCopiedKey(copyKey);
+        setTimeout(() => setCopiedKey(''), 1200);
+      }}
+      className="text-slate-500 hover:text-white"
+      title={title}
+    >
+      {copiedKey === copyKey ? <Check size={14} className="text-green-500" /> : <Copy size={14} />}
+    </button>
+  );
+}
+
 function App() {
   const { user, isAuthenticated, loading, error, login, logout } = useAuth();
   const tabParam = new URLSearchParams(window.location.search).get('tab');
   const [activeTab, setActiveTab] = useState(VALID_TABS.has(tabParam) ? tabParam : 'storyboard');
-  const [copied, setCopied] = useState(false);
+  const [copied, setCopied] = useState('');
   const [events, setEvents] = useState([]);
   const [listeners, setListeners] = useState([]);
   const [fetching, setFetching] = useState(false);
 
-  useEffect(() => {
-    if (!isAuthenticated) return;
-    fetchListeners();
-    if (activeTab === 'storyboard') {
-      fetchEvents();
-    }
-  }, [isAuthenticated, activeTab]);
-
-  const fetchListeners = async () => {
-    try {
-      const res = await fetch('/v1/listeners', {
-        headers: { 'Accept': 'application/json' },
-        credentials: 'include'
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setListeners(data || []);
-      }
-    } catch (err) {
-      console.error('Failed to fetch listeners', err);
-    }
-  };
-
   const accountSlug = user?.slug || '[account]';
   const ingressTemplate = listeners.length > 0
-    ? (listeners[0].webhook_url_template || `agenthook.store/ingest/${accountSlug}/${listeners[0].provider}/${listeners[0].listener_id}/[secret]`)
+    ? listenerIngressTemplate(listeners[0], accountSlug)
     : `agenthook.store/ingest/${accountSlug}/[provider]/[listener_id]/[secret]`;
+
+  const fetchListeners = async () => {
+    const data = await apiRequest('/v1/listeners');
+    setListeners(Array.isArray(data) ? data : []);
+  };
 
   const fetchEvents = async () => {
     setFetching(true);
     try {
-      const res = await fetch('/api/events', {
-        headers: { 'Accept': 'application/json' },
-        credentials: 'include'
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setEvents(data || []);
-      }
-    } catch (err) {
-      console.error('Failed to fetch events', err);
+      const data = await apiRequest('/api/events');
+      setEvents(Array.isArray(data) ? data : []);
     } finally {
       setFetching(false);
     }
   };
 
-  const copyUrl = () => {
-    const ingress = user ? ingressTemplate : 'agenthook.store/login';
-    navigator.clipboard.writeText(ingress);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    fetchListeners().catch((err) => console.error('Failed to fetch listeners', err));
+    if (activeTab === 'storyboard') {
+      fetchEvents().catch((err) => console.error('Failed to fetch events', err));
+    }
+  }, [isAuthenticated, activeTab]);
+
+  const refreshAll = async () => {
+    await Promise.allSettled([fetchListeners(), fetchEvents()]);
   };
 
   if (loading) {
@@ -124,19 +252,17 @@ function App() {
                     <RefreshCw
                       size={14}
                       className={`text-indigo-400 cursor-pointer ${fetching ? 'animate-spin' : ''}`}
-                      onClick={() => {
-                        fetchEvents();
-                        fetchListeners();
-                      }}
+                      onClick={() => refreshAll().catch((err) => console.error(err))}
                     />
                   </div>
                   <div className="flex items-center gap-2 bg-slate-950/50 px-3 py-2 rounded-lg border border-slate-800">
-                    <code className="text-indigo-300 font-code-snippet text-xs truncate">
-                      {ingressTemplate}
-                    </code>
-                    <button onClick={copyUrl} className="ml-auto text-slate-500 hover:text-white">
-                      {copied ? <Check size={14} className="text-green-500" /> : <Copy size={14} />}
-                    </button>
+                    <code className="text-indigo-300 font-code-snippet text-xs truncate">{ingressTemplate}</code>
+                    <CopyButton
+                      value={ingressTemplate}
+                      copiedKey={copied}
+                      setCopiedKey={setCopied}
+                      copyKey="storyboard-ingress"
+                    />
                   </div>
                 </div>
               </section>
@@ -160,20 +286,53 @@ function App() {
                     <div className="inline-flex p-4 bg-slate-900 rounded-full border border-slate-800 text-slate-500">
                       <RefreshCw size={32} />
                     </div>
-                    <p className="text-slate-400 text-sm">No events detected yet.<br />Send a payload to your ingress URL.</p>
+                    <p className="text-slate-400 text-sm">
+                      No events detected yet.
+                      <br />
+                      Send a payload to your ingress URL.
+                    </p>
                   </div>
                 )}
 
                 {events.map((event, i) => (
-                  <StoryboardCard key={event.id || i} event={{
-                    status: event.status,
-                    time: new Date(event.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-                    story: event.processed_text || `Received ${event.type_key || 'webhook'} payload.`,
-                    actions: event.action_selected ? [event.action_selected] : ['LOGGED']
-                  }} />
+                  <StoryboardCard
+                    key={event.id || i}
+                    event={{
+                      status: event.status,
+                      time: new Date(event.created_at).toLocaleTimeString([], {
+                        hour: '2-digit',
+                        minute: '2-digit',
+                        second: '2-digit',
+                      }),
+                      story: event.processed_text || `Received ${event.type_key || 'webhook'} payload.`,
+                      actions: event.action_selected ? [event.action_selected] : ['LOGGED'],
+                    }}
+                  />
                 ))}
               </section>
             </motion.div>
+          )}
+
+          {activeTab === 'urls' && (
+            <UrlsTab
+              key="urls"
+              listeners={listeners}
+              user={user}
+              onRefresh={refreshAll}
+              copied={copied}
+              setCopied={setCopied}
+            />
+          )}
+
+          {activeTab === 'skills' && (
+            <SkillsTab
+              key="skills"
+              listeners={listeners}
+              user={user}
+              copied={copied}
+              setCopied={setCopied}
+              onRefreshListeners={fetchListeners}
+            />
           )}
 
           {activeTab === 'settings' && (
@@ -188,30 +347,14 @@ function App() {
               <BYOKSettings />
             </motion.div>
           )}
-
-          {activeTab === 'skills' && (
-            <motion.div
-              key="skills"
-              initial={{ opacity: 0, x: -20 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: 20 }}
-              className="flex flex-col items-center justify-center py-20 text-center space-y-4"
-            >
-              <div className="bg-slate-900 p-6 rounded-full border border-slate-800">
-                <Brain size={48} className="text-primary" />
-              </div>
-              <h2 className="text-xl text-white">AI Skills</h2>
-              <p className="text-slate-500 text-sm max-w-[240px]">
-                Skill policies are available through the API and appear here once configured.
-              </p>
-            </motion.div>
-          )}
-
-          {activeTab === 'urls' && <UrlsTab listeners={listeners} user={user} />}
         </AnimatePresence>
       </main>
 
-      <button className="fixed right-6 bottom-24 w-14 h-14 bg-primary-container text-on-primary-container rounded-full shadow-2xl flex items-center justify-center active:scale-90 transition-transform duration-150 z-40 border border-white/10">
+      <button
+        onClick={() => setActiveTab(activeTab === 'urls' ? 'skills' : 'urls')}
+        className="fixed right-6 bottom-24 w-14 h-14 bg-primary-container text-on-primary-container rounded-full shadow-2xl flex items-center justify-center active:scale-90 transition-transform duration-150 z-40 border border-white/10"
+        title={activeTab === 'urls' ? 'Open skills tools' : 'Open URL tools'}
+      >
         <Plus size={32} />
       </button>
 
@@ -220,57 +363,50 @@ function App() {
   );
 }
 
-// Sub-components moved for clarity or can stay here
 const BYOKSettings = () => {
   const [provider, setProvider] = useState('groq');
   const [apiKey, setApiKey] = useState('');
   const [saving, setSaving] = useState(false);
+  const [notice, setNotice] = useState('');
 
   const save = async () => {
     setSaving(true);
+    setNotice('');
     try {
-      await fetch('/v1/byok/providers', {
+      await apiRequest('/v1/byok/providers', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        credentials: 'include',
-        body: JSON.stringify({ provider, api_key: apiKey, is_default: true })
+        body: JSON.stringify({ provider, api_key: apiKey, is_default: true }),
       });
-      alert('Config saved!');
+      setNotice('Provider config saved.');
     } catch (err) {
-      console.error(err);
+      setNotice(err.message);
     } finally {
       setSaving(false);
     }
   };
 
   return (
-    <div className="glass-card border border-slate-800 rounded-2xl p-4 space-y-4">
-      <h3 className="font-h2 text-sm text-slate-400">LLM PROVIDER (BYOK)</h3>
+    <Panel
+      title="LLM Provider (BYOK)"
+      subtitle="Bring your own provider credentials for model-driven classification and response flows."
+    >
       <div className="space-y-3">
-        <div className="space-y-1">
-          <label className="text-[10px] text-slate-500 font-label-caps">PROVIDER</label>
-          <select
-            value={provider}
-            onChange={(e) => setProvider(e.target.value)}
-            className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-primary"
-          >
+        <FormField label="Provider">
+          <Select value={provider} onChange={(e) => setProvider(e.target.value)}>
             <option value="groq">Groq (Recommended)</option>
             <option value="openai">OpenAI</option>
             <option value="anthropic">Anthropic</option>
-          </select>
-        </div>
-        <div className="space-y-1">
-          <label className="text-[10px] text-slate-500 font-label-caps">API KEY</label>
-          <input
+          </Select>
+        </FormField>
+        <FormField label="API Key">
+          <TextInput
             type="password"
             value={apiKey}
             onChange={(e) => setApiKey(e.target.value)}
-            placeholder="sk-················"
-            className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-primary"
+            placeholder="sk-..."
           />
-        </div>
+        </FormField>
+        {notice && <InlineNotice tone={notice.includes('saved') ? 'success' : 'error'}>{notice}</InlineNotice>}
         <button
           onClick={save}
           disabled={saving}
@@ -279,49 +415,590 @@ const BYOKSettings = () => {
           {saving ? 'SAVING...' : 'SAVE CONFIG'}
         </button>
       </div>
-    </div>
+    </Panel>
   );
 };
 
-const UrlsTab = ({ listeners, user }) => {
-  const [copiedListener, setCopiedListener] = useState('');
+const UrlsTab = ({ listeners, user, onRefresh, copied, setCopied }) => {
+  const [provider, setProvider] = useState('github');
+  const [listenerID, setListenerID] = useState('');
+  const [deploymentMode, setDeploymentMode] = useState('multitenant');
+  const [plainTextAction, setPlainTextAction] = useState('store_mysql');
+  const [useLLMFallback, setUseLLMFallback] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState('');
+  const [apiToken, setApiToken] = useState('');
+  const [tokenBusy, setTokenBusy] = useState(false);
+  const [secretMap, setSecretMap] = useState({});
+
   const accountSlug = user?.slug || '[account]';
 
-  const copyListenerUrl = (listener) => {
-    const value = listener.webhook_url_template || `agenthook.store/ingest/${accountSlug}/${listener.provider}/${listener.listener_id}/[secret]`;
-    navigator.clipboard.writeText(value);
-    setCopiedListener(listener.listener_id);
-    setTimeout(() => setCopiedListener(''), 1200);
+  const createListener = async () => {
+    setSubmitting(true);
+    setError('');
+    try {
+      const created = await apiRequest('/v1/listeners', {
+        method: 'POST',
+        body: JSON.stringify({
+          provider,
+          listener_id: listenerID,
+          deployment_mode: deploymentMode,
+          plain_text_action: plainTextAction,
+          use_llm_fallback: useLLMFallback,
+        }),
+      });
+      setSecretMap((current) => ({
+        ...current,
+        [`${created.provider}:${created.listener_id}`]: created,
+      }));
+      setListenerID('');
+      await onRefresh();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const createSecret = async (listener) => {
+    const key = `${listener.provider}:${listener.listener_id}`;
+    try {
+      const created = await apiRequest(`/v1/listeners/${listener.listener_id}/secrets`, {
+        method: 'POST',
+        body: JSON.stringify({ provider: listener.provider }),
+      });
+      setSecretMap((current) => ({ ...current, [key]: created }));
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  const createToken = async () => {
+    setTokenBusy(true);
+    setError('');
+    try {
+      const created = await apiRequest('/v1/auth/tokens', {
+        method: 'POST',
+      });
+      setApiToken(created?.token || '');
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setTokenBusy(false);
+    }
   };
 
   return (
     <motion.div
-      key="urls"
       initial={{ opacity: 0, x: -20 }}
       animate={{ opacity: 1, x: 0 }}
       exit={{ opacity: 0, x: 20 }}
       className="space-y-4"
     >
       <h2 className="px-1 text-white">Webhook URLs</h2>
-      {listeners.map((l, i) => (
-        <div key={i} className="glass-card border border-slate-800 rounded-2xl p-4 flex items-center justify-between gap-3">
-          <div className="min-w-0">
-            <p className="text-white text-sm font-medium truncate">{l.listener_display_name || `${l.provider} · ${l.listener_id}`}</p>
-            <p className="text-slate-500 text-[10px] break-all">{l.webhook_url_template || `agenthook.store/ingest/${accountSlug}/${l.provider}/${l.listener_id}/[secret]`}</p>
+
+      <Panel
+        title="Create Listener"
+        subtitle="Provision a new ingress scenario directly from the UI, including type, mode, and default action."
+        action={<Link2 size={18} className="text-primary" />}
+      >
+        <div className="grid grid-cols-1 gap-3">
+          <FormField label="Provider" hint="Choose a provider label or reuse one of the existing API-friendly options.">
+            <Select value={provider} onChange={(e) => setProvider(e.target.value)}>
+              {PROVIDER_OPTIONS.map((item) => (
+                <option key={item} value={item}>
+                  {item}
+                </option>
+              ))}
+            </Select>
+          </FormField>
+          <FormField label="Listener ID" hint="Optional. Leave blank to let the backend generate one.">
+            <TextInput
+              value={listenerID}
+              onChange={(e) => setListenerID(e.target.value)}
+              placeholder="jobs-feed"
+            />
+          </FormField>
+          <div className="grid grid-cols-2 gap-3">
+            <FormField label="Deployment Mode">
+              <Select value={deploymentMode} onChange={(e) => setDeploymentMode(e.target.value)}>
+                <option value="multitenant">Multitenant</option>
+                <option value="single_tenant">Single Tenant</option>
+              </Select>
+            </FormField>
+            <FormField label="Default Action">
+              <Select value={plainTextAction} onChange={(e) => setPlainTextAction(e.target.value)}>
+                {FORCED_ACTION_OPTIONS.map((item) => (
+                  <option key={item} value={item}>
+                    {item}
+                  </option>
+                ))}
+              </Select>
+            </FormField>
           </div>
-          <div className="flex items-center gap-2 shrink-0">
-            <button
-              onClick={() => copyListenerUrl(l)}
-              className="text-slate-500 hover:text-white"
-              title="Copy ingress template"
-            >
-              {copiedListener === l.listener_id ? <Check size={14} className="text-green-500" /> : <Copy size={14} />}
-            </button>
-            <StatusBadge status="ACTIVE" />
-          </div>
+          <label className="flex items-center gap-2 text-sm text-slate-300">
+            <input
+              type="checkbox"
+              checked={useLLMFallback}
+              onChange={(e) => setUseLLMFallback(e.target.checked)}
+            />
+            Use LLM fallback when deterministic logic is insufficient
+          </label>
+          {error && <InlineNotice tone="error">{error}</InlineNotice>}
+          <button
+            onClick={createListener}
+            disabled={submitting}
+            className="w-full bg-primary text-on-primary font-bold py-2 rounded-lg text-sm active:scale-95 transition-transform disabled:opacity-50"
+          >
+            {submitting ? 'CREATING...' : 'CREATE LISTENER'}
+          </button>
         </div>
-      ))}
-      {listeners.length === 0 && <p className="text-slate-500 text-center py-10">No specific URLs configured yet.</p>}
+      </Panel>
+
+      <Panel
+        title="API Token"
+        subtitle="Generate a token for curl, scripts, or direct API testing while you validate each ingress setup."
+        action={<KeyRound size={18} className="text-primary" />}
+      >
+        <button
+          onClick={createToken}
+          disabled={tokenBusy}
+          className="w-full bg-slate-900 border border-slate-800 text-white font-semibold py-2 rounded-lg text-sm active:scale-95 transition-transform disabled:opacity-50"
+        >
+          {tokenBusy ? 'CREATING...' : 'CREATE API TOKEN'}
+        </button>
+        {apiToken && (
+          <div className="flex items-center gap-2 bg-slate-950/50 px-3 py-2 rounded-lg border border-slate-800">
+            <code className="text-indigo-300 font-code-snippet text-xs truncate">{apiToken}</code>
+            <CopyButton value={apiToken} copiedKey={copied} setCopiedKey={setCopied} copyKey="api-token" />
+          </div>
+        )}
+      </Panel>
+
+      <Panel
+        title="Configured URLs"
+        subtitle="Each listener can mint a fresh secret-backed ingress URL from the UI."
+        action={
+          <button
+            onClick={() => onRefresh().catch((err) => setError(err.message))}
+            className="text-slate-400 hover:text-white"
+            title="Refresh listeners"
+          >
+            <RefreshCw size={16} />
+          </button>
+        }
+      >
+        <div className="space-y-3">
+          {listeners.map((listener) => {
+            const createdSecret = secretMap[`${listener.provider}:${listener.listener_id}`];
+            const mintedURL = createdSecret?.webhook_url
+              ? `agenthook.store${createdSecret.webhook_url}`
+              : listenerIngressTemplate(listener, accountSlug);
+
+            return (
+              <div key={`${listener.provider}-${listener.listener_id}`} className="rounded-2xl border border-slate-800 bg-slate-950/30 p-4 space-y-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-white text-sm font-medium">
+                      {listener.listener_display_name || `${listener.provider} · ${listener.listener_id}`}
+                    </p>
+                    <p className="text-slate-500 text-[11px] mt-1">{listener.deployment_mode} · {listener.type_key}</p>
+                  </div>
+                  <StatusBadge status="ACTIVE" />
+                </div>
+                <div className="flex items-center gap-2 bg-slate-950/60 px-3 py-2 rounded-lg border border-slate-800">
+                  <code className="text-indigo-300 font-code-snippet text-xs break-all">{mintedURL}</code>
+                  <CopyButton
+                    value={mintedURL}
+                    copiedKey={copied}
+                    setCopiedKey={setCopied}
+                    copyKey={`listener-${listener.listener_id}`}
+                    title="Copy webhook URL"
+                  />
+                </div>
+                {createdSecret?.secret_value && (
+                  <InlineNotice tone="success">
+                    Fresh secret created for this listener. Save the new URL now: the raw secret is only returned once.
+                  </InlineNotice>
+                )}
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => createSecret(listener)}
+                    className="flex-1 bg-slate-900 border border-slate-800 text-white font-semibold py-2 rounded-lg text-sm active:scale-95 transition-transform"
+                  >
+                    Generate Secret
+                  </button>
+                  <button
+                    onClick={() => navigator.clipboard.writeText(prettyJSON(listener))}
+                    className="px-3 bg-slate-900 border border-slate-800 text-slate-300 rounded-lg text-sm active:scale-95 transition-transform"
+                  >
+                    JSON
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+
+          {listeners.length === 0 && (
+            <p className="text-slate-500 text-center py-10">
+              No specific URLs configured yet. Create your first listener above to unlock secret-backed ingress URLs.
+            </p>
+          )}
+        </div>
+      </Panel>
+    </motion.div>
+  );
+};
+
+const SkillsTab = ({ listeners, copied, setCopied, onRefreshListeners }) => {
+  const listenerOptions = useMemo(
+    () =>
+      listeners.map((listener) => ({
+        label: listener.listener_display_name || `${listener.provider} · ${listener.listener_id}`,
+        value: inferTypeKey(listener),
+        listener,
+      })),
+    [listeners],
+  );
+
+  const [selectedTypeKey, setSelectedTypeKey] = useState(listenerOptions[0]?.value || '');
+  const [skills, setSkills] = useState([]);
+  const [loadingSkills, setLoadingSkills] = useState(false);
+  const [skillForm, setSkillForm] = useState({
+    skill_key: '',
+    skill_prompt: '',
+    match_contains: '',
+    forced_action: 'store_mysql',
+    memory_write_mode: 'update_or_insert',
+    priority: 100,
+    enabled: true,
+  });
+  const [skillNotice, setSkillNotice] = useState('');
+  const [presetBusy, setPresetBusy] = useState(false);
+  const [classifyPayload, setClassifyPayload] = useState('{"provider":"github","event":"push","repository":"agenthook"}');
+  const [classifyResult, setClassifyResult] = useState('');
+  const [transformPayload, setTransformPayload] = useState('{"provider":"github","event":"push","repository":"agenthook"}');
+  const [transformResult, setTransformResult] = useState('');
+  const [testBusy, setTestBusy] = useState(false);
+
+  useEffect(() => {
+    if (!listenerOptions.length) {
+      setSelectedTypeKey('');
+      setSkills([]);
+      return;
+    }
+    if (!listenerOptions.some((item) => item.value === selectedTypeKey)) {
+      setSelectedTypeKey(listenerOptions[0].value);
+    }
+  }, [listenerOptions, selectedTypeKey]);
+
+  useEffect(() => {
+    if (!selectedTypeKey) return;
+    setLoadingSkills(true);
+    apiRequest(`/api/policy/skills?type_key=${encodeURIComponent(selectedTypeKey)}`)
+      .then((data) => setSkills(Array.isArray(data) ? data : []))
+      .catch((err) => setSkillNotice(err.message))
+      .finally(() => setLoadingSkills(false));
+  }, [selectedTypeKey]);
+
+  const selectedListener = listenerOptions.find((item) => item.value === selectedTypeKey)?.listener || null;
+
+  const createSkill = async () => {
+    if (!selectedTypeKey) return;
+    setSkillNotice('');
+    try {
+      const created = await apiRequest('/api/policy/skills', {
+        method: 'POST',
+        body: JSON.stringify({
+          type_key: selectedTypeKey,
+          ...skillForm,
+          priority: Number(skillForm.priority) || 100,
+        }),
+      });
+      setSkills((current) => [created, ...current]);
+      setSkillForm((current) => ({
+        ...current,
+        skill_key: '',
+        skill_prompt: '',
+        match_contains: '',
+      }));
+      setSkillNotice('Skill created successfully.');
+    } catch (err) {
+      setSkillNotice(err.message);
+    }
+  };
+
+  const applyPreset = async () => {
+    if (!selectedListener) return;
+    setPresetBusy(true);
+    setSkillNotice('');
+    try {
+      await apiRequest('/v1/presets/webhook-processing', {
+        method: 'POST',
+        body: JSON.stringify({
+          provider: selectedListener.provider,
+          listener_id: selectedListener.listener_id,
+          specific_prompt: `Handle ${selectedListener.provider} webhook messages for ${selectedListener.listener_id} with concise structured summaries.`,
+          specific_match_contains: selectedListener.provider,
+          specific_action: 'store_mysql',
+          memory_write_mode: 'update_or_insert',
+        }),
+      });
+      const refreshed = await apiRequest(`/api/policy/skills?type_key=${encodeURIComponent(selectedTypeKey)}`);
+      setSkills(Array.isArray(refreshed) ? refreshed : []);
+      setSkillNotice('Preset applied. General and provider-specific skills were created.');
+      await onRefreshListeners();
+    } catch (err) {
+      setSkillNotice(err.message);
+    } finally {
+      setPresetBusy(false);
+    }
+  };
+
+  const runClassify = async () => {
+    setTestBusy(true);
+    setClassifyResult('');
+    try {
+      const result = await apiRequest('/api/resolver/classify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: classifyPayload,
+      });
+      setClassifyResult(prettyJSON(result));
+    } catch (err) {
+      setClassifyResult(prettyJSON({ error: err.message }));
+    } finally {
+      setTestBusy(false);
+    }
+  };
+
+  const runTransform = async () => {
+    if (!selectedTypeKey) return;
+    setTestBusy(true);
+    setTransformResult('');
+    try {
+      const result = await apiRequest(`/api/resolver/transform?type_key=${encodeURIComponent(selectedTypeKey)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: transformPayload,
+      });
+      setTransformResult(prettyJSON(result));
+    } catch (err) {
+      setTransformResult(prettyJSON({ error: err.message }));
+    } finally {
+      setTestBusy(false);
+    }
+  };
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, x: -20 }}
+      animate={{ opacity: 1, x: 0 }}
+      exit={{ opacity: 0, x: 20 }}
+      className="space-y-4"
+    >
+      <h2 className="px-1 text-white">Skills</h2>
+
+      {!listenerOptions.length && (
+        <Panel
+          title="No listener selected yet"
+          subtitle="Create a listener first. Skills are attached per webhook type, so the UI needs at least one listener to target."
+          action={<Brain size={18} className="text-primary" />}
+        >
+          <InlineNotice>Open the URLs tab, create a listener, then come back here to attach routing skills and test payload behavior.</InlineNotice>
+        </Panel>
+      )}
+
+      {listenerOptions.length > 0 && (
+        <>
+          <Panel
+            title="Skill Target"
+            subtitle="Pick the webhook type you want to enrich with prompt-based routing or provider-specific handling."
+            action={<Sparkles size={18} className="text-primary" />}
+          >
+            <FormField label="Listener / Type">
+              <Select value={selectedTypeKey} onChange={(e) => setSelectedTypeKey(e.target.value)}>
+                {listenerOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </Select>
+            </FormField>
+            {selectedListener && (
+              <div className="flex items-center gap-2 bg-slate-950/50 px-3 py-2 rounded-lg border border-slate-800">
+                <code className="text-indigo-300 font-code-snippet text-xs break-all">{selectedTypeKey}</code>
+                <CopyButton
+                  value={selectedTypeKey}
+                  copiedKey={copied}
+                  setCopiedKey={setCopied}
+                  copyKey="selected-type-key"
+                  title="Copy type key"
+                />
+              </div>
+            )}
+          </Panel>
+
+          <Panel
+            title="Bootstrap Provider Skills"
+            subtitle="Create a sensible baseline automatically, then fine-tune prompts for specific message patterns."
+            action={<Wand2 size={18} className="text-primary" />}
+          >
+            {skillNotice && (
+              <InlineNotice tone={skillNotice.toLowerCase().includes('success') || skillNotice.toLowerCase().includes('preset') ? 'success' : 'info'}>
+                {skillNotice}
+              </InlineNotice>
+            )}
+            <button
+              onClick={applyPreset}
+              disabled={presetBusy || !selectedListener}
+              className="w-full bg-slate-900 border border-slate-800 text-white font-semibold py-2 rounded-lg text-sm active:scale-95 transition-transform disabled:opacity-50"
+            >
+              {presetBusy ? 'APPLYING...' : 'APPLY WEBHOOK PROCESSING PRESET'}
+            </button>
+          </Panel>
+
+          <Panel
+            title="Create Skill"
+            subtitle="Attach a prompt, a match rule, and a forced action to a specific webhook type."
+            action={<Brain size={18} className="text-primary" />}
+          >
+            <div className="grid grid-cols-1 gap-3">
+              <FormField label="Skill Key" hint="Use a stable identifier like github-priority-triage.">
+                <TextInput
+                  value={skillForm.skill_key}
+                  onChange={(e) => setSkillForm((current) => ({ ...current, skill_key: e.target.value }))}
+                  placeholder="github-priority-triage"
+                />
+              </FormField>
+              <FormField label="Skill Prompt">
+                <TextArea
+                  value={skillForm.skill_prompt}
+                  onChange={(e) => setSkillForm((current) => ({ ...current, skill_prompt: e.target.value }))}
+                  placeholder="Summarize important repository changes and flag deploy-impacting messages."
+                />
+              </FormField>
+              <FormField label="Match Contains" hint="Optional substring check before this skill becomes relevant.">
+                <TextInput
+                  value={skillForm.match_contains}
+                  onChange={(e) => setSkillForm((current) => ({ ...current, match_contains: e.target.value }))}
+                  placeholder="deploy"
+                />
+              </FormField>
+              <div className="grid grid-cols-2 gap-3">
+                <FormField label="Forced Action">
+                  <Select
+                    value={skillForm.forced_action}
+                    onChange={(e) => setSkillForm((current) => ({ ...current, forced_action: e.target.value }))}
+                  >
+                    {FORCED_ACTION_OPTIONS.map((item) => (
+                      <option key={item} value={item}>
+                        {item}
+                      </option>
+                    ))}
+                  </Select>
+                </FormField>
+                <FormField label="Memory Write Mode">
+                  <Select
+                    value={skillForm.memory_write_mode}
+                    onChange={(e) => setSkillForm((current) => ({ ...current, memory_write_mode: e.target.value }))}
+                  >
+                    {MEMORY_WRITE_MODES.map((item) => (
+                      <option key={item} value={item}>
+                        {item}
+                      </option>
+                    ))}
+                  </Select>
+                </FormField>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <FormField label="Priority">
+                  <TextInput
+                    type="number"
+                    value={skillForm.priority}
+                    onChange={(e) => setSkillForm((current) => ({ ...current, priority: e.target.value }))}
+                  />
+                </FormField>
+                <FormField label="Enabled">
+                  <Select
+                    value={String(skillForm.enabled)}
+                    onChange={(e) => setSkillForm((current) => ({ ...current, enabled: e.target.value === 'true' }))}
+                  >
+                    <option value="true">Enabled</option>
+                    <option value="false">Disabled</option>
+                  </Select>
+                </FormField>
+              </div>
+              <button
+                onClick={createSkill}
+                className="w-full bg-primary text-on-primary font-bold py-2 rounded-lg text-sm active:scale-95 transition-transform"
+              >
+                CREATE SKILL
+              </button>
+            </div>
+          </Panel>
+
+          <Panel
+            title="Existing Skills"
+            subtitle="These are the prompt-based rules already attached to the selected webhook type."
+            action={loadingSkills ? <RefreshCw size={16} className="text-primary animate-spin" /> : null}
+          >
+            <div className="space-y-3">
+              {skills.map((skill) => (
+                <div key={skill.id} className="rounded-2xl border border-slate-800 bg-slate-950/30 p-4 space-y-2">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-white text-sm font-medium">{skill.skill_key}</p>
+                      <p className="text-slate-500 text-[11px] mt-1">
+                        {skill.match_contains || 'matches all'} · action {skill.forced_action || 'auto'} · priority {skill.priority}
+                      </p>
+                    </div>
+                    <StatusBadge status={skill.enabled ? 'ACTIVE' : 'LEARNING'} />
+                  </div>
+                  <p className="text-slate-300 text-sm">{skill.skill_prompt || 'No prompt text saved.'}</p>
+                </div>
+              ))}
+              {!skills.length && !loadingSkills && (
+                <p className="text-slate-500 text-center py-6">
+                  No skills exist for this listener yet. Use the preset or create one manually.
+                </p>
+              )}
+            </div>
+          </Panel>
+
+          <Panel
+            title="Test Skills"
+            subtitle="Dry-run classification and transformation with a sample payload before wiring the listener into production traffic."
+            action={<TestTube2 size={18} className="text-primary" />}
+          >
+            <div className="space-y-4">
+              <FormField label="Classifier Payload">
+                <TextArea value={classifyPayload} onChange={(e) => setClassifyPayload(e.target.value)} />
+              </FormField>
+              <button
+                onClick={runClassify}
+                disabled={testBusy}
+                className="w-full bg-slate-900 border border-slate-800 text-white font-semibold py-2 rounded-lg text-sm active:scale-95 transition-transform disabled:opacity-50"
+              >
+                {testBusy ? 'RUNNING...' : 'RUN CLASSIFY DRY-RUN'}
+              </button>
+              {classifyResult && <pre className="text-xs text-slate-300 bg-slate-950/80 p-3 rounded-xl overflow-auto border border-slate-800">{classifyResult}</pre>}
+
+              <FormField label="Transform Payload">
+                <TextArea value={transformPayload} onChange={(e) => setTransformPayload(e.target.value)} />
+              </FormField>
+              <button
+                onClick={runTransform}
+                disabled={testBusy || !selectedTypeKey}
+                className="w-full bg-slate-900 border border-slate-800 text-white font-semibold py-2 rounded-lg text-sm active:scale-95 transition-transform disabled:opacity-50"
+              >
+                {testBusy ? 'RUNNING...' : 'RUN TRANSFORM DRY-RUN'}
+              </button>
+              {transformResult && <pre className="text-xs text-slate-300 bg-slate-950/80 p-3 rounded-xl overflow-auto border border-slate-800">{transformResult}</pre>}
+            </div>
+          </Panel>
+        </>
+      )}
     </motion.div>
   );
 };
