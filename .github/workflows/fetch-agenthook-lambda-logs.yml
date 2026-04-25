@@ -1,0 +1,37 @@
+name: Fetch Agenthook Lambda Logs
+
+on:
+  workflow_dispatch:
+
+jobs:
+  fetch-logs:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: us-east-1
+      AWS_REGION: us-east-1
+      LOG_GROUP_NAME: /aws/lambda/agenthook-app
+    steps:
+      - name: Fetch recent CloudWatch logs
+        run: |
+          set -euo pipefail
+          START_MS="$(python3 - <<'PY'
+          import time
+          print(int((time.time() - 3600) * 1000))
+          PY
+          )"
+          aws logs filter-log-events \
+            --region "${AWS_REGION}" \
+            --log-group-name "${LOG_GROUP_NAME}" \
+            --start-time "${START_MS}" \
+            --query 'events[].message' \
+            --output text | tr '\t' '\n' | tee agenthook-lambda-logs.txt
+
+      - name: Upload logs artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: agenthook-lambda-logs
+          path: agenthook-lambda-logs.txt
