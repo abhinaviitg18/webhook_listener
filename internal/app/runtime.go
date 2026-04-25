@@ -24,9 +24,6 @@ func BuildHTTPHandler(ctx context.Context, cfg config.Config) (http.Handler, err
 		if err != nil {
 			return nil, err
 		}
-		if err := mysqlStore.Ping(ctx); err != nil {
-			return nil, err
-		}
 		st = mysqlStore
 	}
 
