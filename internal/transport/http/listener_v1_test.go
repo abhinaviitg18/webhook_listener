@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"testing"
 
 	"agenthook.store/internal/auth"
@@ -57,7 +58,8 @@ func TestListenerV1CreateIngestAndListEvents(t *testing.T) {
 	}
 
 	payload := []byte(`{"event_id":"evt_v1_1","event_type":"message.received","message":{"text":"hello listener v1"}}`)
-	resp2, err := http.Post(ts.URL+webhookURL, "application/json", bytes.NewReader(payload))
+	u, _ := url.Parse(webhookURL)
+	resp2, err := http.Post(ts.URL+u.Path, "application/json", bytes.NewReader(payload))
 	if err != nil {
 		t.Fatal(err)
 	}
