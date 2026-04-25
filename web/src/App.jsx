@@ -73,8 +73,8 @@ function inferTypeKey(listener) {
 }
 
 function listenerIngressTemplate(listener, accountSlug) {
-  if (!listener) return `agenthook.store/ingest/${accountSlug}/[provider]/[listener_id]/[secret]`;
-  return listener.webhook_url_template || `agenthook.store/ingest/${accountSlug}/${listener.provider}/${listener.listener_id}/[secret]`;
+  if (!listener) return `https://app.agenthook.store/ingest/${accountSlug}/[provider]/[listener_id]/[secret]`;
+  return listener.webhook_url_template || `https://app.agenthook.store/ingest/${accountSlug}/${listener.provider}/${listener.listener_id}/[secret]`;
 }
 
 function Panel({ title, subtitle, action, children }) {
@@ -170,7 +170,7 @@ function App() {
   const accountSlug = user?.slug || '[account]';
   const ingressTemplate = listeners.length > 0
     ? listenerIngressTemplate(listeners[0], accountSlug)
-    : `agenthook.store/ingest/${accountSlug}/[provider]/[listener_id]/[secret]`;
+    : `https://app.agenthook.store/ingest/${accountSlug}/[provider]/[listener_id]/[secret]`;
 
   const fetchListeners = async () => {
     const data = await apiRequest('/v1/listeners');
@@ -430,8 +430,28 @@ const UrlsTab = ({ listeners, user, onRefresh, copied, setCopied }) => {
   const [apiToken, setApiToken] = useState('');
   const [tokenBusy, setTokenBusy] = useState(false);
   const [secretMap, setSecretMap] = useState({});
+  const [secretsHistory, setSecretsHistory] = useState({});
+  const [loadingSecrets, setLoadingSecrets] = useState(false);
 
   const accountSlug = user?.slug || '[account]';
+
+  const fetchSecrets = async (listener) => {
+    try {
+      const data = await apiRequest(`/v1/listeners/${listener.listener_id}/secrets?provider=${listener.provider}`);
+      setSecretsHistory((current) => ({
+        ...current,
+        [`${listener.provider}:${listener.listener_id}`]: data || [],
+      }));
+    } catch (err) {
+      console.error('Failed to fetch secrets', err);
+    }
+  };
+
+  useEffect(() => {
+    if (listeners.length > 0) {
+      listeners.forEach((l) => fetchSecrets(l));
+    }
+  }, [listeners]);
 
   const createListener = async () => {
     setSubmitting(true);
@@ -468,6 +488,7 @@ const UrlsTab = ({ listeners, user, onRefresh, copied, setCopied }) => {
         body: JSON.stringify({ provider: listener.provider }),
       });
       setSecretMap((current) => ({ ...current, [key]: created }));
+      await fetchSecrets(listener);
     } catch (err) {
       setError(err.message);
     }
@@ -590,37 +611,57 @@ const UrlsTab = ({ listeners, user, onRefresh, copied, setCopied }) => {
       >
         <div className="space-y-3">
           {listeners.map((listener) => {
-            const createdSecret = secretMap[`${listener.provider}:${listener.listener_id}`];
-            const mintedURL = createdSecret?.webhook_url
-              ? `agenthook.store${createdSecret.webhook_url}`
-              : listenerIngressTemplate(listener, accountSlug);
+            const key = `${listener.provider}:${listener.listener_id}`;
+            const createdSecret = secretMap[key];
+            const history = secretsHistory[key] || [];
+
+            const mintedURL = createdSecret?.webhook_url || listenerIngressTemplate(listener, accountSlug);
 
             return (
-              <div key={`${listener.provider}-${listener.listener_id}`} className="rounded-2xl border border-slate-800 bg-slate-950/30 p-4 space-y-3">
+              <div key={key} className="rounded-2xl border border-slate-800 bg-slate-950/30 p-4 space-y-3">
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <p className="text-white text-sm font-medium">
                       {listener.listener_display_name || `${listener.provider} · ${listener.listener_id}`}
                     </p>
-                    <p className="text-slate-500 text-[11px] mt-1">{listener.deployment_mode} · {listener.type_key}</p>
+                    <p className="text-slate-500 text-[11px] mt-1">
+                      {listener.deployment_mode} · {listener.type_key}
+                    </p>
                   </div>
                   <StatusBadge status="ACTIVE" />
                 </div>
-                <div className="flex items-center gap-2 bg-slate-950/60 px-3 py-2 rounded-lg border border-slate-800">
-                  <code className="text-indigo-300 font-code-snippet text-xs break-all">{mintedURL}</code>
-                  <CopyButton
-                    value={mintedURL}
-                    copiedKey={copied}
-                    setCopiedKey={setCopied}
-                    copyKey={`listener-${listener.listener_id}`}
-                    title="Copy webhook URL"
-                  />
+
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2 bg-slate-950/60 px-3 py-2 rounded-lg border border-slate-800">
+                    <code className="text-indigo-300 font-code-snippet text-xs break-all">{mintedURL}</code>
+                    <CopyButton
+                      value={mintedURL}
+                      copiedKey={copied}
+                      setCopiedKey={setCopied}
+                      copyKey={`listener-${listener.listener_id}`}
+                      title="Copy primary URL"
+                    />
+                  </div>
+
+                  {createdSecret?.secret_value && (
+                    <InlineNotice tone="success">
+                      Fresh secret created. Save the URL now: the raw secret is only returned once.
+                    </InlineNotice>
+                  )}
+
+                  {history.length > 0 && (
+                    <div className="space-y-1.5 pt-1">
+                      <p className="text-[10px] text-slate-500 font-label-caps px-1">Other Active Secrets</p>
+                      {history.map((s) => (
+                        <div key={s.id} className="flex items-center justify-between gap-2 bg-slate-900/40 px-3 py-1.5 rounded-lg border border-slate-800/50 text-[10px]">
+                          <code className="text-slate-400 truncate">{s.webhook_url}</code>
+                          <span className="text-slate-600 shrink-0">{new Date(s.created_at).toLocaleDateString()}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
-                {createdSecret?.secret_value && (
-                  <InlineNotice tone="success">
-                    Fresh secret created for this listener. Save the new URL now: the raw secret is only returned once.
-                  </InlineNotice>
-                )}
+
                 <div className="flex gap-2">
                   <button
                     onClick={() => createSecret(listener)}

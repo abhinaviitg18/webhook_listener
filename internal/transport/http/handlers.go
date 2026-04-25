@@ -76,6 +76,7 @@ func NewRouter(h *Handler, verifier auth.RequestVerifier) http.Handler {
 		ar.Post("/v1/listeners", h.CreateListener)
 		ar.Get("/v1/listeners", h.ListListeners)
 		ar.Post("/v1/listeners/{listenerID}/secrets", h.CreateListenerSecret)
+		ar.Get("/v1/listeners/{listenerID}/secrets", h.ListListenerSecrets)
 		ar.Get("/v1/listeners/{listenerID}/events", h.ListListenerEvents)
 		ar.Post("/v1/auth/tokens", h.CreateAPIToken)
 		ar.Post("/v1/presets/webhook-processing", h.ApplyWebhookProcessingPreset)
@@ -874,6 +875,7 @@ func (h *Handler) CreateListener(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	baseUrl := h.publicBaseURL()
 	writeJSON(w, http.StatusCreated, map[string]any{
 		"listener_id":      listenerID,
 		"provider":         provider,
@@ -881,8 +883,8 @@ func (h *Handler) CreateListener(w http.ResponseWriter, r *http.Request) {
 		"type_key":         whType.TypeKey,
 		"secret_id":        secret.ID,
 		"secret_value":     raw,
-		"webhook_url":      "/ingest/" + acct.Slug + "/" + provider + "/" + listenerID + "/" + raw,
-		"legacy_webhook":   "/url/" + acct.Slug + "/" + whType.TypeKey + "/" + raw,
+		"webhook_url":      baseUrl + "/ingest/" + acct.Slug + "/" + provider + "/" + listenerID + "/" + raw,
+		"legacy_webhook":   baseUrl + "/url/" + acct.Slug + "/" + whType.TypeKey + "/" + raw,
 		"required_headers": []string{"Content-Type: application/json"},
 	})
 }
@@ -904,6 +906,7 @@ func (h *Handler) ListListeners(w http.ResponseWriter, r *http.Request) {
 		if !ok {
 			continue
 		}
+		baseUrl := h.publicBaseURL()
 		resp = append(resp, map[string]any{
 			"listener_id":           ref.ListenerID,
 			"provider":              ref.Provider,
@@ -912,8 +915,8 @@ func (h *Handler) ListListeners(w http.ResponseWriter, r *http.Request) {
 			"plain_text_action":     item.PlainTextAction,
 			"use_llm_fallback":      item.UseLLMFallback,
 			"created_at":            item.CreatedAt,
-			"webhook_url_template":  "agenthook.store/ingest/" + acct.Slug + "/" + ref.Provider + "/" + ref.ListenerID + "/[secret]",
-			"legacy_webhook_url":    "/url/" + acct.Slug + "/" + item.TypeKey + "/[secret]",
+			"webhook_url_template":  baseUrl + "/ingest/" + acct.Slug + "/" + ref.Provider + "/" + ref.ListenerID + "/[secret]",
+			"legacy_webhook_url":    baseUrl + "/url/" + acct.Slug + "/" + item.TypeKey + "/[secret]",
 			"listener_display_name": ref.Provider + " · " + ref.ListenerID,
 		})
 	}
@@ -949,14 +952,53 @@ func (h *Handler) CreateListenerSecret(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	baseUrl := h.publicBaseURL()
 	writeJSON(w, http.StatusCreated, map[string]any{
 		"secret_id":       secret.ID,
 		"secret_value":    raw,
-		"webhook_url":     "/ingest/" + acct.Slug + "/" + provider + "/" + listenerID + "/" + raw,
+		"webhook_url":     baseUrl + "/ingest/" + acct.Slug + "/" + provider + "/" + listenerID + "/" + raw,
 		"listener_id":     listenerID,
 		"provider":        provider,
 		"deployment_mode": parseModeFromTypeKey(whType.TypeKey),
 	})
+}
+
+func (h *Handler) ListListenerSecrets(w http.ResponseWriter, r *http.Request) {
+	acct, ok := auth.AccountFromContext(r.Context())
+	if !ok {
+		writeErr(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	listenerID := normalizeListenerID(chi.URLParam(r, "listenerID"))
+	provider := normalizeProvider(r.URL.Query().Get("provider"))
+	if provider == "" || listenerID == "" {
+		writeErr(w, http.StatusBadRequest, "provider and listenerID required")
+		return
+	}
+	whType, err := h.findListenerType(r.Context(), h.Store, acct.ID, provider, listenerID)
+	if err != nil {
+		writeErr(w, http.StatusNotFound, "listener not found")
+		return
+	}
+	secrets, err := h.Store.ListSecrets(r.Context(), acct.ID, whType.ID)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	baseUrl := h.publicBaseURL()
+	resp := make([]map[string]any, 0, len(secrets))
+	for _, sec := range secrets {
+		// Since we only store hash, we can't show the real URL with the secret value here.
+		// We show the URL pattern or a masked version if needed.
+		// For "history", showing the ID and creation date is standard.
+		resp = append(resp, map[string]any{
+			"id":          sec.ID,
+			"status":      sec.Status,
+			"created_at":  sec.CreatedAt,
+			"webhook_url": baseUrl + "/ingest/" + acct.Slug + "/" + provider + "/" + listenerID + "/[secret]",
+		})
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 func (h *Handler) ListListenerEvents(w http.ResponseWriter, r *http.Request) {

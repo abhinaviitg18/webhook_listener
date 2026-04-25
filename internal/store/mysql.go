@@ -167,6 +167,23 @@ func (s *MySQLStore) CreateSecret(ctx context.Context, accountID, typeID string)
 	return domain.WebhookSecret{ID: id, AccountID: accountID, TypeID: typeID, ValueHash: h, Status: "active", CreatedAt: time.Now().UTC()}, raw, nil
 }
 
+func (s *MySQLStore) ListSecrets(ctx context.Context, accountID, typeID string) ([]domain.WebhookSecret, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT id, account_id, type_id, secret_hash, status, created_at FROM webhook_secrets WHERE account_id=? AND type_id=? AND status='active' ORDER BY created_at DESC`, accountID, typeID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []domain.WebhookSecret
+	for rows.Next() {
+		var sec domain.WebhookSecret
+		if err := rows.Scan(&sec.ID, &sec.AccountID, &sec.TypeID, &sec.ValueHash, &sec.Status, &sec.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, sec)
+	}
+	return out, nil
+}
+
 func (s *MySQLStore) DeleteSecret(ctx context.Context, accountID, secretID string) error {
 	_, err := s.db.ExecContext(ctx, `UPDATE webhook_secrets SET status='revoked' WHERE id=? AND account_id=?`, secretID, accountID)
 	return err

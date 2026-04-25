@@ -185,6 +185,19 @@ func (s *MemoryStore) CreateSecret(_ context.Context, accountID, typeID string) 
 	return obj, raw, nil
 }
 
+func (s *MemoryStore) ListSecrets(_ context.Context, accountID, typeID string) ([]domain.WebhookSecret, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var out []domain.WebhookSecret
+	for _, sec := range s.secretsByID {
+		if sec.AccountID == accountID && sec.TypeID == typeID && sec.Status == "active" {
+			out = append(out, sec)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.After(out[j].CreatedAt) })
+	return out, nil
+}
+
 func (s *MemoryStore) DeleteSecret(_ context.Context, accountID, secretID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

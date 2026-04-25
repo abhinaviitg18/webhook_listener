@@ -12,6 +12,7 @@ type Store interface {
 	GetWebhookTypeByAccountAndKey(ctx context.Context, accountID, typeKey string) (WebhookType, error)
 
 	CreateSecret(ctx context.Context, accountID, typeID string) (WebhookSecret, string, error)
+	ListSecrets(ctx context.Context, accountID, typeID string) ([]WebhookSecret, error)
 	DeleteSecret(ctx context.Context, accountID, secretID string) error
 	ValidateSecret(ctx context.Context, accountID, typeID, secret string) (WebhookSecret, error)
 	ResolveSecretAnyType(ctx context.Context, accountID, secret string) (WebhookSecret, error)
