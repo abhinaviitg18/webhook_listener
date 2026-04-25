@@ -1,0 +1,84 @@
+name: Debug Agenthook Lambda Invoke
+
+on:
+  workflow_dispatch:
+
+jobs:
+  debug-invoke:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: us-east-1
+      AWS_REGION: us-east-1
+      LAMBDA_FUNCTION_NAME: agenthook-app
+    steps:
+      - name: Create healthz payload
+        run: |
+          cat > payload.json <<'JSON'
+          {
+            "version": "2.0",
+            "routeKey": "$default",
+            "rawPath": "/healthz",
+            "rawQueryString": "",
+            "headers": {
+              "host": "app.agenthook.store",
+              "x-forwarded-proto": "https"
+            },
+            "requestContext": {
+              "accountId": "anonymous",
+              "apiId": "lambda-url",
+              "domainName": "app.agenthook.store",
+              "domainPrefix": "app",
+              "requestId": "debug-healthz",
+              "time": "25/Apr/2026:00:00:00 +0000",
+              "timeEpoch": 1770000000000,
+              "http": {
+                "method": "GET",
+                "path": "/healthz",
+                "protocol": "HTTP/1.1",
+                "sourceIp": "127.0.0.1",
+                "userAgent": "GitHubActions/debug"
+              }
+            },
+            "isBase64Encoded": false
+          }
+          JSON
+
+      - name: Invoke lambda and capture tail logs
+        run: |
+          set -euo pipefail
+          aws lambda invoke \
+            --region "${AWS_REGION}" \
+            --function-name "${LAMBDA_FUNCTION_NAME}" \
+            --cli-binary-format raw-in-base64-out \
+            --payload fileb://payload.json \
+            --log-type Tail \
+            response.json > invoke-meta.json
+
+          python3 - <<'PY'
+          import base64, json, pathlib
+          meta = json.loads(pathlib.Path("invoke-meta.json").read_text())
+          print("StatusCode:", meta.get("StatusCode"))
+          if meta.get("FunctionError"):
+              print("FunctionError:", meta["FunctionError"])
+          print("\nDecoded LogResult:\n")
+          log_result = meta.get("LogResult", "")
+          if log_result:
+              print(base64.b64decode(log_result).decode("utf-8", errors="replace"))
+          else:
+              print("<empty>")
+          print("\nResponse payload:\n")
+          print(pathlib.Path("response.json").read_text())
+          PY
+
+      - name: Upload invoke artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: agenthook-lambda-debug-invoke
+          path: |
+            payload.json
+            invoke-meta.json
+            response.json
