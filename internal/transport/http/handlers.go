@@ -364,21 +364,21 @@ func (h *Handler) parseScaleKitState(state string) (string, error) {
 func (h *Handler) sanitizeReturnTo(raw string) string {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
-		return "/"
+		return "/app"
 	}
 	u, err := url.Parse(raw)
 	if err != nil {
-		return "/"
+		return "/app"
 	}
 	if u.IsAbs() {
 		base, err := url.Parse(strings.TrimSpace(h.publicBaseURL()))
 		if err != nil || base.Hostname() == "" || !strings.EqualFold(base.Hostname(), u.Hostname()) {
-			return "/"
+			return "/app"
 		}
 		return u.RequestURI()
 	}
 	if !strings.HasPrefix(u.Path, "/") {
-		return "/"
+		return "/app"
 	}
 	return u.RequestURI()
 }
@@ -393,7 +393,7 @@ func (h *Handler) appRedirectURL(r *http.Request, returnTo string) url.URL {
 		base.RawQuery = ""
 		return *base
 	}
-	base.Path = "/"
+	base.Path = "/app"
 	base.RawQuery = ""
 	return *base
 }

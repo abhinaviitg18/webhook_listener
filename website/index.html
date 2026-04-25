@@ -19,7 +19,7 @@
           </p>
           <p class="error-banner" id="auth-error" hidden></p>
           <div class="hero-actions">
-            <a class="signin" href="/auth/scalekit/login">Sign in with ScaleKit</a>
+            <a class="signin" href="/auth/scalekit/login?return_to=%2Fapp">Sign in with ScaleKit</a>
           </div>
         </section>
 
@@ -92,12 +92,6 @@
         }
       }
 
-      function showDashboard() {
-        marketingView.hidden = true;
-        dashboardView.hidden = false;
-        authError.hidden = true;
-      }
-
       function ingressTemplate(user, listeners) {
         if (!user) return "agenthook.store/ingest/[account]/[provider]/[listener_id]/[secret]";
         if (listeners.length > 0 && listeners[0].webhook_url_template) return listeners[0].webhook_url_template;
@@ -165,6 +159,9 @@
           showMarketing("");
           return;
         }
+
+        window.location.replace("/app");
+        return;
 
         const [listenersResp, eventsResp] = await Promise.all([
           fetchJSON("/v1/listeners"),
