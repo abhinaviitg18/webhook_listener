@@ -225,6 +225,22 @@ if ! aws lambda get-function-url-config --region "$AWS_REGION" --function-name "
     --auth-type NONE >/dev/null
 fi
 
+aws lambda add-permission \
+  --region "$AWS_REGION" \
+  --function-name "$LAMBDA_FUNCTION_NAME" \
+  --statement-id "${LAMBDA_FUNCTION_NAME}-function-url-public" \
+  --action lambda:InvokeFunctionUrl \
+  --principal '*' \
+  --function-url-auth-type NONE >/dev/null 2>&1 || true
+
+aws lambda add-permission \
+  --region "$AWS_REGION" \
+  --function-name "$LAMBDA_FUNCTION_NAME" \
+  --statement-id "${LAMBDA_FUNCTION_NAME}-public-invoke" \
+  --action lambda:InvokeFunction \
+  --principal '*' \
+  --invoked-via-function-url true >/dev/null 2>&1 || true
+
 echo "Lambda function URL:"
 aws lambda get-function-url-config \
   --region "$AWS_REGION" \
