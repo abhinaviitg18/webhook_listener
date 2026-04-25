@@ -988,14 +988,12 @@ func (h *Handler) ListListenerSecrets(w http.ResponseWriter, r *http.Request) {
 	baseUrl := h.publicBaseURL()
 	resp := make([]map[string]any, 0, len(secrets))
 	for _, sec := range secrets {
-		// Since we only store hash, we can't show the real URL with the secret value here.
-		// We show the URL pattern or a masked version if needed.
-		// For "history", showing the ID and creation date is standard.
 		resp = append(resp, map[string]any{
-			"id":          sec.ID,
-			"status":      sec.Status,
-			"created_at":  sec.CreatedAt,
-			"webhook_url": baseUrl + "/ingest/" + acct.Slug + "/" + provider + "/" + listenerID + "/[secret]",
+			"id":           sec.ID,
+			"status":       sec.Status,
+			"created_at":   sec.CreatedAt,
+			"secret_value": sec.SecretValue,
+			"webhook_url":  baseUrl + "/ingest/" + acct.Slug + "/" + provider + "/" + listenerID + "/" + sec.SecretValue,
 		})
 	}
 	writeJSON(w, http.StatusOK, resp)

@@ -158,17 +158,16 @@ func (s *MySQLStore) CreateSecret(ctx context.Context, accountID, typeID string)
 	if err != nil {
 		return domain.WebhookSecret{}, "", err
 	}
-	h := security.HashValue(raw)
 	id := uuid.NewString()
-	_, err = s.db.ExecContext(ctx, `INSERT INTO webhook_secrets(id, account_id, type_id, secret_hash, status, created_at) VALUES(?,?,?,?, 'active', UTC_TIMESTAMP())`, id, accountID, typeID, h)
+	_, err = s.db.ExecContext(ctx, `INSERT INTO webhook_secrets(id, account_id, type_id, secret_value, status, created_at) VALUES(?,?,?,?, 'active', UTC_TIMESTAMP())`, id, accountID, typeID, raw)
 	if err != nil {
 		return domain.WebhookSecret{}, "", err
 	}
-	return domain.WebhookSecret{ID: id, AccountID: accountID, TypeID: typeID, ValueHash: h, Status: "active", CreatedAt: time.Now().UTC()}, raw, nil
+	return domain.WebhookSecret{ID: id, AccountID: accountID, TypeID: typeID, SecretValue: raw, Status: "active", CreatedAt: time.Now().UTC()}, raw, nil
 }
 
 func (s *MySQLStore) ListSecrets(ctx context.Context, accountID, typeID string) ([]domain.WebhookSecret, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, account_id, type_id, secret_hash, status, created_at FROM webhook_secrets WHERE account_id=? AND type_id=? AND status='active' ORDER BY created_at DESC`, accountID, typeID)
+	rows, err := s.db.QueryContext(ctx, `SELECT id, account_id, type_id, COALESCE(secret_value, ''), status, created_at FROM webhook_secrets WHERE account_id=? AND type_id=? AND status='active' ORDER BY created_at DESC`, accountID, typeID)
 	if err != nil {
 		return nil, err
 	}
@@ -176,7 +175,7 @@ func (s *MySQLStore) ListSecrets(ctx context.Context, accountID, typeID string) 
 	var out []domain.WebhookSecret
 	for rows.Next() {
 		var sec domain.WebhookSecret
-		if err := rows.Scan(&sec.ID, &sec.AccountID, &sec.TypeID, &sec.ValueHash, &sec.Status, &sec.CreatedAt); err != nil {
+		if err := rows.Scan(&sec.ID, &sec.AccountID, &sec.TypeID, &sec.SecretValue, &sec.Status, &sec.CreatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, sec)
@@ -190,9 +189,8 @@ func (s *MySQLStore) DeleteSecret(ctx context.Context, accountID, secretID strin
 }
 
 func (s *MySQLStore) ValidateSecret(ctx context.Context, accountID, typeID, secret string) (domain.WebhookSecret, error) {
-	h := security.HashValue(secret)
 	var sec domain.WebhookSecret
-	err := s.db.QueryRowContext(ctx, `SELECT id, account_id, type_id, secret_hash, status, created_at FROM webhook_secrets WHERE account_id=? AND type_id=? AND secret_hash=? AND status='active' LIMIT 1`, accountID, typeID, h).Scan(&sec.ID, &sec.AccountID, &sec.TypeID, &sec.ValueHash, &sec.Status, &sec.CreatedAt)
+	err := s.db.QueryRowContext(ctx, `SELECT id, account_id, type_id, COALESCE(secret_value, ''), status, created_at FROM webhook_secrets WHERE account_id=? AND type_id=? AND secret_value=? AND status='active' LIMIT 1`, accountID, typeID, secret).Scan(&sec.ID, &sec.AccountID, &sec.TypeID, &sec.SecretValue, &sec.Status, &sec.CreatedAt)
 	if err != nil {
 		return domain.WebhookSecret{}, errors.New("invalid secret")
 	}
@@ -200,9 +198,8 @@ func (s *MySQLStore) ValidateSecret(ctx context.Context, accountID, typeID, secr
 }
 
 func (s *MySQLStore) ResolveSecretAnyType(ctx context.Context, accountID, secret string) (domain.WebhookSecret, error) {
-	h := security.HashValue(secret)
 	var sec domain.WebhookSecret
-	err := s.db.QueryRowContext(ctx, `SELECT id, account_id, type_id, secret_hash, status, created_at FROM webhook_secrets WHERE account_id=? AND secret_hash=? AND status='active' LIMIT 1`, accountID, h).Scan(&sec.ID, &sec.AccountID, &sec.TypeID, &sec.ValueHash, &sec.Status, &sec.CreatedAt)
+	err := s.db.QueryRowContext(ctx, `SELECT id, account_id, type_id, COALESCE(secret_value, ''), status, created_at FROM webhook_secrets WHERE account_id=? AND secret_value=? AND status='active' LIMIT 1`, accountID, secret).Scan(&sec.ID, &sec.AccountID, &sec.TypeID, &sec.SecretValue, &sec.Status, &sec.CreatedAt)
 	if err != nil {
 		return domain.WebhookSecret{}, errors.New("invalid secret")
 	}

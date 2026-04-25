@@ -448,9 +448,9 @@ const UrlsTab = ({ listeners, user, onRefresh, copied, setCopied }) => {
   };
 
   useEffect(() => {
-    if (listeners.length > 0) {
-      listeners.forEach((l) => fetchSecrets(l));
-    }
+    if (listeners.length === 0) return;
+    setLoadingSecrets(true);
+    Promise.allSettled(listeners.map((listener) => fetchSecrets(listener))).finally(() => setLoadingSecrets(false));
   }, [listeners]);
 
   const createListener = async () => {
@@ -609,13 +609,14 @@ const UrlsTab = ({ listeners, user, onRefresh, copied, setCopied }) => {
           </button>
         }
       >
+        {loadingSecrets && <InlineNotice>Refreshing listener secrets and URL placeholders...</InlineNotice>}
         <div className="space-y-3">
           {listeners.map((listener) => {
             const key = `${listener.provider}:${listener.listener_id}`;
             const createdSecret = secretMap[key];
             const history = secretsHistory[key] || [];
-
-            const mintedURL = createdSecret?.webhook_url || listenerIngressTemplate(listener, accountSlug);
+            const latestBackendSecret = history[0];
+            const mintedURL = createdSecret?.webhook_url || latestBackendSecret?.webhook_url || listenerIngressTemplate(listener, accountSlug);
 
             return (
               <div key={key} className="rounded-2xl border border-slate-800 bg-slate-950/30 p-4 space-y-3">

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 
 	"agenthook.store/internal/auth"
@@ -59,7 +60,13 @@ func TestListenerV1CreateIngestAndListEvents(t *testing.T) {
 
 	payload := []byte(`{"event_id":"evt_v1_1","event_type":"message.received","message":{"text":"hello listener v1"}}`)
 	u, _ := url.Parse(webhookURL)
-	resp2, err := http.Post(ts.URL+u.Path, "application/json", bytes.NewReader(payload))
+	ingestURL := webhookURL
+	if u != nil && u.Path != "" {
+		u.Scheme = "http"
+		u.Host = strings.TrimPrefix(ts.URL, "http://")
+		ingestURL = u.String()
+	}
+	resp2, err := http.Post(ingestURL, "application/json", bytes.NewReader(payload))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -69,6 +76,27 @@ func TestListenerV1CreateIngestAndListEvents(t *testing.T) {
 	}
 
 	listenerID, _ := created["listener_id"].(string)
+	reqSecrets, _ := http.NewRequest(http.MethodGet, ts.URL+"/v1/listeners/"+listenerID+"/secrets?provider=agentmail", nil)
+	reqSecrets.Header.Set("Authorization", "Bearer "+token)
+	respSecrets, err := http.DefaultClient.Do(reqSecrets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer respSecrets.Body.Close()
+	if respSecrets.StatusCode != http.StatusOK {
+		t.Fatalf("unexpected secrets status %d", respSecrets.StatusCode)
+	}
+	var secrets []map[string]interface{}
+	if err := json.NewDecoder(respSecrets.Body).Decode(&secrets); err != nil {
+		t.Fatal(err)
+	}
+	if len(secrets) != 1 {
+		t.Fatalf("expected 1 listener secret, got %d", len(secrets))
+	}
+	if secrets[0]["webhook_url"] != webhookURL {
+		t.Fatalf("expected listed webhook_url %q, got %v", webhookURL, secrets[0]["webhook_url"])
+	}
+
 	req3, _ := http.NewRequest(http.MethodGet, ts.URL+"/v1/listeners/"+listenerID+"/events?provider=agentmail", nil)
 	req3.Header.Set("Authorization", "Bearer "+token)
 	resp3, err := http.DefaultClient.Do(req3)

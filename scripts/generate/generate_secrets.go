@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"log"
 
-	_ "github.com/go-sql-driver/mysql"
 	"agenthook.store/internal/store"
+	_ "github.com/go-sql-driver/mysql"
 )
 
 func main() {

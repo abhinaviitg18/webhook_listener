@@ -20,12 +20,13 @@ type WebhookType struct {
 }
 
 type WebhookSecret struct {
-	ID        string    `json:"id"`
-	AccountID string    `json:"account_id"`
-	TypeID    string    `json:"type_id"`
-	ValueHash string    `json:"-"`
-	Status    string    `json:"status"`
-	CreatedAt time.Time `json:"created_at"`
+	ID          string    `json:"id"`
+	AccountID   string    `json:"account_id"`
+	TypeID      string    `json:"type_id"`
+	ValueHash   string    `json:"-"`
+	SecretValue string    `json:"-"`
+	Status      string    `json:"status"`
+	CreatedAt   time.Time `json:"created_at"`
 }
 
 type ForwardTarget struct {

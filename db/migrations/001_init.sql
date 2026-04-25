@@ -29,10 +29,10 @@ CREATE TABLE IF NOT EXISTS webhook_secrets (
   id VARCHAR(64) PRIMARY KEY,
   account_id VARCHAR(64) NOT NULL,
   type_id VARCHAR(64) NOT NULL,
-  secret_hash VARCHAR(128) NOT NULL,
+  secret_value VARCHAR(255) NOT NULL,
   status VARCHAR(32) NOT NULL,
   created_at DATETIME NOT NULL,
-  INDEX idx_secret_hash (secret_hash)
+  INDEX idx_secret_value (secret_value)
 );
 
 CREATE TABLE IF NOT EXISTS forward_targets (

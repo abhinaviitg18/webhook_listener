@@ -171,17 +171,16 @@ func (s *MemoryStore) CreateSecret(_ context.Context, accountID, typeID string) 
 		return domain.WebhookSecret{}, "", err
 	}
 	id := uuid.NewString()
-	h := security.HashValue(raw)
 	obj := domain.WebhookSecret{
-		ID:        id,
-		AccountID: accountID,
-		TypeID:    typeID,
-		ValueHash: h,
-		Status:    "active",
-		CreatedAt: time.Now().UTC(),
+		ID:          id,
+		AccountID:   accountID,
+		TypeID:      typeID,
+		SecretValue: raw,
+		Status:      "active",
+		CreatedAt:   time.Now().UTC(),
 	}
 	s.secretsByID[id] = obj
-	s.secretByHash[h] = id
+	s.secretByHash[raw] = id
 	return obj, raw, nil
 }
 
@@ -213,7 +212,7 @@ func (s *MemoryStore) DeleteSecret(_ context.Context, accountID, secretID string
 func (s *MemoryStore) ValidateSecret(_ context.Context, accountID, typeID, secret string) (domain.WebhookSecret, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	id, ok := s.secretByHash[security.HashValue(secret)]
+	id, ok := s.secretByHash[secret]
 	if !ok {
 		return domain.WebhookSecret{}, errors.New("invalid secret")
 	}
@@ -227,7 +226,7 @@ func (s *MemoryStore) ValidateSecret(_ context.Context, accountID, typeID, secre
 func (s *MemoryStore) ResolveSecretAnyType(_ context.Context, accountID, secret string) (domain.WebhookSecret, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	id, ok := s.secretByHash[security.HashValue(secret)]
+	id, ok := s.secretByHash[secret]
 	if !ok {
 		return domain.WebhookSecret{}, errors.New("invalid secret")
 	}
