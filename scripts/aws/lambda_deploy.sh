@@ -5,7 +5,7 @@ AWS_REGION="${AWS_REGION:-us-east-1}"
 LAMBDA_FUNCTION_NAME="${LAMBDA_FUNCTION_NAME:-agenthook-app}"
 APP_ENV_SSM_PARAM="${APP_ENV_SSM_PARAM:-/agenthook/prod/env}"
 APP_ENV_INLINE_B64="${APP_ENV_INLINE_B64:-}"
-LAMBDA_ARCHITECTURE="${LAMBDA_ARCHITECTURE:-x86_64}"
+LAMBDA_ARCHITECTURE="${LAMBDA_ARCHITECTURE:-}"
 LAMBDA_MEMORY_SIZE="${LAMBDA_MEMORY_SIZE:-1024}"
 LAMBDA_TIMEOUT="${LAMBDA_TIMEOUT:-30}"
 LAMBDA_ENVIRONMENT="${LAMBDA_ENVIRONMENT:-production}"
@@ -53,6 +53,7 @@ lambda_update_configuration_with_retry() {
       --region "$AWS_REGION" \
       --function-name "$LAMBDA_FUNCTION_NAME" \
       --runtime provided.al2023 \
+      --architectures "$LAMBDA_ARCHITECTURE" \
       --handler bootstrap \
       --memory-size "$LAMBDA_MEMORY_SIZE" \
       --timeout "$LAMBDA_TIMEOUT" \
@@ -76,20 +77,6 @@ lambda_update_configuration_with_retry() {
 echo "Building frontend..."
 (cd web && npm install && npm run build && mkdir -p ../internal/ui/dist && cp -r dist/* ../internal/ui/dist/)
 
-echo "Running tests..."
-go test ./cmd/... ./internal/...
-
-echo "Building lambda binary..."
-export CGO_ENABLED=0
-GOARCH_VALUE="amd64"
-if [[ "$LAMBDA_ARCHITECTURE" == "arm64" ]]; then
-  GOARCH_VALUE="arm64"
-fi
-GOOS=linux GOARCH="$GOARCH_VALUE" go build -tags lambda.norpc -o "$BUILD_DIR/bootstrap" ./cmd/lambda
-
-echo "Packaging lambda..."
-(cd "$BUILD_DIR" && zip -q -j "$ZIP_PATH" bootstrap)
-
 function_exists=0
 if aws lambda get-function --region "$AWS_REGION" --function-name "$LAMBDA_FUNCTION_NAME" >/dev/null 2>&1; then
   function_exists=1
@@ -108,6 +95,31 @@ if [[ "$function_exists" -eq 0 ]]; then
   echo "Lambda function ${LAMBDA_FUNCTION_NAME} does not exist; refusing to create it from CI." >&2
   exit 1
 fi
+
+if [[ -z "$LAMBDA_ARCHITECTURE" ]]; then
+  LAMBDA_ARCHITECTURE="$(aws lambda get-function-configuration \
+    --region "$AWS_REGION" \
+    --function-name "$LAMBDA_FUNCTION_NAME" \
+    --query 'Architectures[0]' \
+    --output text)"
+fi
+if [[ -z "$LAMBDA_ARCHITECTURE" || "$LAMBDA_ARCHITECTURE" == "None" ]]; then
+  LAMBDA_ARCHITECTURE="x86_64"
+fi
+
+echo "Running tests..."
+go test ./cmd/... ./internal/...
+
+echo "Building lambda binary for architecture: ${LAMBDA_ARCHITECTURE}"
+export CGO_ENABLED=0
+GOARCH_VALUE="amd64"
+if [[ "$LAMBDA_ARCHITECTURE" == "arm64" ]]; then
+  GOARCH_VALUE="arm64"
+fi
+GOOS=linux GOARCH="$GOARCH_VALUE" go build -tags lambda.norpc -o "$BUILD_DIR/bootstrap" ./cmd/lambda
+
+echo "Packaging lambda..."
+(cd "$BUILD_DIR" && zip -q -j "$ZIP_PATH" bootstrap)
 
 lambda_wait_until_idle 30 10 || true
 
