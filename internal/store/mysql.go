@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"strings"
+	"sync"
 	"time"
 
 	_ "github.com/go-sql-driver/mysql"
@@ -18,6 +19,7 @@ type MySQLStore struct {
 	db                *sql.DB
 	hasRawPayloadJSON bool
 	hasProcessedText  bool
+	schemaCheckOnce   sync.Once
 }
 
 func NewMySQLStore(dsn string) (*MySQLStore, error) {
@@ -28,10 +30,7 @@ func NewMySQLStore(dsn string) (*MySQLStore, error) {
 	db.SetMaxOpenConns(50)
 	db.SetMaxIdleConns(20)
 	db.SetConnMaxLifetime(30 * time.Minute)
-	s := &MySQLStore{db: db}
-	s.hasRawPayloadJSON = s.columnExists("webhook_events", "raw_payload_json")
-	s.hasProcessedText = s.columnExists("webhook_events", "processed_text")
-	return s, nil
+	return &MySQLStore{db: db}, nil
 }
 
 func (s *MySQLStore) Ping(ctx context.Context) error { return s.db.PingContext(ctx) }
@@ -45,6 +44,13 @@ WHERE table_schema = DATABASE() AND table_name = ? AND column_name = ?`,
 		tableName, columnName,
 	).Scan(&exists)
 	return err == nil && exists > 0
+}
+
+func (s *MySQLStore) ensureEventSchemaCapabilities() {
+	s.schemaCheckOnce.Do(func() {
+		s.hasRawPayloadJSON = s.columnExists("webhook_events", "raw_payload_json")
+		s.hasProcessedText = s.columnExists("webhook_events", "processed_text")
+	})
 }
 
 func (s *MySQLStore) CreateAccount(ctx context.Context, email string) (domain.Account, string, error) {
@@ -213,6 +219,7 @@ func (s *MySQLStore) ListForwardTargets(ctx context.Context, accountID string) (
 }
 
 func (s *MySQLStore) CreateEvent(ctx context.Context, e domain.WebhookEvent) (domain.WebhookEvent, error) {
+	s.ensureEventSchemaCapabilities()
 	e.ID = uuid.NewString()
 	e.CreatedAt = time.Now().UTC()
 	query := `INSERT INTO webhook_events(id, account_id, type_id, secret_id, request_id, source_event_id, type_key, payload_json, action_selected, status, created_at) VALUES(?,?,?,?,?,?,?,?,?, ?,UTC_TIMESTAMP())`
@@ -234,6 +241,7 @@ func (s *MySQLStore) UpdateEventStatus(ctx context.Context, eventID, status, act
 }
 
 func (s *MySQLStore) ListEvents(ctx context.Context, accountID string, limit int) ([]domain.WebhookEvent, error) {
+	s.ensureEventSchemaCapabilities()
 	if limit <= 0 {
 		limit = 50
 	}
@@ -258,6 +266,7 @@ func (s *MySQLStore) ListEvents(ctx context.Context, accountID string, limit int
 }
 
 func (s *MySQLStore) FindEventBySourceEventID(ctx context.Context, accountID, sourceEventID string) (domain.WebhookEvent, error) {
+	s.ensureEventSchemaCapabilities()
 	if strings.TrimSpace(sourceEventID) == "" {
 		return domain.WebhookEvent{}, errors.New("source event id required")
 	}
