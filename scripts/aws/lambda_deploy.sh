@@ -13,6 +13,7 @@ LAMBDA_MEMORY_SIZE="${LAMBDA_MEMORY_SIZE:-1024}"
 LAMBDA_TIMEOUT="${LAMBDA_TIMEOUT:-30}"
 LAMBDA_ENVIRONMENT="${LAMBDA_ENVIRONMENT:-production}"
 LAMBDA_ORIGIN_SHARED_SECRET="${LAMBDA_ORIGIN_SHARED_SECRET:-}"
+CORS_CONFIG="AllowCredentials=true,AllowHeaders=*,AllowMethods=*,AllowOrigins=*,ExposeHeaders=*,MaxAge=86400"
 BUILD_DIR="${BUILD_DIR:-/tmp/agenthook-lambda}"
 ZIP_PATH="${ZIP_PATH:-$BUILD_DIR/bootstrap.zip}"
 TRUST_POLICY_PATH="${TRUST_POLICY_PATH:-$BUILD_DIR/lambda-trust-policy.json}"
@@ -222,13 +223,15 @@ if ! aws lambda get-function-url-config --region "$AWS_REGION" --function-name "
   aws lambda create-function-url-config \
     --region "$AWS_REGION" \
     --function-name "$LAMBDA_FUNCTION_NAME" \
-    --auth-type NONE >/dev/null
+    --auth-type NONE \
+    --cors "$CORS_CONFIG" >/dev/null
 fi
 
 aws lambda update-function-url-config \
   --region "$AWS_REGION" \
   --function-name "$LAMBDA_FUNCTION_NAME" \
-  --auth-type NONE >/dev/null
+  --auth-type NONE \
+  --cors "$CORS_CONFIG" >/dev/null
 
 aws lambda add-permission \
   --region "$AWS_REGION" \

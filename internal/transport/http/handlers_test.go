@@ -77,6 +77,31 @@ func TestScaleKitStartUsesOAuthAuthorizeWhenClientConfigured(t *testing.T) {
 	}
 }
 
+func TestScaleKitStartFallsBackToHostedLoginWhenOAuthStateMintFails(t *testing.T) {
+	h := &Handler{
+		ScaleKitBaseURL:      "https://hookweb.scalekit.com",
+		ScaleKitClientID:     "client_123",
+		ScaleKitClientSecret: "secret_123",
+	}
+	req := httptest.NewRequest(http.MethodGet, "/auth/scalekit/start", nil)
+	rr := httptest.NewRecorder()
+
+	h.ScaleKitStart(rr, req)
+	if rr.Code != http.StatusFound {
+		t.Fatalf("expected status 302, got %d", rr.Code)
+	}
+	u, err := url.Parse(rr.Header().Get("Location"))
+	if err != nil {
+		t.Fatalf("parse redirect url: %v", err)
+	}
+	if u.Path != "/a/auth/login" {
+		t.Fatalf("expected hosted login path, got %s", u.Path)
+	}
+	if got := u.Query().Get("redirect_uri"); got != "https://app.agenthook.store/auth/scalekit/callback" {
+		t.Fatalf("unexpected redirect_uri: %s", got)
+	}
+}
+
 func TestScaleKitBaseNormalizesHookwebDevToCom(t *testing.T) {
 	h := &Handler{ScaleKitBaseURL: "https://hookweb.scalekit.dev"}
 	got := h.scalekitBase()

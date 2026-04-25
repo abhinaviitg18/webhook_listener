@@ -4,6 +4,7 @@ set -euo pipefail
 AWS_REGION="${AWS_REGION:-us-east-1}"
 PAGE_SIZE="${PAGE_SIZE:-50}"
 SLEEP_SEC="${SLEEP_SEC:-2}"
+CORS_CONFIG="${CORS_CONFIG:-AllowCredentials=true,AllowHeaders=*,AllowMethods=*,AllowOrigins=*,ExposeHeaders=*,MaxAge=86400}"
 
 list_functions() {
   local marker=""
@@ -32,13 +33,15 @@ ensure_public_url() {
     aws lambda create-function-url-config \
       --region "$AWS_REGION" \
       --function-name "$function_name" \
-      --auth-type NONE >/dev/null
+      --auth-type NONE \
+      --cors "$CORS_CONFIG" >/dev/null
   fi
 
   aws lambda update-function-url-config \
     --region "$AWS_REGION" \
     --function-name "$function_name" \
-    --auth-type NONE >/dev/null
+    --auth-type NONE \
+    --cors "$CORS_CONFIG" >/dev/null
 
   aws lambda add-permission \
     --region "$AWS_REGION" \

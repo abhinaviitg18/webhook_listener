@@ -122,12 +122,10 @@ func (h *Handler) RegisterEmail(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) ScaleKitStart(w http.ResponseWriter, r *http.Request) {
 	if h.hasScaleKitOAuthConfig() {
 		authURL, err := h.scaleKitAuthorizationURL(r)
-		if err != nil {
-			writeErr(w, http.StatusInternalServerError, err.Error())
+		if err == nil {
+			http.Redirect(w, r, authURL, http.StatusFound)
 			return
 		}
-		http.Redirect(w, r, authURL, http.StatusFound)
-		return
 	}
 
 	intent := strings.TrimSpace(strings.ToLower(r.URL.Query().Get("intent")))
