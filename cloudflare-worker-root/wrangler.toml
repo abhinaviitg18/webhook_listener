@@ -12,8 +12,6 @@ routes = [
 [vars]
 SCALEKIT_BASE_URL = "https://hookweb.scalekit.com"
 APP_REDIRECT_BASE = "https://app.agenthook.store"
-APP_ORIGIN_URL = ""
-APP_ORIGIN_SHARED_SECRET = ""
 
 [assets]
 directory = "../website"
