@@ -225,6 +225,11 @@ if ! aws lambda get-function-url-config --region "$AWS_REGION" --function-name "
     --auth-type NONE >/dev/null
 fi
 
+aws lambda update-function-url-config \
+  --region "$AWS_REGION" \
+  --function-name "$LAMBDA_FUNCTION_NAME" \
+  --auth-type NONE >/dev/null
+
 aws lambda add-permission \
   --region "$AWS_REGION" \
   --function-name "$LAMBDA_FUNCTION_NAME" \
