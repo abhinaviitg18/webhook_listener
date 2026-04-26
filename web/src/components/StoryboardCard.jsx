@@ -58,6 +58,16 @@ export const StoryboardCard = ({ event }) => {
             <p className={`font-story-text text-text-story text-sm mb-4 leading-relaxed ${event.status === 'LEARNING' ? 'opacity-80 italic' : ''}`}>
                 {event.story}
             </p>
+            {event.payload && (
+                <div className="mb-4 rounded-xl border border-slate-800 bg-slate-950/60 p-3">
+                    <div className="mb-2 text-[10px] font-label-caps text-slate-500">
+                        Payload Snapshot
+                    </div>
+                    <pre className="max-h-56 overflow-auto whitespace-pre-wrap break-words font-code-snippet text-[11px] leading-relaxed text-indigo-300">
+                        {event.payload}
+                    </pre>
+                </div>
+            )}
             <div className="flex items-center gap-2 flex-wrap">
                 {event.actions.map((action, i) => (
                     <motion.div

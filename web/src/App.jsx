@@ -67,6 +67,19 @@ function prettyJSON(value) {
   return JSON.stringify(value, null, 2);
 }
 
+function payloadPreview(event) {
+  const candidates = [event?.processed_text, event?.raw_payload_json, event?.payload_json];
+  for (const candidate of candidates) {
+    if (typeof candidate !== 'string' || candidate.trim() === '') continue;
+    const parsed = safeJSONParse(candidate, null);
+    if (parsed) {
+      return prettyJSON(parsed);
+    }
+    return candidate.trim();
+  }
+  return '';
+}
+
 function inferTypeKey(listener) {
   if (!listener) return '';
   return listener.type_key || '';
@@ -304,7 +317,9 @@ function App() {
                         minute: '2-digit',
                         second: '2-digit',
                       }),
-                      story: event.processed_text || `Received ${event.type_key || 'webhook'} payload.`,
+                      story: payloadPreview(event) || `Received ${event.type_key || 'webhook'} payload.`,
+                      payload: payloadPreview(event),
+                      typeKey: event.type_key || 'webhook',
                       actions: event.action_selected ? [event.action_selected] : ['LOGGED'],
                     }}
                   />
