@@ -50,11 +50,11 @@ type Config struct {
 }
 
 func Load() Config {
-	tidbDSN := getenv("TIDB_DSN", "")
-	if tidbDSN == "" {
-		tidbDSN = getenv("COMMERCE_MYSQL_DSN", "")
+	storeDSN := getenv("COMMERCE_MYSQL_DSN", "")
+	if storeDSN == "" {
+		storeDSN = getenv("TIDB_DSN", "")
 	}
-	defaultInMemoryStore := strings.TrimSpace(tidbDSN) == ""
+	defaultInMemoryStore := strings.TrimSpace(storeDSN) == ""
 
 	llmKey := getenv("LLM_API_KEY", "")
 	if llmKey == "" {
@@ -73,7 +73,7 @@ func Load() Config {
 		AppSessionSecret:     getenv("APP_SESSION_SECRET", getenv("SCALEKIT_CLIENT_SECRET", "")),
 		PublicBaseURL:        getenv("PUBLIC_BASE_URL", "https://app.agenthook.store"),
 
-		TiDBDSN: tidbDSN,
+		TiDBDSN: storeDSN,
 
 		PineconeAPIKey:    getenv("PINECONE_API_KEY", ""),
 		PineconeIndexURL:  pineconeHost,
