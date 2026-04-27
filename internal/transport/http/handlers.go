@@ -71,6 +71,7 @@ func NewRouter(h *Handler, verifier auth.RequestVerifier) http.Handler {
 		ar.Get("/api/policy/master", h.GetMasterPromptPolicy)
 		ar.Post("/api/policy/skills", h.CreateWebhookSkill)
 		ar.Get("/api/policy/skills", h.ListWebhookSkills)
+		ar.Post("/api/policy/skills/dry-run", h.DryRunSkills)
 		ar.Get("/api/me", h.UserInfo)
 
 		ar.Post("/v1/listeners", h.CreateListener)
@@ -1366,6 +1367,40 @@ func (h *Handler) ListTransforms(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (h *Handler) DryRunSkills(w http.ResponseWriter, r *http.Request) {
+	acct, ok := auth.AccountFromContext(r.Context())
+	if !ok {
+		writeErr(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	var body struct {
+		Payload string `json:"payload"`
+		TypeKey string `json:"type_key"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid json")
+		return
+	}
+	if body.TypeKey == "" {
+		writeErr(w, http.StatusBadRequest, "type_key required")
+		return
+	}
+	skills, err := h.Store.ListWebhookSkills(r.Context(), acct.ID, body.TypeKey)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	skill, matched := h.Processor.MatchSkill(skills, body.Payload)
+	out := map[string]any{
+		"matched": matched,
+		"skill":   nil,
+	}
+	if matched {
+		out["skill"] = skill
 	}
 	writeJSON(w, http.StatusOK, out)
 }

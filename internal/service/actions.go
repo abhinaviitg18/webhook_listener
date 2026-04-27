@@ -127,6 +127,10 @@ type decisionPolicyContext struct {
 	Skills       []domain.WebhookSkill
 }
 
+func (p *Processor) MatchSkill(skills []domain.WebhookSkill, payload string) (domain.WebhookSkill, bool) {
+	return chooseSkill(skills, payload)
+}
+
 func (p *Processor) ProcessWebhook(ctx context.Context, account domain.Account, whType domain.WebhookType, secret domain.WebhookSecret, requestID, payload string) (domain.WebhookEvent, domain.ProcessDecision, error) {
 	rawPayload := payload
 	policyCtx := p.loadPolicyContext(ctx, account.ID, whType.TypeKey)
@@ -298,25 +302,25 @@ func chooseSkill(skills []domain.WebhookSkill, payload string) (domain.WebhookSk
 		if !sk.Enabled {
 			continue
 		}
-		if matchesAllTokens(normalized, sk.MatchContains) {
+		if matchesAnyToken(normalized, sk.MatchContains) {
 			return sk, true
 		}
 	}
 	return domain.WebhookSkill{}, false
 }
 
-func matchesAllTokens(normalizedPayload, matchContains string) bool {
+func matchesAnyToken(normalizedPayload, matchContains string) bool {
 	tokens := strings.Split(matchContains, ",")
 	for _, t := range tokens {
 		token := strings.TrimSpace(strings.ToLower(t))
 		if token == "" {
 			continue
 		}
-		if !strings.Contains(normalizedPayload, token) {
-			return false
+		if strings.Contains(normalizedPayload, token) {
+			return true
 		}
 	}
-	return true
+	return false
 }
 
 func normalizeMemoryMode(in string) string {
