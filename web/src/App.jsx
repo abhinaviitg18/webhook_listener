@@ -409,8 +409,9 @@ const BYOKSettings = () => {
         <FormField label="Provider">
           <Select value={provider} onChange={(e) => setProvider(e.target.value)}>
             <option value="groq">Groq (Recommended)</option>
+            <option value="cerebras">Cerebras</option>
             <option value="openai">OpenAI</option>
-            <option value="anthropic">Anthropic</option>
+            <option value="openrouter">OpenRouter</option>
           </Select>
         </FormField>
         <FormField label="API Key">

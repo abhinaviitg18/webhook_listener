@@ -801,13 +801,24 @@ func (h *Handler) UpsertBYOKProvider(w http.ResponseWriter, r *http.Request) {
 			baseURL = "https://api.groq.com/openai/v1"
 		case "cerebras":
 			baseURL = "https://api.cerebras.ai/v1"
+		case "openai":
+			baseURL = "https://api.openai.com/v1"
 		default:
 			baseURL = "https://openrouter.ai/api/v1"
 		}
 	}
 	model := strings.TrimSpace(body.Model)
 	if model == "" {
-		model = "llama3-70b-8192"
+		switch provider {
+		case "groq":
+			model = "llama3-70b-8192"
+		case "cerebras":
+			model = "llama3.1-70b"
+		case "openai":
+			model = "gpt-4o-mini"
+		default:
+			model = "meta-llama/llama-3-70b-instruct"
+		}
 	}
 	cfg, err := h.Store.UpsertBYOKConfig(r.Context(), domain.BYOKProviderConfig{
 		AccountID: acct.ID,
