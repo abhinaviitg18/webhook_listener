@@ -10,6 +10,7 @@ type Store interface {
 	CreateWebhookType(ctx context.Context, accountID, typeKey, plainTextAction string, useLLMFallback bool) (WebhookType, error)
 	ListWebhookTypes(ctx context.Context, accountID string) ([]WebhookType, error)
 	GetWebhookTypeByAccountAndKey(ctx context.Context, accountID, typeKey string) (WebhookType, error)
+	DeleteWebhookType(ctx context.Context, accountID, typeID string) error
 
 	CreateSecret(ctx context.Context, accountID, typeID string) (WebhookSecret, string, error)
 	ListSecrets(ctx context.Context, accountID, typeID string) ([]WebhookSecret, error)

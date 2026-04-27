@@ -163,6 +163,18 @@ func (s *MemoryStore) GetWebhookTypeByAccountAndKey(_ context.Context, accountID
 	return s.typesByID[id], nil
 }
 
+func (s *MemoryStore) DeleteWebhookType(_ context.Context, accountID, typeID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	wt, ok := s.typesByID[typeID]
+	if !ok || wt.AccountID != accountID {
+		return errors.New("type not found")
+	}
+	delete(s.typesByID, typeID)
+	delete(s.typesByAccountKey, accountID+"::"+wt.TypeKey)
+	return nil
+}
+
 func (s *MemoryStore) CreateSecret(_ context.Context, accountID, typeID string) (domain.WebhookSecret, string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

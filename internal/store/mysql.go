@@ -153,6 +153,11 @@ func (s *MySQLStore) GetWebhookTypeByID(ctx context.Context, typeID string) (dom
 	return w, nil
 }
 
+func (s *MySQLStore) DeleteWebhookType(ctx context.Context, accountID, typeID string) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM webhook_types WHERE id=? AND account_id=?`, typeID, accountID)
+	return err
+}
+
 func (s *MySQLStore) CreateSecret(ctx context.Context, accountID, typeID string) (domain.WebhookSecret, string, error) {
 	raw, err := security.NewToken(18)
 	if err != nil {

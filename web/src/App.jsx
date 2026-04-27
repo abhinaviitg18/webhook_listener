@@ -468,6 +468,21 @@ const UrlsTab = ({ listeners, user, onRefresh, copied, setCopied }) => {
     Promise.allSettled(listeners.map((listener) => fetchSecrets(listener))).finally(() => setLoadingSecrets(false));
   }, [listeners]);
 
+  const deleteListener = async (listener) => {
+    if (!window.confirm(`Delete listener "${listener.listener_id}" (${listener.provider})? This will revoke all its secrets.`)) return;
+    try {
+      await apiRequest(`/v1/listeners/${listener.listener_id}?provider=${listener.provider}`, { method: 'DELETE' });
+      setListeners((prev) => prev.filter((l) => l.listener_id !== listener.listener_id || l.provider !== listener.provider));
+      setSecretsHistory((prev) => {
+        const next = { ...prev };
+        delete next[`${listener.provider}:${listener.listener_id}`];
+        return next;
+      });
+    } catch (err) {
+      setError(`Failed to delete listener: ${err.message}`);
+    }
+  };
+
   const createListener = async () => {
     setSubmitting(true);
     setError('');
@@ -644,7 +659,16 @@ const UrlsTab = ({ listeners, user, onRefresh, copied, setCopied }) => {
                       {listener.deployment_mode} · {listener.type_key}
                     </p>
                   </div>
-                  <StatusBadge status="ACTIVE" />
+                  <div className="flex items-start gap-2">
+                    <StatusBadge status="ACTIVE" />
+                    <button
+                      onClick={() => deleteListener(listener)}
+                      title="Delete listener"
+                      className="ml-1 text-slate-500 hover:text-red-400 transition-colors"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6" /><path d="M19 6l-1 14H6L5 6" /><path d="M10 11v6" /><path d="M14 11v6" /><path d="M9 6V4h6v2" /></svg>
+                    </button>
+                  </div>
                 </div>
 
                 <div className="space-y-2">

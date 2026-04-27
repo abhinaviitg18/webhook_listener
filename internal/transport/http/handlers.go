@@ -75,6 +75,7 @@ func NewRouter(h *Handler, verifier auth.RequestVerifier) http.Handler {
 
 		ar.Post("/v1/listeners", h.CreateListener)
 		ar.Get("/v1/listeners", h.ListListeners)
+		ar.Delete("/v1/listeners/{listenerID}", h.DeleteListener)
 		ar.Post("/v1/listeners/{listenerID}/secrets", h.CreateListenerSecret)
 		ar.Get("/v1/listeners/{listenerID}/secrets", h.ListListenerSecrets)
 		ar.Get("/v1/listeners/{listenerID}/events", h.ListListenerEvents)
@@ -997,6 +998,47 @@ func (h *Handler) ListListenerSecrets(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+func (h *Handler) DeleteListener(w http.ResponseWriter, r *http.Request) {
+	acct, ok := auth.AccountFromContext(r.Context())
+	if !ok {
+		writeErr(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	listenerID := normalizeListenerID(chi.URLParam(r, "listenerID"))
+	provider := normalizeProvider(r.URL.Query().Get("provider"))
+	if listenerID == "" {
+		writeErr(w, http.StatusBadRequest, "listenerID required")
+		return
+	}
+	// Find the webhook type – provider is helpful but we fall back to any match
+	var whType domain.WebhookType
+	types, _ := h.Store.ListWebhookTypes(r.Context(), acct.ID)
+	for _, t := range types {
+		ref, ok := parseListenerTypeKey(t.TypeKey)
+		if !ok {
+			continue
+		}
+		if ref.ListenerID == listenerID && (provider == "" || ref.Provider == provider) {
+			whType = t
+			break
+		}
+	}
+	if whType.ID == "" {
+		writeErr(w, http.StatusNotFound, "listener not found")
+		return
+	}
+	// Revoke all active secrets belonging to this type
+	secrets, _ := h.Store.ListSecrets(r.Context(), acct.ID, whType.ID)
+	for _, sec := range secrets {
+		_ = h.Store.DeleteSecret(r.Context(), acct.ID, sec.ID)
+	}
+	if err := h.Store.DeleteWebhookType(r.Context(), acct.ID, whType.ID); err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"deleted": true, "listener_id": listenerID})
 }
 
 func (h *Handler) ListListenerEvents(w http.ResponseWriter, r *http.Request) {
