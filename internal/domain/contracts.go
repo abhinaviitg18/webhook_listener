@@ -6,6 +6,7 @@ type Store interface {
 	CreateAccount(ctx context.Context, email string) (Account, string, error)
 	GetAccountBySlug(ctx context.Context, slug string) (Account, error)
 	GetAccountByToken(ctx context.Context, token string) (Account, error)
+	GetAccount(ctx context.Context, id string) (Account, error)
 
 	CreateWebhookType(ctx context.Context, accountID, typeKey, plainTextAction string, useLLMFallback bool) (WebhookType, error)
 	ListWebhookTypes(ctx context.Context, accountID string) ([]WebhookType, error)
@@ -25,6 +26,7 @@ type Store interface {
 	CreateEvent(ctx context.Context, event WebhookEvent) (WebhookEvent, error)
 	UpdateEventStatus(ctx context.Context, eventID, status, action string) error
 	ListEvents(ctx context.Context, accountID string, limit int) ([]WebhookEvent, error)
+	GetEvent(ctx context.Context, accountID, eventID string) (WebhookEvent, error)
 	FindEventBySourceEventID(ctx context.Context, accountID, sourceEventID string) (WebhookEvent, error)
 
 	CreateTypeSignature(ctx context.Context, sig WebhookTypeSignature) (WebhookTypeSignature, error)

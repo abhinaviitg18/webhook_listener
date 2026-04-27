@@ -113,6 +113,16 @@ func (s *MemoryStore) GetAccountByToken(_ context.Context, token string) (domain
 	return s.accountsByID[id], nil
 }
 
+func (s *MemoryStore) GetAccount(_ context.Context, id string) (domain.Account, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	acct, ok := s.accountsByID[id]
+	if !ok {
+		return domain.Account{}, errors.New("account not found")
+	}
+	return acct, nil
+}
+
 func (s *MemoryStore) CreateWebhookType(_ context.Context, accountID, typeKey, plainTextAction string, useLLMFallback bool) (domain.WebhookType, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -297,6 +307,16 @@ func (s *MemoryStore) UpdateEventStatus(_ context.Context, eventID, status, acti
 	e.ActionSelected = action
 	s.events[eventID] = e
 	return nil
+}
+
+func (s *MemoryStore) GetEvent(_ context.Context, accountID, eventID string) (domain.WebhookEvent, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	ev, ok := s.events[eventID]
+	if !ok || ev.AccountID != accountID {
+		return domain.WebhookEvent{}, errors.New("event not found")
+	}
+	return ev, nil
 }
 
 func (s *MemoryStore) ListEvents(_ context.Context, accountID string, limit int) ([]domain.WebhookEvent, error) {

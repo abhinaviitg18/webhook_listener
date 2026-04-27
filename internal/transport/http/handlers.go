@@ -61,6 +61,8 @@ func NewRouter(h *Handler, verifier auth.RequestVerifier) http.Handler {
 		ar.Delete("/api/webhooks/secrets/{secretID}", h.DeleteSecret)
 		ar.Post("/api/forward-targets", h.CreateForwardTarget)
 		ar.Get("/api/events", h.ListEvents)
+		ar.Post("/api/events/{eventID}/re-run", h.ReprocessEvent)
+		ar.Get("/api/events/{eventID}", h.GetEvent)
 		ar.Post("/api/resolver/signatures", h.CreateSignature)
 		ar.Get("/api/resolver/signatures", h.ListSignatures)
 		ar.Post("/api/resolver/transforms", h.CreateTransform)
@@ -1422,6 +1424,47 @@ func (h *Handler) DryRunClassify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+func (h *Handler) ReprocessEvent(w http.ResponseWriter, r *http.Request) {
+	acct, ok := auth.AccountFromContext(r.Context())
+	if !ok {
+		writeErr(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	eventID := chi.URLParam(r, "eventID")
+	if eventID == "" {
+		writeErr(w, http.StatusBadRequest, "eventID required")
+		return
+	}
+	event, decision, err := h.Processor.ReprocessEvent(r.Context(), acct.ID, eventID)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"event":    event,
+		"decision": decision,
+	})
+}
+
+func (h *Handler) GetEvent(w http.ResponseWriter, r *http.Request) {
+	acct, ok := auth.AccountFromContext(r.Context())
+	if !ok {
+		writeErr(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	eventID := chi.URLParam(r, "eventID")
+	if eventID == "" {
+		writeErr(w, http.StatusBadRequest, "eventID required")
+		return
+	}
+	event, err := h.Store.GetEvent(r.Context(), acct.ID, eventID)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, event)
 }
 
 func (h *Handler) DryRunTransform(w http.ResponseWriter, r *http.Request) {

@@ -133,7 +133,6 @@ func (p *Processor) MatchSkill(skills []domain.WebhookSkill, payload string) (do
 
 func (p *Processor) ProcessWebhook(ctx context.Context, account domain.Account, whType domain.WebhookType, secret domain.WebhookSecret, requestID, payload string) (domain.WebhookEvent, domain.ProcessDecision, error) {
 	rawPayload := payload
-	policyCtx := p.loadPolicyContext(ctx, account.ID, whType.TypeKey)
 	sourceEventID := extractSourceEventID(payload)
 	if sourceEventID != "" {
 		if existing, err := p.Store.FindEventBySourceEventID(ctx, account.ID, sourceEventID); err == nil {
@@ -169,6 +168,30 @@ func (p *Processor) ProcessWebhook(ctx context.Context, account domain.Account, 
 	if err != nil {
 		return domain.WebhookEvent{}, domain.ProcessDecision{}, err
 	}
+
+	return p.processWithPolicy(ctx, account, whType, event, payload)
+}
+
+func (p *Processor) ReprocessEvent(ctx context.Context, accountID, eventID string) (domain.WebhookEvent, domain.ProcessDecision, error) {
+	event, err := p.Store.GetEvent(ctx, accountID, eventID)
+	if err != nil {
+		return domain.WebhookEvent{}, domain.ProcessDecision{}, err
+	}
+	account, err := p.Store.GetAccount(ctx, accountID)
+	if err != nil {
+		return domain.WebhookEvent{}, domain.ProcessDecision{}, err
+	}
+	whType, err := p.Store.GetWebhookTypeByAccountAndKey(ctx, accountID, event.TypeKey)
+	if err != nil {
+		return domain.WebhookEvent{}, domain.ProcessDecision{}, err
+	}
+
+	// For re-processing, we use the already stored PayloadJSON (which might be canonically transformed)
+	return p.processWithPolicy(ctx, account, whType, event, event.PayloadJSON)
+}
+
+func (p *Processor) processWithPolicy(ctx context.Context, account domain.Account, whType domain.WebhookType, event domain.WebhookEvent, payload string) (domain.WebhookEvent, domain.ProcessDecision, error) {
+	policyCtx := p.loadPolicyContext(ctx, account.ID, whType.TypeKey)
 	memories := []domain.PineconeMemory{}
 	if p.Pinecone != nil {
 		memories, _ = p.Pinecone.Query(ctx, account.ID, payload, 5)
@@ -218,7 +241,7 @@ func (p *Processor) ProcessWebhook(ctx context.Context, account domain.Account, 
 	}
 
 	targets, _ := p.Store.ListForwardTargets(ctx, account.ID)
-	err = p.Executor.Execute(ctx, decision, account, event, targets)
+	err := p.Executor.Execute(ctx, decision, account, event, targets)
 	if err != nil {
 		_ = p.Store.UpdateEventStatus(ctx, event.ID, "failed", decision.ActionName)
 		return event, decision, err
@@ -238,8 +261,6 @@ func (p *Processor) ProcessWebhook(ctx context.Context, account domain.Account, 
 	}
 	event.Status = "processed"
 	event.ActionSelected = decision.ActionName
-	event.RawPayloadJSON = rawPayload
-	event.PayloadJSON = payload
 	if strings.TrimSpace(decision.ProcessedText) != "" {
 		event.ProcessedText = decision.ProcessedText
 	} else {

@@ -118,6 +118,13 @@ func (s *MySQLStore) CreateWebhookType(ctx context.Context, accountID, typeKey, 
 	return domain.WebhookType{ID: id, AccountID: accountID, TypeKey: typeKey, PlainTextAction: plainTextAction, UseLLMFallback: useLLMFallback, CreatedAt: time.Now().UTC()}, nil
 }
 
+func (s *MySQLStore) GetAccount(ctx context.Context, id string) (domain.Account, error) {
+	var a domain.Account
+	err := s.db.QueryRowContext(ctx, "SELECT id, slug, owner_email, created_at FROM accounts WHERE id=?", id).
+		Scan(&a.ID, &a.Slug, &a.OwnerEmail, &a.CreatedAt)
+	return a, err
+}
+
 func (s *MySQLStore) ListWebhookTypes(ctx context.Context, accountID string) ([]domain.WebhookType, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT id, account_id, type_key, plain_text_action, use_llm_fallback, created_at FROM webhook_types WHERE account_id=? ORDER BY created_at ASC`, accountID)
 	if err != nil {
@@ -282,6 +289,15 @@ func (s *MySQLStore) ListEvents(ctx context.Context, accountID string, limit int
 		out = append(out, e)
 	}
 	return out, nil
+}
+
+func (s *MySQLStore) GetEvent(ctx context.Context, accountID, eventID string) (domain.WebhookEvent, error) {
+	var e domain.WebhookEvent
+	err := s.db.QueryRowContext(ctx, `
+SELECT id, account_id, type_id, secret_id, request_id, source_event_id, type_key, raw_payload_json, payload_json, processed_text, status, action_selected, created_at 
+FROM webhook_events WHERE account_id=? AND id=?`, accountID, eventID).
+		Scan(&e.ID, &e.AccountID, &e.TypeID, &e.SecretID, &e.RequestID, &e.SourceEventID, &e.TypeKey, &e.RawPayloadJSON, &e.PayloadJSON, &e.ProcessedText, &e.Status, &e.ActionSelected, &e.CreatedAt)
+	return e, err
 }
 
 func (s *MySQLStore) FindEventBySourceEventID(ctx context.Context, accountID, sourceEventID string) (domain.WebhookEvent, error) {
