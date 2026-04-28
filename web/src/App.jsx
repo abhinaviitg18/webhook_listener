@@ -15,6 +15,8 @@ import {
   Wand2,
   TestTube2,
   Sparkles,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from './context/AuthContext';
@@ -820,6 +822,9 @@ const SkillsTab = ({ listeners, copied, setCopied, onRefreshListeners }) => {
   const [selectedTypeKey, setSelectedTypeKey] = useState(listenerOptions[0]?.value || '');
   const [skills, setSkills] = useState([]);
   const [loadingSkills, setLoadingSkills] = useState(false);
+  const [allSkillsByType, setAllSkillsByType] = useState({});
+  const [skillCounts, setSkillCounts] = useState({});
+  const [expandedSkillCard, setExpandedSkillCard] = useState('');
   const [skillForm, setSkillForm] = useState({
     skill_key: '',
     skill_prompt: '',
@@ -840,12 +845,47 @@ const SkillsTab = ({ listeners, copied, setCopied, onRefreshListeners }) => {
   useEffect(() => {
     if (!listenerOptions.length) {
       setSelectedTypeKey('');
+      setSkillCounts({});
       setSkills([]);
       return;
     }
     if (!listenerOptions.some((item) => item.value === selectedTypeKey)) {
       setSelectedTypeKey(listenerOptions[0].value);
     }
+  }, [listenerOptions, selectedTypeKey]);
+
+  useEffect(() => {
+    if (!listenerOptions.length) return;
+    let cancelled = false;
+
+    Promise.all(
+      listenerOptions.map(async (option) => {
+        const data = await apiRequest(`/api/policy/skills?type_key=${encodeURIComponent(option.value)}`);
+        const normalized = Array.isArray(data) ? data : [];
+        return [option.value, normalized];
+      }),
+    )
+      .then((entries) => {
+        if (cancelled) return;
+        const nextSkillsByType = Object.fromEntries(entries);
+        const nextCounts = Object.fromEntries(entries.map(([typeKey, items]) => [typeKey, items.length]));
+        setAllSkillsByType(nextSkillsByType);
+        setSkillCounts(nextCounts);
+
+        const firstWithSkills = listenerOptions.find((option) => nextCounts[option.value] > 0)?.value;
+        if (
+          firstWithSkills &&
+          selectedTypeKey === listenerOptions[0]?.value &&
+          nextCounts[selectedTypeKey] === 0
+        ) {
+          setSelectedTypeKey(firstWithSkills);
+        }
+      })
+      .catch((err) => console.error('Failed to prefetch skill counts', err));
+
+    return () => {
+      cancelled = true;
+    };
   }, [listenerOptions, selectedTypeKey]);
 
   useEffect(() => {
@@ -872,6 +912,14 @@ const SkillsTab = ({ listeners, copied, setCopied, onRefreshListeners }) => {
         }),
       });
       setSkills((current) => [created, ...current]);
+      setAllSkillsByType((current) => ({
+        ...current,
+        [selectedTypeKey]: [created, ...(current[selectedTypeKey] || [])],
+      }));
+      setSkillCounts((current) => ({
+        ...current,
+        [selectedTypeKey]: (current[selectedTypeKey] || 0) + 1,
+      }));
       setSkillForm((current) => ({
         ...current,
         skill_key: '',
@@ -901,7 +949,16 @@ const SkillsTab = ({ listeners, copied, setCopied, onRefreshListeners }) => {
         }),
       });
       const refreshed = await apiRequest(`/api/policy/skills?type_key=${encodeURIComponent(selectedTypeKey)}`);
-      setSkills(Array.isArray(refreshed) ? refreshed : []);
+      const normalized = Array.isArray(refreshed) ? refreshed : [];
+      setSkills(normalized);
+      setAllSkillsByType((current) => ({
+        ...current,
+        [selectedTypeKey]: normalized,
+      }));
+      setSkillCounts((current) => ({
+        ...current,
+        [selectedTypeKey]: normalized.length,
+      }));
       setSkillNotice('Preset applied. General and provider-specific skills were created.');
       await onRefreshListeners();
     } catch (err) {
@@ -946,6 +1003,11 @@ const SkillsTab = ({ listeners, copied, setCopied, onRefreshListeners }) => {
     }
   };
 
+  const listenerCards = listenerOptions.map((option) => ({
+    ...option,
+    skills: allSkillsByType[option.value] || [],
+  }));
+
   return (
     <motion.div
       initial={{ opacity: 0, x: -20 }}
@@ -976,7 +1038,7 @@ const SkillsTab = ({ listeners, copied, setCopied, onRefreshListeners }) => {
               <Select value={selectedTypeKey} onChange={(e) => setSelectedTypeKey(e.target.value)}>
                 {listenerOptions.map((option) => (
                   <option key={option.value} value={option.value}>
-                    {option.label}
+                    {skillCounts[option.value] > 0 ? `${option.label} (${skillCounts[option.value]} skills)` : option.label}
                   </option>
                 ))}
               </Select>
@@ -994,6 +1056,12 @@ const SkillsTab = ({ listeners, copied, setCopied, onRefreshListeners }) => {
               </div>
             )}
           </Panel>
+
+          {Object.values(skillCounts).some((count) => count > 0) && skillCounts[selectedTypeKey] === 0 && (
+            <InlineNotice>
+              This listener has no saved skills. The selector above highlights listeners that already do.
+            </InlineNotice>
+          )}
 
           <Panel
             title="Bootstrap Provider Skills"
@@ -1095,28 +1163,67 @@ const SkillsTab = ({ listeners, copied, setCopied, onRefreshListeners }) => {
           </Panel>
 
           <Panel
-            title="Existing Skills"
-            subtitle="These are the prompt-based rules already attached to the selected webhook type."
+            title="All Skills"
+            subtitle="Every listener's saved skills are shown below. Click a card to expand the full rule."
             action={loadingSkills ? <RefreshCw size={16} className="text-primary animate-spin" /> : null}
           >
             <div className="space-y-3">
-              {skills.map((skill) => (
-                <div key={skill.id} className="rounded-2xl border border-slate-800 bg-slate-950/30 p-4 space-y-2">
-                  <div className="flex items-start justify-between gap-3">
+              {listenerCards.map((listenerCard) => (
+                <div key={listenerCard.value} className="space-y-2">
+                  <div className="flex items-center justify-between px-1">
                     <div>
-                      <p className="text-white text-sm font-medium">{skill.skill_key}</p>
-                      <p className="text-slate-500 text-[11px] mt-1">
-                        {skill.match_contains || 'matches all'} · action {skill.forced_action || 'auto'} · priority {skill.priority}
-                      </p>
+                      <p className="text-white text-sm font-medium">{listenerCard.label}</p>
+                      <p className="text-slate-500 text-[11px] mt-1">{listenerCard.skills.length} saved skill{listenerCard.skills.length === 1 ? '' : 's'}</p>
                     </div>
-                    <StatusBadge status={skill.enabled ? 'ACTIVE' : 'LEARNING'} />
+                    {listenerCard.value === selectedTypeKey && <StatusBadge status="ACTIVE" />}
                   </div>
-                  <p className="text-slate-300 text-sm">{skill.skill_prompt || 'No prompt text saved.'}</p>
+
+                  {listenerCard.skills.map((skill) => {
+                    const cardID = `${listenerCard.value}:${skill.id}`;
+                    const isExpanded = expandedSkillCard === cardID;
+                    return (
+                      <button
+                        key={skill.id}
+                        type="button"
+                        onClick={() => setExpandedSkillCard((current) => (current === cardID ? '' : cardID))}
+                        className="w-full text-left rounded-2xl border border-slate-800 bg-slate-950/30 p-4 space-y-3 transition-colors hover:border-slate-700"
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <p className="text-white text-sm font-medium">{skill.skill_key}</p>
+                            <p className="text-slate-500 text-[11px] mt-1">
+                              {skill.match_contains || 'matches all'} · action {skill.forced_action || 'auto'} · priority {skill.priority}
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <StatusBadge status={skill.enabled ? 'ACTIVE' : 'LEARNING'} />
+                            {isExpanded ? <ChevronUp size={16} className="text-slate-500" /> : <ChevronDown size={16} className="text-slate-500" />}
+                          </div>
+                        </div>
+                        {isExpanded && (
+                          <div className="space-y-2 border-t border-slate-800/80 pt-3">
+                            <p className="text-slate-300 text-sm">{skill.skill_prompt || 'No prompt text saved.'}</p>
+                            <div className="grid grid-cols-1 gap-2 text-[11px] text-slate-400">
+                              <div>Type key: <code className="text-slate-300 break-all">{listenerCard.value}</code></div>
+                              <div>Memory write mode: <span className="text-slate-300">{skill.memory_write_mode || 'default'}</span></div>
+                              <div>Created: <span className="text-slate-300">{skill.created_at ? new Date(skill.created_at).toLocaleString() : 'Unknown'}</span></div>
+                            </div>
+                          </div>
+                        )}
+                      </button>
+                    );
+                  })}
+
+                  {!listenerCard.skills.length && (
+                    <p className="text-slate-500 text-center py-4 rounded-2xl border border-dashed border-slate-800">
+                      No skills saved for this listener yet.
+                    </p>
+                  )}
                 </div>
               ))}
-              {!skills.length && !loadingSkills && (
+              {!listenerCards.some((listenerCard) => listenerCard.skills.length > 0) && !loadingSkills && (
                 <p className="text-slate-500 text-center py-6">
-                  No skills exist for this listener yet. Use the preset or create one manually.
+                  No skills exist for this account yet. Use the preset or create one manually.
                 </p>
               )}
             </div>
