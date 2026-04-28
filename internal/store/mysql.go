@@ -269,16 +269,16 @@ func (s *MySQLStore) ListForwardTargets(ctx context.Context, accountID string) (
 }
 
 func (s *MySQLStore) CreateEvent(ctx context.Context, e domain.WebhookEvent) (domain.WebhookEvent, error) {
-	s.ensureEventSchemaCapabilities()
 	e.ID = uuid.NewString()
 	e.CreatedAt = time.Now().UTC()
-	query := `INSERT INTO webhook_events(id, account_id, type_id, secret_id, request_id, source_event_id, type_key, payload_json, action_selected, status, created_at) VALUES(?,?,?,?,?,?,?,?,?, ?,UTC_TIMESTAMP())`
-	args := []interface{}{e.ID, e.AccountID, e.TypeID, e.SecretID, e.RequestID, nullIfEmpty(e.SourceEventID), e.TypeKey, e.PayloadJSON, e.ActionSelected, e.Status}
-	if s.hasRawPayloadJSON && s.hasProcessedText {
-		query = `INSERT INTO webhook_events(id, account_id, type_id, secret_id, request_id, source_event_id, type_key, raw_payload_json, payload_json, processed_text, action_selected, status, created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?, ?,UTC_TIMESTAMP())`
-		args = []interface{}{e.ID, e.AccountID, e.TypeID, e.SecretID, e.RequestID, nullIfEmpty(e.SourceEventID), e.TypeKey, nullIfEmpty(e.RawPayloadJSON), e.PayloadJSON, nullIfEmpty(e.ProcessedText), e.ActionSelected, e.Status}
+	modernQuery := `INSERT INTO webhook_events(id, account_id, type_id, secret_id, request_id, source_event_id, type_key, raw_payload_json, payload_json, processed_text, action_selected, status, created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?, ?,UTC_TIMESTAMP())`
+	modernArgs := []interface{}{e.ID, e.AccountID, e.TypeID, e.SecretID, e.RequestID, nullIfEmpty(e.SourceEventID), e.TypeKey, nullIfEmpty(e.RawPayloadJSON), e.PayloadJSON, nullIfEmpty(e.ProcessedText), e.ActionSelected, e.Status}
+	_, err := s.db.ExecContext(ctx, modernQuery, modernArgs...)
+	if err != nil && isUnknownColumnErr(err) {
+		legacyQuery := `INSERT INTO webhook_events(id, account_id, type_id, secret_id, request_id, source_event_id, type_key, payload_json, action_selected, status, created_at) VALUES(?,?,?,?,?,?,?,?,?, ?,UTC_TIMESTAMP())`
+		legacyArgs := []interface{}{e.ID, e.AccountID, e.TypeID, e.SecretID, e.RequestID, nullIfEmpty(e.SourceEventID), e.TypeKey, e.PayloadJSON, e.ActionSelected, e.Status}
+		_, err = s.db.ExecContext(ctx, legacyQuery, legacyArgs...)
 	}
-	_, err := s.db.ExecContext(ctx, query, args...)
 	if err != nil {
 		return domain.WebhookEvent{}, err
 	}
@@ -291,25 +291,24 @@ func (s *MySQLStore) UpdateEventStatus(ctx context.Context, eventID, status, act
 }
 
 func (s *MySQLStore) UpdateEventProcessedText(ctx context.Context, eventID, processedText string) error {
-	s.ensureEventSchemaCapabilities()
-	if !s.hasProcessedText {
+	_, err := s.db.ExecContext(ctx, `UPDATE webhook_events SET processed_text=? WHERE id=?`, nullIfEmpty(processedText), eventID)
+	if err != nil && isUnknownColumnErr(err) {
 		log.Printf("mysql.update_event_processed_text_skipped event_id=%s reason=processed_text_column_unavailable", eventID)
 		return nil
 	}
-	_, err := s.db.ExecContext(ctx, `UPDATE webhook_events SET processed_text=? WHERE id=?`, nullIfEmpty(processedText), eventID)
 	return err
 }
 
 func (s *MySQLStore) ListEvents(ctx context.Context, accountID string, limit int) ([]domain.WebhookEvent, error) {
-	s.ensureEventSchemaCapabilities()
 	if limit <= 0 {
 		limit = 50
 	}
-	query := `SELECT id, account_id, type_id, secret_id, request_id, COALESCE(source_event_id,''), type_key, '', payload_json, '', action_selected, '', status, created_at FROM webhook_events WHERE account_id=? ORDER BY created_at DESC LIMIT ?`
-	if s.hasRawPayloadJSON && s.hasProcessedText {
-		query = `SELECT id, account_id, type_id, secret_id, request_id, COALESCE(source_event_id,''), type_key, COALESCE(raw_payload_json,''), payload_json, COALESCE(processed_text,''), action_selected, COALESCE(tags_json,''), status, created_at FROM webhook_events WHERE account_id=? ORDER BY created_at DESC LIMIT ?`
+	modernQuery := `SELECT id, account_id, type_id, secret_id, request_id, COALESCE(source_event_id,''), type_key, COALESCE(raw_payload_json,''), payload_json, COALESCE(processed_text,''), action_selected, COALESCE(tags_json,''), status, created_at FROM webhook_events WHERE account_id=? ORDER BY created_at DESC LIMIT ?`
+	rows, err := s.db.QueryContext(ctx, modernQuery, accountID, limit)
+	if err != nil && isUnknownColumnErr(err) {
+		legacyQuery := `SELECT id, account_id, type_id, secret_id, request_id, COALESCE(source_event_id,''), type_key, '', payload_json, '', action_selected, '', status, created_at FROM webhook_events WHERE account_id=? ORDER BY created_at DESC LIMIT ?`
+		rows, err = s.db.QueryContext(ctx, legacyQuery, accountID, limit)
 	}
-	rows, err := s.db.QueryContext(ctx, query, accountID, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -326,29 +325,31 @@ func (s *MySQLStore) ListEvents(ctx context.Context, accountID string, limit int
 }
 
 func (s *MySQLStore) GetEvent(ctx context.Context, accountID, eventID string) (domain.WebhookEvent, error) {
-	s.ensureEventSchemaCapabilities()
-	query := `SELECT id, account_id, type_id, secret_id, request_id, COALESCE(source_event_id,''), type_key, '', payload_json, '', action_selected, '', status, created_at FROM webhook_events WHERE account_id=? AND id=?`
-	if s.hasRawPayloadJSON && s.hasProcessedText {
-		query = `SELECT id, account_id, type_id, secret_id, request_id, COALESCE(source_event_id,''), type_key, COALESCE(raw_payload_json,''), payload_json, COALESCE(processed_text,''), action_selected, COALESCE(tags_json,''), status, created_at FROM webhook_events WHERE account_id=? AND id=?`
-	}
+	modernQuery := `SELECT id, account_id, type_id, secret_id, request_id, COALESCE(source_event_id,''), type_key, COALESCE(raw_payload_json,''), payload_json, COALESCE(processed_text,''), action_selected, COALESCE(tags_json,''), status, created_at FROM webhook_events WHERE account_id=? AND id=?`
 	var e domain.WebhookEvent
-	err := s.db.QueryRowContext(ctx, query, accountID, eventID).
+	err := s.db.QueryRowContext(ctx, modernQuery, accountID, eventID).
 		Scan(&e.ID, &e.AccountID, &e.TypeID, &e.SecretID, &e.RequestID, &e.SourceEventID, &e.TypeKey, &e.RawPayloadJSON, &e.PayloadJSON, &e.ProcessedText, &e.ActionSelected, &e.TagsJSON, &e.Status, &e.CreatedAt)
+	if err != nil && isUnknownColumnErr(err) {
+		legacyQuery := `SELECT id, account_id, type_id, secret_id, request_id, COALESCE(source_event_id,''), type_key, '', payload_json, '', action_selected, '', status, created_at FROM webhook_events WHERE account_id=? AND id=?`
+		err = s.db.QueryRowContext(ctx, legacyQuery, accountID, eventID).
+			Scan(&e.ID, &e.AccountID, &e.TypeID, &e.SecretID, &e.RequestID, &e.SourceEventID, &e.TypeKey, &e.RawPayloadJSON, &e.PayloadJSON, &e.ProcessedText, &e.ActionSelected, &e.TagsJSON, &e.Status, &e.CreatedAt)
+	}
 	return e, err
 }
 
 func (s *MySQLStore) FindEventBySourceEventID(ctx context.Context, accountID, sourceEventID string) (domain.WebhookEvent, error) {
-	s.ensureEventSchemaCapabilities()
 	if strings.TrimSpace(sourceEventID) == "" {
 		return domain.WebhookEvent{}, errors.New("source event id required")
 	}
 	var e domain.WebhookEvent
-	query := `SELECT id, account_id, type_id, secret_id, request_id, COALESCE(source_event_id,''), type_key, '', payload_json, '', action_selected, status, created_at FROM webhook_events WHERE account_id=? AND source_event_id=? LIMIT 1`
-	if s.hasRawPayloadJSON && s.hasProcessedText {
-		query = `SELECT id, account_id, type_id, secret_id, request_id, COALESCE(source_event_id,''), type_key, COALESCE(raw_payload_json,''), payload_json, COALESCE(processed_text,''), action_selected, status, created_at FROM webhook_events WHERE account_id=? AND source_event_id=? LIMIT 1`
+	modernQuery := `SELECT id, account_id, type_id, secret_id, request_id, COALESCE(source_event_id,''), type_key, COALESCE(raw_payload_json,''), payload_json, COALESCE(processed_text,''), action_selected, '', status, created_at FROM webhook_events WHERE account_id=? AND source_event_id=? LIMIT 1`
+	err := s.db.QueryRowContext(ctx, modernQuery, accountID, sourceEventID).
+		Scan(&e.ID, &e.AccountID, &e.TypeID, &e.SecretID, &e.RequestID, &e.SourceEventID, &e.TypeKey, &e.RawPayloadJSON, &e.PayloadJSON, &e.ProcessedText, &e.ActionSelected, &e.TagsJSON, &e.Status, &e.CreatedAt)
+	if err != nil && isUnknownColumnErr(err) {
+		legacyQuery := `SELECT id, account_id, type_id, secret_id, request_id, COALESCE(source_event_id,''), type_key, '', payload_json, '', action_selected, '', status, created_at FROM webhook_events WHERE account_id=? AND source_event_id=? LIMIT 1`
+		err = s.db.QueryRowContext(ctx, legacyQuery, accountID, sourceEventID).
+			Scan(&e.ID, &e.AccountID, &e.TypeID, &e.SecretID, &e.RequestID, &e.SourceEventID, &e.TypeKey, &e.RawPayloadJSON, &e.PayloadJSON, &e.ProcessedText, &e.ActionSelected, &e.TagsJSON, &e.Status, &e.CreatedAt)
 	}
-	err := s.db.QueryRowContext(ctx, query, accountID, sourceEventID).
-		Scan(&e.ID, &e.AccountID, &e.TypeID, &e.SecretID, &e.RequestID, &e.SourceEventID, &e.TypeKey, &e.RawPayloadJSON, &e.PayloadJSON, &e.ProcessedText, &e.ActionSelected, &e.Status, &e.CreatedAt)
 	if err != nil {
 		return domain.WebhookEvent{}, err
 	}
@@ -356,12 +357,15 @@ func (s *MySQLStore) FindEventBySourceEventID(ctx context.Context, accountID, so
 }
 
 func (s *MySQLStore) ListEventsByTag(ctx context.Context, accountID, tag string, limit int) ([]domain.WebhookEvent, error) {
-	s.ensureEventSchemaCapabilities()
 	if limit <= 0 {
 		limit = 50
 	}
-	query := `SELECT id, account_id, type_id, secret_id, request_id, COALESCE(source_event_id,''), type_key, COALESCE(raw_payload_json,''), payload_json, COALESCE(processed_text,''), action_selected, COALESCE(tags_json,''), status, created_at FROM webhook_events WHERE account_id=? AND tags_json LIKE ? ORDER BY created_at DESC LIMIT ?`
-	rows, err := s.db.QueryContext(ctx, query, accountID, `%"`+tag+`"%`, limit)
+	modernQuery := `SELECT id, account_id, type_id, secret_id, request_id, COALESCE(source_event_id,''), type_key, COALESCE(raw_payload_json,''), payload_json, COALESCE(processed_text,''), action_selected, COALESCE(tags_json,''), status, created_at FROM webhook_events WHERE account_id=? AND tags_json LIKE ? ORDER BY created_at DESC LIMIT ?`
+	rows, err := s.db.QueryContext(ctx, modernQuery, accountID, `%"`+tag+`"%`, limit)
+	if err != nil && isUnknownColumnErr(err) {
+		legacyQuery := `SELECT id, account_id, type_id, secret_id, request_id, COALESCE(source_event_id,''), type_key, '', payload_json, '', action_selected, '', status, created_at FROM webhook_events WHERE account_id=? ORDER BY created_at DESC LIMIT ?`
+		rows, err = s.db.QueryContext(ctx, legacyQuery, accountID, limit)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -379,7 +383,18 @@ func (s *MySQLStore) ListEventsByTag(ctx context.Context, accountID, tag string,
 
 func (s *MySQLStore) UpdateEventTags(ctx context.Context, eventID, tagsJSON string) error {
 	_, err := s.db.ExecContext(ctx, `UPDATE webhook_events SET tags_json=? WHERE id=?`, tagsJSON, eventID)
+	if err != nil && isUnknownColumnErr(err) {
+		return nil
+	}
 	return err
+}
+
+func isUnknownColumnErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "unknown column")
 }
 
 func (s *MySQLStore) CreateTypeSignature(ctx context.Context, sig domain.WebhookTypeSignature) (domain.WebhookTypeSignature, error) {
