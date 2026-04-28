@@ -21,6 +21,8 @@ type MySQLStore struct {
 	hasRawPayloadJSON bool
 	hasProcessedText  bool
 	schemaCheckOnce   sync.Once
+	eventSchemaMu     sync.Mutex
+	eventSchemaReady  bool
 }
 
 type eventSelectVariant struct {
@@ -281,6 +283,13 @@ func (s *MySQLStore) CreateEvent(ctx context.Context, e domain.WebhookEvent) (do
 	modernArgs := []interface{}{e.ID, e.AccountID, e.TypeID, e.SecretID, e.RequestID, nullIfEmpty(e.SourceEventID), e.TypeKey, nullIfEmpty(e.RawPayloadJSON), e.PayloadJSON, nullIfEmpty(e.ProcessedText), e.ActionSelected, e.Status}
 	_, err := s.db.ExecContext(ctx, modernQuery, modernArgs...)
 	if err != nil && isUnknownColumnErr(err) {
+		if schemaErr := s.ensureWebhookEventSchema(ctx); schemaErr == nil {
+			_, err = s.db.ExecContext(ctx, modernQuery, modernArgs...)
+		} else {
+			log.Printf("mysql.ensure_webhook_event_schema_failed account_id=%s event_id=%s err=%v", e.AccountID, e.ID, schemaErr)
+		}
+	}
+	if err != nil && isUnknownColumnErr(err) {
 		legacyQuery := `INSERT INTO webhook_events(id, account_id, type_id, secret_id, request_id, source_event_id, type_key, payload_json, action_selected, status, created_at) VALUES(?,?,?,?,?,?,?,?,?, ?,UTC_TIMESTAMP())`
 		legacyArgs := []interface{}{e.ID, e.AccountID, e.TypeID, e.SecretID, e.RequestID, nullIfEmpty(e.SourceEventID), e.TypeKey, e.PayloadJSON, e.ActionSelected, e.Status}
 		_, err = s.db.ExecContext(ctx, legacyQuery, legacyArgs...)
@@ -298,6 +307,13 @@ func (s *MySQLStore) UpdateEventStatus(ctx context.Context, eventID, status, act
 
 func (s *MySQLStore) UpdateEventProcessedText(ctx context.Context, eventID, processedText string) error {
 	_, err := s.db.ExecContext(ctx, `UPDATE webhook_events SET processed_text=? WHERE id=?`, nullIfEmpty(processedText), eventID)
+	if err != nil && isUnknownColumnErr(err) {
+		if schemaErr := s.ensureWebhookEventSchema(ctx); schemaErr == nil {
+			_, err = s.db.ExecContext(ctx, `UPDATE webhook_events SET processed_text=? WHERE id=?`, nullIfEmpty(processedText), eventID)
+		} else {
+			log.Printf("mysql.ensure_webhook_event_schema_failed event_id=%s err=%v", eventID, schemaErr)
+		}
+	}
 	if err != nil && isUnknownColumnErr(err) {
 		log.Printf("mysql.update_event_processed_text_skipped event_id=%s reason=processed_text_column_unavailable", eventID)
 		return nil
@@ -333,6 +349,31 @@ func eventSelectVariants() []eventSelectVariant {
 	}
 }
 
+func webhookEventSchemaStatements() []string {
+	return []string{
+		`ALTER TABLE webhook_events ADD COLUMN IF NOT EXISTS source_event_id VARCHAR(128) NULL AFTER request_id`,
+		`ALTER TABLE webhook_events ADD COLUMN IF NOT EXISTS raw_payload_json JSON NULL AFTER type_key`,
+		`ALTER TABLE webhook_events ADD COLUMN IF NOT EXISTS processed_text TEXT NULL AFTER payload_json`,
+		`ALTER TABLE webhook_events ADD COLUMN IF NOT EXISTS tags_json TEXT NULL AFTER action_selected`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS uq_events_account_source ON webhook_events (account_id, source_event_id)`,
+	}
+}
+
+func (s *MySQLStore) ensureWebhookEventSchema(ctx context.Context) error {
+	s.eventSchemaMu.Lock()
+	defer s.eventSchemaMu.Unlock()
+	if s.eventSchemaReady {
+		return nil
+	}
+	for _, stmt := range webhookEventSchemaStatements() {
+		if _, err := s.db.ExecContext(ctx, stmt); err != nil {
+			return err
+		}
+	}
+	s.eventSchemaReady = true
+	return nil
+}
+
 func (s *MySQLStore) ListEvents(ctx context.Context, accountID string, limit int) ([]domain.WebhookEvent, error) {
 	if limit <= 0 {
 		limit = 50
@@ -346,6 +387,19 @@ func (s *MySQLStore) ListEvents(ctx context.Context, accountID string, limit int
 		rows, err = s.db.QueryContext(ctx, query, accountID, limit)
 		if err == nil || !isUnknownColumnErr(err) {
 			break
+		}
+	}
+	if err != nil && isUnknownColumnErr(err) {
+		if schemaErr := s.ensureWebhookEventSchema(ctx); schemaErr == nil {
+			for _, variant := range eventSelectVariants() {
+				query := buildEventSelectQuery(`WHERE account_id=? ORDER BY created_at DESC LIMIT ?`, variant.includeRaw, variant.includeProcessed, variant.includeTags)
+				rows, err = s.db.QueryContext(ctx, query, accountID, limit)
+				if err == nil || !isUnknownColumnErr(err) {
+					break
+				}
+			}
+		} else {
+			log.Printf("mysql.ensure_webhook_event_schema_failed account_id=%s err=%v", accountID, schemaErr)
 		}
 	}
 	if err != nil {
@@ -374,6 +428,20 @@ func (s *MySQLStore) GetEvent(ctx context.Context, accountID, eventID string) (d
 			break
 		}
 	}
+	if err != nil && isUnknownColumnErr(err) {
+		if schemaErr := s.ensureWebhookEventSchema(ctx); schemaErr == nil {
+			for _, variant := range eventSelectVariants() {
+				query := buildEventSelectQuery(`WHERE account_id=? AND id=?`, variant.includeRaw, variant.includeProcessed, variant.includeTags)
+				err = s.db.QueryRowContext(ctx, query, accountID, eventID).
+					Scan(&e.ID, &e.AccountID, &e.TypeID, &e.SecretID, &e.RequestID, &e.SourceEventID, &e.TypeKey, &e.RawPayloadJSON, &e.PayloadJSON, &e.ProcessedText, &e.ActionSelected, &e.TagsJSON, &e.Status, &e.CreatedAt)
+				if err == nil || !isUnknownColumnErr(err) {
+					break
+				}
+			}
+		} else {
+			log.Printf("mysql.ensure_webhook_event_schema_failed account_id=%s event_id=%s err=%v", accountID, eventID, schemaErr)
+		}
+	}
 	return e, err
 }
 
@@ -389,6 +457,20 @@ func (s *MySQLStore) FindEventBySourceEventID(ctx context.Context, accountID, so
 			Scan(&e.ID, &e.AccountID, &e.TypeID, &e.SecretID, &e.RequestID, &e.SourceEventID, &e.TypeKey, &e.RawPayloadJSON, &e.PayloadJSON, &e.ProcessedText, &e.ActionSelected, &e.TagsJSON, &e.Status, &e.CreatedAt)
 		if err == nil || !isUnknownColumnErr(err) {
 			break
+		}
+	}
+	if err != nil && isUnknownColumnErr(err) {
+		if schemaErr := s.ensureWebhookEventSchema(ctx); schemaErr == nil {
+			for _, variant := range eventSelectVariants() {
+				query := buildEventSelectQuery(`WHERE account_id=? AND source_event_id=? LIMIT 1`, variant.includeRaw, variant.includeProcessed, variant.includeTags)
+				err = s.db.QueryRowContext(ctx, query, accountID, sourceEventID).
+					Scan(&e.ID, &e.AccountID, &e.TypeID, &e.SecretID, &e.RequestID, &e.SourceEventID, &e.TypeKey, &e.RawPayloadJSON, &e.PayloadJSON, &e.ProcessedText, &e.ActionSelected, &e.TagsJSON, &e.Status, &e.CreatedAt)
+				if err == nil || !isUnknownColumnErr(err) {
+					break
+				}
+			}
+		} else {
+			log.Printf("mysql.ensure_webhook_event_schema_failed account_id=%s source_event_id=%s err=%v", accountID, sourceEventID, schemaErr)
 		}
 	}
 	if err != nil {
@@ -416,6 +498,22 @@ func (s *MySQLStore) ListEventsByTag(ctx context.Context, accountID, tag string,
 		}
 	}
 	if err != nil && isUnknownColumnErr(err) {
+		if schemaErr := s.ensureWebhookEventSchema(ctx); schemaErr == nil {
+			for _, variant := range eventSelectVariants() {
+				if !variant.includeTags {
+					continue
+				}
+				query := buildEventSelectQuery(`WHERE account_id=? AND tags_json LIKE ? ORDER BY created_at DESC LIMIT ?`, variant.includeRaw, variant.includeProcessed, variant.includeTags)
+				rows, err = s.db.QueryContext(ctx, query, accountID, `%"`+tag+`"%`, limit)
+				if err == nil || !isUnknownColumnErr(err) {
+					break
+				}
+			}
+		} else {
+			log.Printf("mysql.ensure_webhook_event_schema_failed account_id=%s tag=%s err=%v", accountID, tag, schemaErr)
+		}
+	}
+	if err != nil && isUnknownColumnErr(err) {
 		log.Printf("mysql.list_events_by_tag_skipped account_id=%s tag=%s reason=tags_json_column_unavailable", accountID, tag)
 		return []domain.WebhookEvent{}, nil
 	}
@@ -436,6 +534,13 @@ func (s *MySQLStore) ListEventsByTag(ctx context.Context, accountID, tag string,
 
 func (s *MySQLStore) UpdateEventTags(ctx context.Context, eventID, tagsJSON string) error {
 	_, err := s.db.ExecContext(ctx, `UPDATE webhook_events SET tags_json=? WHERE id=?`, tagsJSON, eventID)
+	if err != nil && isUnknownColumnErr(err) {
+		if schemaErr := s.ensureWebhookEventSchema(ctx); schemaErr == nil {
+			_, err = s.db.ExecContext(ctx, `UPDATE webhook_events SET tags_json=? WHERE id=?`, tagsJSON, eventID)
+		} else {
+			log.Printf("mysql.ensure_webhook_event_schema_failed event_id=%s err=%v", eventID, schemaErr)
+		}
+	}
 	if err != nil && isUnknownColumnErr(err) {
 		return nil
 	}

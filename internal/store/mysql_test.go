@@ -27,3 +27,10 @@ func TestEventSelectVariantsIncludeProcessedTextWithoutTags(t *testing.T) {
 		t.Fatal("expected a fallback variant that keeps processed_text when tags_json is unavailable")
 	}
 }
+
+func TestWebhookEventSchemaStatementsIncludeTagsColumn(t *testing.T) {
+	stmts := strings.Join(webhookEventSchemaStatements(), "\n")
+	if !strings.Contains(stmts, "tags_json") {
+		t.Fatalf("expected schema statements to include tags_json column migration: %s", stmts)
+	}
+}
