@@ -46,6 +46,11 @@ type Config struct {
 
 	TelegramBotToken string
 
+	LangfuseEnabled   bool
+	LangfuseHost      string
+	LangfusePublicKey string
+	LangfuseSecretKey string
+
 	UseInMemoryStore          bool
 	VerifyHTCSignature        bool
 	DeterministicOnlyTypeKeys []string
@@ -108,6 +113,11 @@ func Load() Config {
 		OpenRouterModel:   getenv("OPENROUTER_MODEL", "openrouter/free"),
 
 		TelegramBotToken: getenv("TELEGRAM_BOT_TOKEN", ""),
+
+		LangfuseEnabled:   getbool("LANGFUSE_ENABLED", false),
+		LangfuseHost:      getenv("LANGFUSE_HOST", "https://cloud.langfuse.com"),
+		LangfusePublicKey: getenv("LANGFUSE_PUBLIC_KEY", ""),
+		LangfuseSecretKey: getenv("LANGFUSE_SECRET_KEY", ""),
 
 		UseInMemoryStore:             getbool("USE_IN_MEMORY_STORE", defaultInMemoryStore),
 		VerifyHTCSignature:           getbool("VERIFY_HTC_SIGNATURE", false),

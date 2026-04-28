@@ -5,6 +5,9 @@ INBOX_EMAIL="${1:-7204909316@agentmail.to}"
 MAX_AGE_MIN="${MAX_AGE_MIN:-30}"
 
 AGENTMAIL_API_KEY="${AGENTMAIL_API_KEY:-}"
+if [[ -z "$AGENTMAIL_API_KEY" && -f "local.env" ]]; then
+  AGENTMAIL_API_KEY=$(awk -F= '/^AGENTMAIL_API_KEY=/{sub(/^AGENTMAIL_API_KEY=/,"");print;exit}' local.env)
+fi
 if [[ -z "$AGENTMAIL_API_KEY" && -f ".env" ]]; then
   AGENTMAIL_API_KEY=$(awk -F= '/^AGENTMAIL_API_KEY=/{sub(/^AGENTMAIL_API_KEY=/,"");print;exit}' .env)
 fi

@@ -10,6 +10,7 @@ import (
 	"agenthook.store/internal/config"
 	"agenthook.store/internal/domain"
 	"agenthook.store/internal/integrations"
+	"agenthook.store/internal/observability"
 	"agenthook.store/internal/service"
 	"agenthook.store/internal/store"
 	httpapi "agenthook.store/internal/transport/http"
@@ -30,6 +31,12 @@ func BuildHTTPHandler(ctx context.Context, cfg config.Config) (http.Handler, err
 
 	pine := integrations.NewPineconeClient(cfg.PineconeAPIKey, cfg.PineconeIndexURL, cfg.PineconeNamespace)
 	llm := buildFallbackLLMClient(nil, cfg)
+	tracer := observability.NewLangfuseClient(observability.Config{
+		Enabled:   cfg.LangfuseEnabled,
+		Host:      cfg.LangfuseHost,
+		PublicKey: cfg.LangfusePublicKey,
+		SecretKey: cfg.LangfuseSecretKey,
+	})
 	groqClassifier := integrations.NewProviderTypeClassifier("groq", cfg.GroqBaseURL, cfg.GroqAPIKey, cfg.GroqModel)
 	cerebrasClassifier := integrations.NewProviderTypeClassifier("cerebras", cfg.CerebrasBaseURL, cfg.CerebrasAPIKey, cfg.CerebrasModel)
 	deterministicOnly := toSet(cfg.DeterministicOnlyTypeKeys)
@@ -57,6 +64,7 @@ func BuildHTTPHandler(ctx context.Context, cfg config.Config) (http.Handler, err
 			MaxArrayItems:   cfg.LLMCompactionMaxArrayItems,
 			MaxObjectFields: cfg.LLMCompactionMaxObjectFields,
 		},
+		Tracer: tracer,
 		BYOKResolver: func(ctx context.Context, accountID string) domain.LLMClient {
 			byokCfgs, err := st.ListBYOKConfigs(ctx, accountID)
 			if err != nil {

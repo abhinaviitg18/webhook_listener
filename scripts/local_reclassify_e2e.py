@@ -15,7 +15,7 @@ from typing import Dict, Optional, Tuple
 
 
 ROOT = Path(__file__).resolve().parents[1]
-ENV_PATH = ROOT / ".env"
+ENV_CANDIDATES = [ROOT / "local.env", ROOT / ".env"]
 BASE_URL = os.environ.get("BASE_URL", "http://127.0.0.1:8092")
 PORT = urllib.parse.urlparse(BASE_URL).port or 8092
 
@@ -29,6 +29,14 @@ def load_env_file(path: Path) -> Dict[str, str]:
         key, value = line.split("=", 1)
         env[key.strip()] = value.strip()
     return env
+
+
+def load_local_env() -> Dict[str, str]:
+    merged: Dict[str, str] = {}
+    for path in reversed(ENV_CANDIDATES):
+        if path.exists():
+            merged.update(load_env_file(path))
+    return merged
 
 
 def http_json(method: str, url: str, token: Optional[str] = None, body: Optional[dict] = None) -> dict:
@@ -79,7 +87,7 @@ def resolve_provider_config(env_file: Dict[str, str], provider: str) -> Tuple[st
 
 
 def main() -> int:
-    env_file = load_env_file(ENV_PATH)
+    env_file = load_local_env()
     provider = os.environ.get("LOCAL_LLM_PROVIDER", "groq").strip().lower()
     api_key, base_url, model = resolve_provider_config(env_file, provider)
     model = os.environ.get("LOCAL_LLM_MODEL", model).strip()

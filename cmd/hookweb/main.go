@@ -16,6 +16,10 @@ import (
 )
 
 func main() {
+	if err := config.LoadEnvFiles("local.env", ".env"); err != nil {
+		fmt.Fprintln(os.Stderr, "env file load failed:", err)
+		os.Exit(1)
+	}
 	if len(os.Args) < 2 {
 		fmt.Fprintln(os.Stderr, "usage: agenthook <classify|transform> [flags]")
 		os.Exit(2)

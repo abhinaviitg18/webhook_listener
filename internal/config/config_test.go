@@ -67,3 +67,31 @@ func TestLoadLLMCompactionEnvOverrides(t *testing.T) {
 		t.Fatalf("expected max object fields 12, got %d", cfg.LLMCompactionMaxObjectFields)
 	}
 }
+
+func TestLoadLangfuseDefaults(t *testing.T) {
+	cfg := Load()
+	if cfg.LangfuseEnabled {
+		t.Fatalf("expected Langfuse disabled by default")
+	}
+	if cfg.LangfuseHost != "https://cloud.langfuse.com" {
+		t.Fatalf("expected default Langfuse host, got %q", cfg.LangfuseHost)
+	}
+}
+
+func TestLoadLangfuseOverrides(t *testing.T) {
+	t.Setenv("LANGFUSE_ENABLED", "true")
+	t.Setenv("LANGFUSE_HOST", "https://example.langfuse.test")
+	t.Setenv("LANGFUSE_PUBLIC_KEY", "pk-test")
+	t.Setenv("LANGFUSE_SECRET_KEY", "sk-test")
+
+	cfg := Load()
+	if !cfg.LangfuseEnabled {
+		t.Fatalf("expected Langfuse enabled")
+	}
+	if cfg.LangfuseHost != "https://example.langfuse.test" {
+		t.Fatalf("unexpected Langfuse host %q", cfg.LangfuseHost)
+	}
+	if cfg.LangfusePublicKey != "pk-test" || cfg.LangfuseSecretKey != "sk-test" {
+		t.Fatalf("expected Langfuse keys to load from env")
+	}
+}

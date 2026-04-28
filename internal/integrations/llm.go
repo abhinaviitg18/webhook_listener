@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"agenthook.store/internal/domain"
+	"agenthook.store/internal/observability"
 )
 
 type LLMClient struct {
@@ -42,6 +43,11 @@ type chatResp struct {
 	Choices []struct {
 		Message chatMsg `json:"message"`
 	} `json:"choices"`
+	Usage struct {
+		PromptTokens     int `json:"prompt_tokens"`
+		CompletionTokens int `json:"completion_tokens"`
+		TotalTokens      int `json:"total_tokens"`
+	} `json:"usage"`
 }
 
 func NewLLMClient(provider, key, baseURL, model string) *LLMClient {
@@ -74,7 +80,15 @@ func NewFallbackLLMClient(clients ...domain.LLMClient) domain.LLMClient {
 }
 
 func (l *LLMClient) SuggestAction(ctx context.Context, typeKey, payload string, memories []domain.PineconeMemory, available []string) (domain.ProcessDecision, error) {
+	observability.RecordAttemptStart(ctx)
+	attempt := observability.TraceFromContext(ctx).StartAttempt(l.Provider, l.Model)
 	if l.APIKey == "" || l.BaseURL == "" {
+		attempt.Finish(observability.LLMAttemptResult{
+			Provider:      l.Provider,
+			Model:         l.Model,
+			Outcome:       "not_configured",
+			StatusMessage: "llm not configured",
+		})
 		return domain.ProcessDecision{ActionName: "store_mysql", Reason: "llm not configured", Params: map[string]interface{}{}}, nil
 	}
 	prompt := buildPrompt(typeKey, payload, memories, available)
@@ -102,15 +116,37 @@ func (l *LLMClient) SuggestAction(ctx context.Context, typeKey, payload string, 
 			snippet = snippet[:400]
 		}
 		log.Printf("llm.suggest failure provider=%s model=%s type_key=%s status=%s response_body=%q", l.Provider, l.Model, typeKey, resp.Status, snippet)
+		attempt.Finish(observability.LLMAttemptResult{
+			Provider:      l.Provider,
+			Model:         l.Model,
+			Outcome:       "provider_error",
+			ErrorClass:    "http_error",
+			ErrorStatus:   resp.StatusCode,
+			StatusMessage: resp.Status,
+		})
 		return domain.ProcessDecision{}, fmt.Errorf("llm request failed: %s", resp.Status)
 	}
 	var parsed chatResp
 	if err := json.NewDecoder(resp.Body).Decode(&parsed); err != nil {
 		log.Printf("llm.suggest decode_error provider=%s model=%s type_key=%s err=%v", l.Provider, l.Model, typeKey, err)
+		attempt.Finish(observability.LLMAttemptResult{
+			Provider:      l.Provider,
+			Model:         l.Model,
+			Outcome:       "decode_error",
+			ErrorClass:    "decode_error",
+			StatusMessage: err.Error(),
+		})
 		return domain.ProcessDecision{}, err
 	}
 	if len(parsed.Choices) == 0 {
 		log.Printf("llm.suggest empty_choices provider=%s model=%s type_key=%s", l.Provider, l.Model, typeKey)
+		attempt.Finish(observability.LLMAttemptResult{
+			Provider:      l.Provider,
+			Model:         l.Model,
+			Outcome:       "empty_response",
+			ErrorClass:    "empty_response",
+			StatusMessage: "empty llm response",
+		})
 		return domain.ProcessDecision{}, fmt.Errorf("empty llm response")
 	}
 	content := parsed.Choices[0].Message.Content
@@ -120,6 +156,16 @@ func (l *LLMClient) SuggestAction(ctx context.Context, typeKey, payload string, 
 	jsonContent := normalizeJSONResponse(content)
 	if err := json.Unmarshal([]byte(jsonContent), &d); err != nil {
 		log.Printf("llm.suggest parse_fallback provider=%s model=%s type_key=%s err=%v", l.Provider, l.Model, typeKey, err)
+		attempt.Finish(observability.LLMAttemptResult{
+			Provider:         l.Provider,
+			Model:            l.Model,
+			Outcome:          "parse_fallback",
+			ErrorClass:       "parse_error",
+			StatusMessage:    err.Error(),
+			PromptTokens:     parsed.Usage.PromptTokens,
+			CompletionTokens: parsed.Usage.CompletionTokens,
+			TotalTokens:      parsed.Usage.TotalTokens,
+		})
 		return domain.ProcessDecision{ActionName: "store_mysql", Reason: "llm parse fallback", Params: map[string]interface{}{}}, nil
 	}
 	if d.ActionName == "" {
@@ -130,6 +176,16 @@ func (l *LLMClient) SuggestAction(ctx context.Context, typeKey, payload string, 
 		d.Params = map[string]interface{}{}
 	}
 	log.Printf("llm.suggest parsed provider=%s model=%s type_key=%s action=%s tags=%d processed_text_bytes=%d", l.Provider, l.Model, typeKey, d.ActionName, len(d.Tags), len(d.ProcessedText))
+	observability.MarkWinningAttempt(ctx, l.Provider, l.Model)
+	attempt.Finish(observability.LLMAttemptResult{
+		Provider:         l.Provider,
+		Model:            l.Model,
+		Outcome:          "success",
+		StatusMessage:    d.ActionName,
+		PromptTokens:     parsed.Usage.PromptTokens,
+		CompletionTokens: parsed.Usage.CompletionTokens,
+		TotalTokens:      parsed.Usage.TotalTokens,
+	})
 	return d, nil
 }
 

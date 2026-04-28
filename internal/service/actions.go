@@ -14,6 +14,7 @@ import (
 
 	"agenthook.store/internal/domain"
 	"agenthook.store/internal/integrations"
+	"agenthook.store/internal/observability"
 )
 
 type processorCtxKey string
@@ -115,6 +116,7 @@ type Processor struct {
 	DeterministicOnly map[string]struct{}
 	BYOKResolver      func(ctx context.Context, accountID string) domain.LLMClient
 	LLMCompaction     LLMCompactionConfig
+	Tracer            observability.Client
 }
 
 type memoryWriteMode string
@@ -172,7 +174,7 @@ func (p *Processor) ProcessWebhook(ctx context.Context, account domain.Account, 
 		return domain.WebhookEvent{}, domain.ProcessDecision{}, err
 	}
 
-	return p.processWithPolicy(ctx, account, whType, event, payload)
+	return p.processWithPolicy(ctx, account, whType, event, payload, "process")
 }
 
 func (p *Processor) ReprocessEvent(ctx context.Context, accountID, eventID string) (domain.WebhookEvent, domain.ProcessDecision, error) {
@@ -191,10 +193,10 @@ func (p *Processor) ReprocessEvent(ctx context.Context, accountID, eventID strin
 
 	// For re-processing, we use the already stored PayloadJSON (which might be canonically transformed)
 	log.Printf("reprocess.start account_id=%s event_id=%s type_key=%s payload_bytes=%d payload_sha256=%x", accountID, eventID, event.TypeKey, len(event.PayloadJSON), payloadFingerprint(event.PayloadJSON))
-	return p.processWithPolicy(ctx, account, whType, event, event.PayloadJSON)
+	return p.processWithPolicy(ctx, account, whType, event, event.PayloadJSON, "reprocess")
 }
 
-func (p *Processor) processWithPolicy(ctx context.Context, account domain.Account, whType domain.WebhookType, event domain.WebhookEvent, payload string) (domain.WebhookEvent, domain.ProcessDecision, error) {
+func (p *Processor) processWithPolicy(ctx context.Context, account domain.Account, whType domain.WebhookType, event domain.WebhookEvent, payload string, operation string) (domain.WebhookEvent, domain.ProcessDecision, error) {
 	policyCtx := p.loadPolicyContext(ctx, account.ID, whType.TypeKey)
 	memories := []domain.PineconeMemory{}
 	if p.Pinecone != nil {
@@ -219,6 +221,7 @@ func (p *Processor) processWithPolicy(ctx context.Context, account domain.Accoun
 
 	needsLLM := (whType.UseLLMFallback && decision.ActionName == "store_mysql") || policyCtx.MasterPrompt != "" || (matched && skill.SkillPrompt != "")
 	log.Printf("reprocess.llm_decision event_id=%s type_key=%s needs_llm=%t deterministic_only=%t use_llm_fallback=%t matched_skill_prompt=%t master_prompt=%t initial_action=%s", event.ID, whType.TypeKey, needsLLM, p.IsDeterministicOnlyType(whType.TypeKey), whType.UseLLMFallback, matched && strings.TrimSpace(skill.SkillPrompt) != "", policyCtx.MasterPrompt != "", decision.ActionName)
+	var llmTrace observability.LLMDecisionTrace
 	if needsLLM && !p.IsDeterministicOnlyType(whType.TypeKey) {
 		// Resolve LLM client: prefer per-account BYOK key, fall back to global
 		llmClient := p.LLM
@@ -229,6 +232,22 @@ func (p *Processor) processWithPolicy(ctx context.Context, account domain.Accoun
 		}
 		if llmClient != nil {
 			compaction := compactPayloadForLLM(payload, p.LLMCompaction)
+			if p.Tracer != nil {
+				llmTrace = p.Tracer.StartLLMDecision(ctx, observability.LLMDecisionMetadata{
+					TraceID:               event.ID + "-llm",
+					EventID:               event.ID,
+					AccountHash:           observability.HashIdentifier(account.ID),
+					TypeKey:               whType.TypeKey,
+					Operation:             operation,
+					MatchedSkillKey:       skill.SkillKey,
+					PayloadHash:           fmt.Sprintf("%x", payloadFingerprint(payload)),
+					PayloadBytes:          len(payload),
+					CompactedPayloadBytes: compaction.CompactedBytes,
+					UsedCompaction:        compaction.WasCompacted,
+					FallbackChainSize:     llmFallbackChainSize(llmClient),
+				})
+				ctx = observability.WithLLMTrace(ctx, llmTrace)
+			}
 			llmPayloadSource := compaction.CompactedPayload
 			if policyCtx.MasterPrompt != "" || len(policyCtx.Skills) > 0 {
 				llmPayloadSource = buildPolicyAwarePayload(compaction.CompactedPayload, policyCtx)
@@ -303,6 +322,21 @@ func (p *Processor) processWithPolicy(ctx context.Context, account domain.Accoun
 		}
 	}
 	event.CreatedAt = time.Now().UTC()
+	if llmTrace != nil {
+		winningProvider, winningModel := observability.WinningAttemptFromContext(ctx)
+		llmTrace.Finish(observability.LLMDecisionResult{
+			FinalAction:         decision.ActionName,
+			DecisionReason:      decision.Reason,
+			WinningProvider:     winningProvider,
+			WinningModel:        winningModel,
+			Outcome:             llmOutcome(decision),
+			UsedFallback:        observability.FallbackUsedFromContext(ctx),
+			ProducedTags:        len(decision.Tags) > 0,
+			ProcessedTextSource: processedTextSource(decision, event.ProcessedText),
+			TagsCount:           len(decision.Tags),
+			ErrorClass:          llmErrorClass(decision.Reason),
+		})
+	}
 	log.Printf("reprocess.complete event_id=%s type_key=%s action=%s reason=%q processed_text_bytes=%d tags=%d", event.ID, whType.TypeKey, decision.ActionName, decision.Reason, len(event.ProcessedText), len(decision.Tags))
 	return event, decision, nil
 }
@@ -324,6 +358,45 @@ func payloadToText(payload string) string {
 		return trimmed
 	}
 	return trimmed[:1200]
+}
+
+func llmFallbackChainSize(client domain.LLMClient) int {
+	switch c := client.(type) {
+	case *integrations.FallbackLLMClient:
+		return len(c.Clients)
+	default:
+		if client != nil {
+			return 1
+		}
+		return 0
+	}
+}
+
+func llmOutcome(decision domain.ProcessDecision) string {
+	if strings.HasPrefix(decision.Reason, "llm processing failed:") {
+		return "provider_error"
+	}
+	if strings.TrimSpace(decision.ProcessedText) != "" || len(decision.Tags) > 0 {
+		return "success"
+	}
+	return "fallback"
+}
+
+func processedTextSource(decision domain.ProcessDecision, stored string) string {
+	if strings.TrimSpace(decision.ProcessedText) != "" {
+		return "llm"
+	}
+	if strings.TrimSpace(stored) != "" {
+		return "payload_fallback"
+	}
+	return "none"
+}
+
+func llmErrorClass(reason string) string {
+	if strings.HasPrefix(reason, "llm processing failed:") {
+		return "provider_error"
+	}
+	return ""
 }
 
 func (p *Processor) ResolveType(ctx context.Context, accountID, payload string, headers map[string]string) (domain.TypeResolution, error) {

@@ -11,6 +11,9 @@ import (
 )
 
 func main() {
+	if err := config.LoadEnvFiles("local.env", ".env"); err != nil {
+		log.Fatalf("env file load failed: %v", err)
+	}
 	cfg := config.Load()
 	if err := cfg.Validate(); err != nil {
 		log.Fatalf("config validation failed: %v", err)

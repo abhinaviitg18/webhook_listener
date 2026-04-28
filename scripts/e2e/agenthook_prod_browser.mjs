@@ -45,16 +45,21 @@ function resolveAgentmailApiKey() {
   if (process.env.AGENTMAIL_API_KEY) {
     return process.env.AGENTMAIL_API_KEY;
   }
-  const envPath = path.resolve(process.cwd(), ".env");
-  if (!fs.existsSync(envPath)) {
-    throw new Error("AGENTMAIL_API_KEY missing and .env not found");
+  const envCandidates = [
+    path.resolve(process.cwd(), "local.env"),
+    path.resolve(process.cwd(), ".env"),
+  ];
+  for (const envPath of envCandidates) {
+    if (!fs.existsSync(envPath)) {
+      continue;
+    }
+    const envText = fs.readFileSync(envPath, "utf8");
+    const match = envText.match(/^AGENTMAIL_API_KEY=(.+)$/m);
+    if (match) {
+      return match[1].trim();
+    }
   }
-  const envText = fs.readFileSync(envPath, "utf8");
-  const match = envText.match(/^AGENTMAIL_API_KEY=(.+)$/m);
-  if (!match) {
-    throw new Error("AGENTMAIL_API_KEY missing from environment and .env");
-  }
-  return match[1].trim();
+  throw new Error("AGENTMAIL_API_KEY missing from environment, local.env, and .env");
 }
 
 async function fetchOtp(email, challengeStartedAt, attempts = 12, delayMs = 5_000) {
