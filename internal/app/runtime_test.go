@@ -14,7 +14,7 @@ func TestBuildFallbackLLMClientPrefersDefaultBYOKThenGlobals(t *testing.T) {
 		LLMProvider:       "openrouter",
 		LLMAPIKey:         "global-openrouter-key",
 		LLMBaseURL:        "https://openrouter.ai/api/v1",
-		LLMModel:          "openai/gpt-4o-mini",
+		LLMModel:          "openrouter/free",
 		GroqAPIKey:        "global-groq-key",
 		GroqBaseURL:       "https://api.groq.com/openai/v1",
 		GroqModel:         "llama3-70b-8192",
@@ -23,7 +23,7 @@ func TestBuildFallbackLLMClientPrefersDefaultBYOKThenGlobals(t *testing.T) {
 		CerebrasModel:     "llama3.1-70b",
 		OpenRouterAPIKey:  "global-openrouter-key",
 		OpenRouterBaseURL: "https://openrouter.ai/api/v1",
-		OpenRouterModel:   "openai/gpt-4o-mini",
+		OpenRouterModel:   "openrouter/free",
 	}
 	now := time.Now().UTC()
 	client := buildFallbackLLMClient([]domain.BYOKProviderConfig{
@@ -47,7 +47,7 @@ func TestBuildFallbackLLMClientPrefersDefaultBYOKThenGlobals(t *testing.T) {
 		t.Fatalf("expected second BYOK client next, got %#v", fallback.Clients[1])
 	}
 	third, ok := fallback.Clients[2].(*integrations.LLMClient)
-	if !ok || third.Provider != "openrouter" || third.APIKey != "global-openrouter-key" {
+	if !ok || third.Provider != "openrouter" || third.APIKey != "global-openrouter-key" || third.Model != "openrouter/free" {
 		t.Fatalf("expected global primary after BYOK configs, got %#v", fallback.Clients[2])
 	}
 	fourth, ok := fallback.Clients[3].(*integrations.LLMClient)

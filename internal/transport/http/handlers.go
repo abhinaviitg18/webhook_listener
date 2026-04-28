@@ -879,7 +879,7 @@ func (h *Handler) UpsertBYOKProvider(w http.ResponseWriter, r *http.Request) {
 		case "openai":
 			model = "gpt-4o-mini"
 		default:
-			model = "meta-llama/llama-3-70b-instruct"
+			model = "openrouter/free"
 		}
 	}
 	cfg, err := h.Store.UpsertBYOKConfig(r.Context(), domain.BYOKProviderConfig{

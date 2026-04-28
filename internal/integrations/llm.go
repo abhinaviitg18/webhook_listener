@@ -197,6 +197,14 @@ func normalizeModelAlias(provider, model string) string {
 		default:
 			return normalizedModel
 		}
+	case "openrouter":
+		if normalizedModel == "" {
+			return "openrouter/free"
+		}
+		if normalizedModel == "openrouter/free" || strings.HasSuffix(normalizedModel, ":free") {
+			return normalizedModel
+		}
+		return "openrouter/free"
 	default:
 		return normalizedModel
 	}

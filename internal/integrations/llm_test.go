@@ -19,8 +19,9 @@ func TestNormalizeModelAlias(t *testing.T) {
 		{name: "groq legacy 70b", provider: "groq", model: "llama3-70b-8192", want: "llama-3.3-70b-versatile"},
 		{name: "groq legacy 8b", provider: "groq", model: "llama3-8b-8192", want: "llama-3.1-8b-instant"},
 		{name: "cerebras legacy 70b", provider: "cerebras", model: "llama3.1-70b", want: "llama-3.3-70b"},
+		{name: "openrouter forced free router", provider: "openrouter", model: "openai/gpt-4o-mini", want: "openrouter/free"},
 		{name: "groq current unchanged", provider: "groq", model: "llama-3.3-70b-versatile", want: "llama-3.3-70b-versatile"},
-		{name: "other provider unchanged", provider: "openrouter", model: "llama3-70b-8192", want: "llama3-70b-8192"},
+		{name: "other provider unchanged", provider: "openai", model: "gpt-4o-mini", want: "gpt-4o-mini"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

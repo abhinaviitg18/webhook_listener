@@ -73,7 +73,7 @@ def resolve_provider_config(env_file: Dict[str, str], provider: str) -> Tuple[st
         return (
             env_file.get("OPENROUTER_API_KEY", "").strip(),
             os.environ.get("LOCAL_OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1").strip(),
-            os.environ.get("LOCAL_OPENROUTER_MODEL", "openai/gpt-4o-mini").strip(),
+            os.environ.get("LOCAL_OPENROUTER_MODEL", "openrouter/free").strip(),
         )
     raise RuntimeError(f"unsupported provider={provider}")
 

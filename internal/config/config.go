@@ -105,7 +105,7 @@ func Load() Config {
 		CerebrasModel:     getenv("CEREBRAS_MODEL", "llama-3.3-70b"),
 		OpenRouterAPIKey:  getenv("OPENROUTER_API_KEY", llmKey),
 		OpenRouterBaseURL: getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"),
-		OpenRouterModel:   getenv("OPENROUTER_MODEL", "openai/gpt-4o-mini"),
+		OpenRouterModel:   getenv("OPENROUTER_MODEL", "openrouter/free"),
 
 		TelegramBotToken: getenv("TELEGRAM_BOT_TOKEN", ""),
 
