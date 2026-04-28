@@ -50,19 +50,14 @@ jobs:
           JSON
           python3 - <<'PY'
           import json
+          import os
           from pathlib import Path
 
           path = Path("payload.json")
           payload = json.loads(path.read_text())
-          payload["headers"]["x-agenthook-origin-secret"] = "__SECRET__"
+          payload["headers"]["x-agenthook-origin-secret"] = os.environ["LAMBDA_ORIGIN_SHARED_SECRET"].strip()
           path.write_text(json.dumps(payload))
           PY
-          python3 - <<'PY'
-          from pathlib import Path
-          text = Path("payload.json").read_text()
-          text = text.replace("__SECRET__", Path("/dev/stdin").read_text().strip())
-          Path("payload.json").write_text(text)
-          PY <<<"$LAMBDA_ORIGIN_SHARED_SECRET"
 
       - name: Invoke lambda and capture tail logs
         run: |

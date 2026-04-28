@@ -102,12 +102,15 @@ func compactValue(path, key string, value interface{}, cfg LLMCompactionConfig, 
 		}
 		out := map[string]interface{}{}
 		for i, item := range fields {
-			if i >= limit && item.score <= 0 {
+			if i >= limit {
 				stats.droppedFields++
 				continue
 			}
 			childPath := path + "." + sanitizeKey(item.key)
 			out[item.key] = compactValue(childPath, item.key, item.value, cfg, stats)
+		}
+		if len(fields) > limit {
+			out["_truncated_fields"] = len(fields) - limit
 		}
 		return out
 	case []interface{}:
@@ -166,10 +169,13 @@ func topLevelKeys(root interface{}) []string {
 func fieldScore(key string, value interface{}) int {
 	normalized := strings.ToLower(strings.TrimSpace(key))
 	score := 0
-	for _, hint := range []string{"id", "name", "title", "subject", "status", "state", "action", "event", "type", "kind", "reason", "conclusion", "branch", "repository", "workflow", "url", "message", "text", "summary"} {
+	for _, hint := range []string{"id", "name", "title", "subject", "status", "state", "action", "event", "type", "kind", "reason", "conclusion", "branch", "repository", "workflow", "message", "text", "summary"} {
 		if normalized == hint || strings.Contains(normalized, hint) {
 			score += 5
 		}
+	}
+	if normalized == "html_url" || normalized == "run_url" || normalized == "workflow_url" || normalized == "target_url" {
+		score += 3
 	}
 	switch typed := value.(type) {
 	case string:
@@ -177,7 +183,7 @@ func fieldScore(key string, value interface{}) int {
 			score += 3
 		}
 		if strings.Contains(strings.ToLower(typed), "http") {
-			score--
+			score -= 2
 		}
 	case bool, float64, int, int64:
 		score += 2
@@ -187,6 +193,9 @@ func fieldScore(key string, value interface{}) int {
 		if len(typed) > 6 {
 			score--
 		}
+	}
+	if strings.Contains(normalized, "url") {
+		score -= 3
 	}
 	if strings.Contains(normalized, "avatar") || strings.Contains(normalized, "gravatar") || strings.Contains(normalized, "blob") || strings.Contains(normalized, "assignee") || strings.Contains(normalized, "subscriber") || strings.Contains(normalized, "subscription") || strings.Contains(normalized, "owner") {
 		score -= 3

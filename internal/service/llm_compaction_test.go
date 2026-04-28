@@ -83,3 +83,37 @@ func TestCompactPayloadForLLMReducesURLHeavyMetadata(t *testing.T) {
 		t.Fatalf("expected noisy url string to be shortened")
 	}
 }
+
+func TestCompactPayloadForLLMHardCapsObjectFields(t *testing.T) {
+	payload := `{"status":"success","workflow":"deploy","repository":"webhook_listener","archive_url":"https://api.example.com/archive","assignees_url":"https://api.example.com/assignees","branches_url":"https://api.example.com/branches","comments_url":"https://api.example.com/comments","commits_url":"https://api.example.com/commits","compare_url":"https://api.example.com/compare","contents_url":"https://api.example.com/contents","deployments_url":"https://api.example.com/deployments","events_url":"https://api.example.com/events","git_url":"https://api.example.com/git","html_url":"https://github.com/example/repo"}`
+	got := compactPayloadForLLM(payload, LLMCompactionConfig{
+		Enabled:         true,
+		ThresholdBytes:  100,
+		MaxStringBytes:  80,
+		MaxArrayItems:   3,
+		MaxObjectFields: 4,
+	})
+	if !got.WasCompacted {
+		t.Fatalf("expected compaction to run")
+	}
+	if !strings.Contains(got.CompactedPayload, "_truncated_fields") {
+		t.Fatalf("expected truncated field marker")
+	}
+	var wrapped map[string]interface{}
+	if err := json.Unmarshal([]byte(got.CompactedPayload), &wrapped); err != nil {
+		t.Fatalf("expected valid wrapped json: %v", err)
+	}
+	payloadObject, ok := wrapped["payload"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected wrapped payload object")
+	}
+	if _, exists := payloadObject["comments_url"]; exists {
+		t.Fatalf("expected comments_url to be pruned, got %v", payloadObject)
+	}
+	if _, exists := payloadObject["compare_url"]; exists {
+		t.Fatalf("expected compare_url to be pruned, got %v", payloadObject)
+	}
+	if _, exists := payloadObject["contents_url"]; exists {
+		t.Fatalf("expected contents_url to be pruned, got %v", payloadObject)
+	}
+}
