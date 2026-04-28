@@ -271,9 +271,9 @@ func (s *MySQLStore) ListEvents(ctx context.Context, accountID string, limit int
 	if limit <= 0 {
 		limit = 50
 	}
-	query := `SELECT id, account_id, type_id, secret_id, request_id, COALESCE(source_event_id,''), type_key, '', payload_json, '', action_selected, status, created_at FROM webhook_events WHERE account_id=? ORDER BY created_at DESC LIMIT ?`
+	query := `SELECT id, account_id, type_id, secret_id, request_id, COALESCE(source_event_id,''), type_key, '', payload_json, '', action_selected, '', status, created_at FROM webhook_events WHERE account_id=? ORDER BY created_at DESC LIMIT ?`
 	if s.hasRawPayloadJSON && s.hasProcessedText {
-		query = `SELECT id, account_id, type_id, secret_id, request_id, COALESCE(source_event_id,''), type_key, COALESCE(raw_payload_json,''), payload_json, COALESCE(processed_text,''), action_selected, status, created_at FROM webhook_events WHERE account_id=? ORDER BY created_at DESC LIMIT ?`
+		query = `SELECT id, account_id, type_id, secret_id, request_id, COALESCE(source_event_id,''), type_key, COALESCE(raw_payload_json,''), payload_json, COALESCE(processed_text,''), action_selected, COALESCE(tags_json,''), status, created_at FROM webhook_events WHERE account_id=? ORDER BY created_at DESC LIMIT ?`
 	}
 	rows, err := s.db.QueryContext(ctx, query, accountID, limit)
 	if err != nil {
@@ -283,7 +283,7 @@ func (s *MySQLStore) ListEvents(ctx context.Context, accountID string, limit int
 	var out []domain.WebhookEvent
 	for rows.Next() {
 		var e domain.WebhookEvent
-		if err := rows.Scan(&e.ID, &e.AccountID, &e.TypeID, &e.SecretID, &e.RequestID, &e.SourceEventID, &e.TypeKey, &e.RawPayloadJSON, &e.PayloadJSON, &e.ProcessedText, &e.ActionSelected, &e.Status, &e.CreatedAt); err != nil {
+		if err := rows.Scan(&e.ID, &e.AccountID, &e.TypeID, &e.SecretID, &e.RequestID, &e.SourceEventID, &e.TypeKey, &e.RawPayloadJSON, &e.PayloadJSON, &e.ProcessedText, &e.ActionSelected, &e.TagsJSON, &e.Status, &e.CreatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, e)
@@ -292,11 +292,14 @@ func (s *MySQLStore) ListEvents(ctx context.Context, accountID string, limit int
 }
 
 func (s *MySQLStore) GetEvent(ctx context.Context, accountID, eventID string) (domain.WebhookEvent, error) {
+	s.ensureEventSchemaCapabilities()
+	query := `SELECT id, account_id, type_id, secret_id, request_id, COALESCE(source_event_id,''), type_key, '', payload_json, '', action_selected, '', status, created_at FROM webhook_events WHERE account_id=? AND id=?`
+	if s.hasRawPayloadJSON && s.hasProcessedText {
+		query = `SELECT id, account_id, type_id, secret_id, request_id, COALESCE(source_event_id,''), type_key, COALESCE(raw_payload_json,''), payload_json, COALESCE(processed_text,''), action_selected, COALESCE(tags_json,''), status, created_at FROM webhook_events WHERE account_id=? AND id=?`
+	}
 	var e domain.WebhookEvent
-	err := s.db.QueryRowContext(ctx, `
-SELECT id, account_id, type_id, secret_id, request_id, source_event_id, type_key, raw_payload_json, payload_json, processed_text, status, action_selected, created_at 
-FROM webhook_events WHERE account_id=? AND id=?`, accountID, eventID).
-		Scan(&e.ID, &e.AccountID, &e.TypeID, &e.SecretID, &e.RequestID, &e.SourceEventID, &e.TypeKey, &e.RawPayloadJSON, &e.PayloadJSON, &e.ProcessedText, &e.Status, &e.ActionSelected, &e.CreatedAt)
+	err := s.db.QueryRowContext(ctx, query, accountID, eventID).
+		Scan(&e.ID, &e.AccountID, &e.TypeID, &e.SecretID, &e.RequestID, &e.SourceEventID, &e.TypeKey, &e.RawPayloadJSON, &e.PayloadJSON, &e.ProcessedText, &e.ActionSelected, &e.TagsJSON, &e.Status, &e.CreatedAt)
 	return e, err
 }
 
@@ -316,6 +319,33 @@ func (s *MySQLStore) FindEventBySourceEventID(ctx context.Context, accountID, so
 		return domain.WebhookEvent{}, err
 	}
 	return e, nil
+}
+
+func (s *MySQLStore) ListEventsByTag(ctx context.Context, accountID, tag string, limit int) ([]domain.WebhookEvent, error) {
+	s.ensureEventSchemaCapabilities()
+	if limit <= 0 {
+		limit = 50
+	}
+	query := `SELECT id, account_id, type_id, secret_id, request_id, COALESCE(source_event_id,''), type_key, COALESCE(raw_payload_json,''), payload_json, COALESCE(processed_text,''), action_selected, COALESCE(tags_json,''), status, created_at FROM webhook_events WHERE account_id=? AND tags_json LIKE ? ORDER BY created_at DESC LIMIT ?`
+	rows, err := s.db.QueryContext(ctx, query, accountID, `%"`+tag+`"%`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []domain.WebhookEvent
+	for rows.Next() {
+		var e domain.WebhookEvent
+		if err := rows.Scan(&e.ID, &e.AccountID, &e.TypeID, &e.SecretID, &e.RequestID, &e.SourceEventID, &e.TypeKey, &e.RawPayloadJSON, &e.PayloadJSON, &e.ProcessedText, &e.ActionSelected, &e.TagsJSON, &e.Status, &e.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, nil
+}
+
+func (s *MySQLStore) UpdateEventTags(ctx context.Context, eventID, tagsJSON string) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE webhook_events SET tags_json=? WHERE id=?`, tagsJSON, eventID)
+	return err
 }
 
 func (s *MySQLStore) CreateTypeSignature(ctx context.Context, sig domain.WebhookTypeSignature) (domain.WebhookTypeSignature, error) {

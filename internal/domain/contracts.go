@@ -28,6 +28,8 @@ type Store interface {
 	ListEvents(ctx context.Context, accountID string, limit int) ([]WebhookEvent, error)
 	GetEvent(ctx context.Context, accountID, eventID string) (WebhookEvent, error)
 	FindEventBySourceEventID(ctx context.Context, accountID, sourceEventID string) (WebhookEvent, error)
+	ListEventsByTag(ctx context.Context, accountID, tag string, limit int) ([]WebhookEvent, error)
+	UpdateEventTags(ctx context.Context, eventID, tagsJSON string) error
 
 	CreateTypeSignature(ctx context.Context, sig WebhookTypeSignature) (WebhookTypeSignature, error)
 	ListTypeSignatures(ctx context.Context, accountID string) ([]WebhookTypeSignature, error)

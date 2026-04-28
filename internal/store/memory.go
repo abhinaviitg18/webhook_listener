@@ -352,6 +352,34 @@ func (s *MemoryStore) FindEventBySourceEventID(_ context.Context, accountID, sou
 	return ev, nil
 }
 
+func (s *MemoryStore) ListEventsByTag(_ context.Context, accountID, tag string, limit int) ([]domain.WebhookEvent, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var out []domain.WebhookEvent
+	for _, e := range s.events {
+		if e.AccountID == accountID && strings.Contains(e.TagsJSON, `"`+tag+`"`) {
+			out = append(out, e)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.After(out[j].CreatedAt) })
+	if limit > 0 && len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
+}
+
+func (s *MemoryStore) UpdateEventTags(_ context.Context, eventID, tagsJSON string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	ev, ok := s.events[eventID]
+	if !ok {
+		return errors.New("event not found")
+	}
+	ev.TagsJSON = tagsJSON
+	s.events[eventID] = ev
+	return nil
+}
+
 func (s *MemoryStore) CreateTypeSignature(_ context.Context, sig domain.WebhookTypeSignature) (domain.WebhookTypeSignature, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

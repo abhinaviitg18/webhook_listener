@@ -49,6 +49,7 @@ type WebhookEvent struct {
 	PayloadJSON    string    `json:"payload_json"`
 	ProcessedText  string    `json:"processed_text,omitempty"`
 	ActionSelected string    `json:"action_selected"`
+	TagsJSON       string    `json:"tags_json,omitempty"`
 	Status         string    `json:"status"`
 	CreatedAt      time.Time `json:"created_at"`
 }
@@ -114,6 +115,7 @@ type ProcessDecision struct {
 	Reason        string                 `json:"reason"`
 	Params        map[string]interface{} `json:"params"`
 	ProcessedText string                 `json:"processed_text,omitempty"`
+	Tags          []string               `json:"tags,omitempty"`
 }
 
 type PineconeMemory struct {

@@ -179,6 +179,7 @@ function App() {
   const [events, setEvents] = useState([]);
   const [listeners, setListeners] = useState([]);
   const [fetching, setFetching] = useState(false);
+  const [activeTag, setActiveTag] = useState(null);
 
   const accountSlug = user?.slug || '[account]';
   const ingressTemplate = listeners.length > 0
@@ -190,10 +191,13 @@ function App() {
     setListeners(Array.isArray(data) ? data : []);
   };
 
-  const fetchEvents = async () => {
+  const fetchEvents = async (tag = null) => {
     setFetching(true);
     try {
-      const data = await apiRequest('/api/events');
+      const path = tag
+        ? `/api/events/by-tag?tag=${encodeURIComponent(tag)}&limit=50`
+        : '/api/events';
+      const data = await apiRequest(path);
       setEvents(Array.isArray(data) ? data : []);
     } finally {
       setFetching(false);
@@ -204,12 +208,16 @@ function App() {
     if (!isAuthenticated) return;
     fetchListeners().catch((err) => console.error('Failed to fetch listeners', err));
     if (activeTab === 'storyboard') {
-      fetchEvents().catch((err) => console.error('Failed to fetch events', err));
+      fetchEvents(activeTag).catch((err) => console.error('Failed to fetch events', err));
     }
-  }, [isAuthenticated, activeTab]);
+  }, [isAuthenticated, activeTab, activeTag]);
 
   const refreshAll = async () => {
-    await Promise.allSettled([fetchListeners(), fetchEvents()]);
+    await Promise.allSettled([fetchListeners(), fetchEvents(activeTag)]);
+  };
+
+  const handleTagClick = (tag) => {
+    setActiveTag(prev => prev === tag ? null : tag);
   };
 
   if (loading) {
@@ -307,6 +315,21 @@ function App() {
                   </div>
                 )}
 
+                {activeTag && (
+                  <div className="flex items-center gap-2 px-1 mb-2">
+                    <span className="text-xs text-indigo-400">Filtered by tag:</span>
+                    <span className="text-xs font-semibold text-indigo-300 bg-indigo-500/10 border border-indigo-500/20 px-2 py-0.5 rounded-full">
+                      {activeTag}
+                    </span>
+                    <button
+                      onClick={() => setActiveTag(null)}
+                      className="text-xs text-slate-500 hover:text-white underline"
+                    >
+                      Clear
+                    </button>
+                  </div>
+                )}
+
                 {events.map((event, i) => (
                   <StoryboardCard
                     key={event.id || i}
@@ -317,11 +340,13 @@ function App() {
                         minute: '2-digit',
                         second: '2-digit',
                       }),
-                      story: payloadPreview(event) || `Received ${event.type_key || 'webhook'} payload.`,
-                      payload: payloadPreview(event),
+                      processedText: event.processed_text || '',
+                      rawPayload: event.raw_payload_json || event.payload_json || '',
+                      tagsJson: event.tags_json || '[]',
                       typeKey: event.type_key || 'webhook',
                       actions: event.action_selected ? [event.action_selected] : ['LOGGED'],
                     }}
+                    onTagClick={handleTagClick}
                   />
                 ))}
               </section>

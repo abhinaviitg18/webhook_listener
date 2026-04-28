@@ -48,7 +48,7 @@ func (l *LLMClient) SuggestAction(ctx context.Context, typeKey, payload string, 
 	prompt := buildPrompt(typeKey, payload, memories, available)
 	r := chatReq{
 		Model:    l.Model,
-		Messages: []chatMsg{{Role: "system", Content: "Return strict JSON: {\"action_name\": string, \"reason\": string, \"params\": object, \"processed_text\": string}. The \"processed_text\" should be a concise, human-readable summary of the webhook event based on the user's intent or policy. Optional params.memory_write_mode must be one of: update_or_insert, insert_only, none."}, {Role: "user", Content: prompt}},
+		Messages: []chatMsg{{Role: "system", Content: "Return strict JSON: {\"action_name\": string, \"reason\": string, \"params\": object, \"processed_text\": string, \"tags\": [string]}. The \"processed_text\" should be a concise, human-readable summary of the webhook event based on the user's intent or policy. The \"tags\" array should contain relevant category labels for this message such as: marketing, promotion, newsletter, otp, personal, transactional, alert, system, broadcast, notification, or any other relevant domain-specific tags. Always include at least one tag. Optional params.memory_write_mode must be one of: update_or_insert, insert_only, none."}, {Role: "user", Content: prompt}},
 	}
 	b, _ := json.Marshal(r)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(l.BaseURL, "/")+"/chat/completions", bytes.NewReader(b))

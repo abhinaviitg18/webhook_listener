@@ -61,6 +61,7 @@ func NewRouter(h *Handler, verifier auth.RequestVerifier) http.Handler {
 		ar.Delete("/api/webhooks/secrets/{secretID}", h.DeleteSecret)
 		ar.Post("/api/forward-targets", h.CreateForwardTarget)
 		ar.Get("/api/events", h.ListEvents)
+		ar.Get("/api/events/by-tag", h.ListEventsByTag)
 		ar.Post("/api/events/{eventID}/re-run", h.ReprocessEvent)
 		ar.Get("/api/events/{eventID}", h.GetEvent)
 		ar.Post("/api/resolver/signatures", h.CreateSignature)
@@ -622,6 +623,29 @@ func (h *Handler) ListEvents(w http.ResponseWriter, r *http.Request) {
 		limit = 50
 	}
 	events, err := h.Store.ListEvents(r.Context(), acct.ID, limit)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, events)
+}
+
+func (h *Handler) ListEventsByTag(w http.ResponseWriter, r *http.Request) {
+	acct, ok := auth.AccountFromContext(r.Context())
+	if !ok {
+		writeErr(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	tag := strings.TrimSpace(r.URL.Query().Get("tag"))
+	if tag == "" {
+		writeErr(w, http.StatusBadRequest, "tag query parameter required")
+		return
+	}
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
+	events, err := h.Store.ListEventsByTag(r.Context(), acct.ID, tag, limit)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
