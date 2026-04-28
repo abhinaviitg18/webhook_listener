@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"net/http"
+	"slices"
 	"strings"
 
 	"agenthook.store/internal/auth"
@@ -28,7 +29,7 @@ func BuildHTTPHandler(ctx context.Context, cfg config.Config) (http.Handler, err
 	}
 
 	pine := integrations.NewPineconeClient(cfg.PineconeAPIKey, cfg.PineconeIndexURL, cfg.PineconeNamespace)
-	llm := integrations.NewLLMClient(cfg.LLMProvider, cfg.LLMAPIKey, cfg.LLMBaseURL, cfg.LLMModel)
+	llm := buildFallbackLLMClient(nil, cfg)
 	groqClassifier := integrations.NewProviderTypeClassifier("groq", cfg.GroqBaseURL, cfg.GroqAPIKey, cfg.GroqModel)
 	cerebrasClassifier := integrations.NewProviderTypeClassifier("cerebras", cfg.CerebrasBaseURL, cfg.CerebrasAPIKey, cfg.CerebrasModel)
 	deterministicOnly := toSet(cfg.DeterministicOnlyTypeKeys)
@@ -57,11 +58,11 @@ func BuildHTTPHandler(ctx context.Context, cfg config.Config) (http.Handler, err
 			MaxObjectFields: cfg.LLMCompactionMaxObjectFields,
 		},
 		BYOKResolver: func(ctx context.Context, accountID string) domain.LLMClient {
-			byokCfg, err := st.GetDefaultBYOKConfig(ctx, accountID)
+			byokCfgs, err := st.ListBYOKConfigs(ctx, accountID)
 			if err != nil {
 				return nil
 			}
-			return integrations.NewLLMClient(byokCfg.Provider, byokCfg.APIKey, byokCfg.BaseURL, byokCfg.Model)
+			return buildFallbackLLMClient(byokCfgs, cfg)
 		},
 	}
 
@@ -83,6 +84,52 @@ func BuildHTTPHandler(ctx context.Context, cfg config.Config) (http.Handler, err
 	}
 
 	return httpapi.NewRouter(handler, verifier), nil
+}
+
+func buildFallbackLLMClient(byokCfgs []domain.BYOKProviderConfig, cfg config.Config) domain.LLMClient {
+	clients := make([]domain.LLMClient, 0, len(byokCfgs)+4)
+	seen := map[string]struct{}{}
+	appendClient := func(provider, key, baseURL, model string) {
+		normalizedProvider := strings.TrimSpace(strings.ToLower(provider))
+		trimmedKey := strings.TrimSpace(key)
+		trimmedBaseURL := strings.TrimSpace(baseURL)
+		trimmedModel := strings.TrimSpace(model)
+		if normalizedProvider == "" || trimmedKey == "" || trimmedBaseURL == "" || trimmedModel == "" {
+			return
+		}
+		dedupeKey := normalizedProvider + "|" + trimmedBaseURL + "|" + trimmedModel + "|" + trimmedKey
+		if _, ok := seen[dedupeKey]; ok {
+			return
+		}
+		seen[dedupeKey] = struct{}{}
+		clients = append(clients, integrations.NewLLMClient(normalizedProvider, trimmedKey, trimmedBaseURL, trimmedModel))
+	}
+
+	sortedBYOK := append([]domain.BYOKProviderConfig(nil), byokCfgs...)
+	slices.SortStableFunc(sortedBYOK, func(a, b domain.BYOKProviderConfig) int {
+		if a.IsDefault && !b.IsDefault {
+			return -1
+		}
+		if !a.IsDefault && b.IsDefault {
+			return 1
+		}
+		if a.CreatedAt.Before(b.CreatedAt) {
+			return -1
+		}
+		if a.CreatedAt.After(b.CreatedAt) {
+			return 1
+		}
+		return strings.Compare(a.Provider, b.Provider)
+	})
+	for _, byokCfg := range sortedBYOK {
+		appendClient(byokCfg.Provider, byokCfg.APIKey, byokCfg.BaseURL, byokCfg.Model)
+	}
+
+	appendClient(cfg.LLMProvider, cfg.LLMAPIKey, cfg.LLMBaseURL, cfg.LLMModel)
+	appendClient("groq", cfg.GroqAPIKey, cfg.GroqBaseURL, cfg.GroqModel)
+	appendClient("cerebras", cfg.CerebrasAPIKey, cfg.CerebrasBaseURL, cfg.CerebrasModel)
+	appendClient("openrouter", cfg.OpenRouterAPIKey, cfg.OpenRouterBaseURL, cfg.OpenRouterModel)
+	return integrations.NewFallbackLLMClient(clients...)
 }
 
 func UsingInMemoryStore(cfg config.Config) bool {

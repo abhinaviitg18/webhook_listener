@@ -875,7 +875,7 @@ func (h *Handler) UpsertBYOKProvider(w http.ResponseWriter, r *http.Request) {
 		case "groq":
 			model = "llama3-70b-8192"
 		case "cerebras":
-			model = "llama3.1-70b"
+			model = "llama-3.3-70b"
 		case "openai":
 			model = "gpt-4o-mini"
 		default:

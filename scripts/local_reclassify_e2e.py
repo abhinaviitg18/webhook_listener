@@ -11,7 +11,7 @@ import urllib.parse
 import urllib.request
 import uuid
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, Optional, Tuple
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -55,18 +55,39 @@ def wait_for_healthz() -> None:
     raise RuntimeError("local server did not become healthy in time")
 
 
+def resolve_provider_config(env_file: Dict[str, str], provider: str) -> Tuple[str, str, str]:
+    provider = provider.strip().lower()
+    if provider == "groq":
+        return (
+            env_file.get("GROQ_API_KEY", "").strip(),
+            os.environ.get("LOCAL_GROQ_BASE_URL", "https://api.groq.com/openai/v1").strip(),
+            os.environ.get("LOCAL_GROQ_MODEL", "llama-3.3-70b-versatile").strip(),
+        )
+    if provider == "cerebras":
+        return (
+            env_file.get("CEREBRAS_API_KEY", "").strip(),
+            os.environ.get("LOCAL_CEREBRAS_BASE_URL", "https://api.cerebras.ai/v1").strip(),
+            os.environ.get("LOCAL_CEREBRAS_MODEL", "llama-3.3-70b").strip(),
+        )
+    if provider == "openrouter":
+        return (
+            env_file.get("OPENROUTER_API_KEY", "").strip(),
+            os.environ.get("LOCAL_OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1").strip(),
+            os.environ.get("LOCAL_OPENROUTER_MODEL", "openai/gpt-4o-mini").strip(),
+        )
+    raise RuntimeError(f"unsupported provider={provider}")
+
+
 def main() -> int:
     env_file = load_env_file(ENV_PATH)
     provider = os.environ.get("LOCAL_LLM_PROVIDER", "groq").strip().lower()
-    model = os.environ.get("LOCAL_LLM_MODEL", "llama-3.3-70b-versatile").strip()
-    api_key = env_file.get("GROQ_API_KEY", "").strip()
-    base_url = os.environ.get("LOCAL_LLM_BASE_URL", "https://api.groq.com/openai/v1").strip()
-    if provider == "openrouter":
-        api_key = env_file.get("OPENROUTER_API_KEY", "").strip()
-        base_url = os.environ.get("LOCAL_LLM_BASE_URL", "https://openrouter.ai/api/v1").strip()
-        model = os.environ.get("LOCAL_LLM_MODEL", "openai/gpt-4o-mini").strip()
+    api_key, base_url, model = resolve_provider_config(env_file, provider)
+    model = os.environ.get("LOCAL_LLM_MODEL", model).strip()
+    base_url = os.environ.get("LOCAL_LLM_BASE_URL", base_url).strip()
     if not api_key:
         raise RuntimeError(f"missing API key for provider={provider}")
+    fallback_providers = [p.strip().lower() for p in os.environ.get("LOCAL_LLM_FALLBACK_PROVIDERS", "").split(",") if p.strip()]
+    force_primary_failure = os.environ.get("LOCAL_FORCE_PRIMARY_FAILURE", "").strip().lower() in {"1", "true", "yes"}
 
     env = os.environ.copy()
     env.update(env_file)
@@ -123,9 +144,33 @@ def main() -> int:
             "POST",
             f"{BASE_URL}/v1/byok/providers",
             token=token,
-            body={"provider": provider, "api_key": api_key, "base_url": base_url, "model": model, "is_default": True},
+            body={
+                "provider": provider,
+                "api_key": "invalid-test-key" if force_primary_failure else api_key,
+                "base_url": base_url,
+                "model": model,
+                "is_default": True,
+            },
         )
         print("configured byok provider")
+        for fallback_provider in fallback_providers:
+            fallback_key, fallback_base_url, fallback_model = resolve_provider_config(env_file, fallback_provider)
+            if not fallback_key:
+                raise RuntimeError(f"missing API key for fallback provider={fallback_provider}")
+            http_json(
+                "POST",
+                f"{BASE_URL}/v1/byok/providers",
+                token=token,
+                body={
+                    "provider": fallback_provider,
+                    "api_key": fallback_key,
+                    "base_url": fallback_base_url,
+                    "model": fallback_model,
+                    "is_default": False,
+                },
+            )
+        if fallback_providers:
+            print(f"configured fallback providers={','.join(fallback_providers)}")
         http_json(
             "POST",
             f"{BASE_URL}/api/policy/skills",
@@ -162,6 +207,7 @@ def main() -> int:
                 {
                     "provider": provider,
                     "model": model,
+                    "fallback_providers": fallback_providers,
                     "event_id": event["id"],
                     "rerun_decision": rerun.get("decision"),
                     "response_processed_text_len": len((rerun.get("event") or {}).get("processed_text") or ""),

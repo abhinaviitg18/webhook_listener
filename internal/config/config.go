@@ -34,12 +34,15 @@ type Config struct {
 	LLMCompactionMaxArrayItems   int
 	LLMCompactionMaxObjectFields int
 
-	GroqAPIKey      string
-	GroqBaseURL     string
-	GroqModel       string
-	CerebrasAPIKey  string
-	CerebrasBaseURL string
-	CerebrasModel   string
+	GroqAPIKey        string
+	GroqBaseURL       string
+	GroqModel         string
+	CerebrasAPIKey    string
+	CerebrasBaseURL   string
+	CerebrasModel     string
+	OpenRouterAPIKey  string
+	OpenRouterBaseURL string
+	OpenRouterModel   string
 
 	TelegramBotToken string
 
@@ -94,12 +97,15 @@ func Load() Config {
 		LLMCompactionMaxArrayItems:   getint("LLM_COMPACTION_MAX_ARRAY_ITEMS", 8),
 		LLMCompactionMaxObjectFields: getint("LLM_COMPACTION_MAX_OBJECT_FIELDS", 20),
 
-		GroqAPIKey:      getenv("GROQ_API_KEY", ""),
-		GroqBaseURL:     getenv("GROQ_BASE_URL", "https://api.groq.com/openai/v1"),
-		GroqModel:       getenv("GROQ_MODEL", ""),
-		CerebrasAPIKey:  getenv("CEREBRAS_API_KEY", ""),
-		CerebrasBaseURL: getenv("CEREBRAS_BASE_URL", "https://api.cerebras.ai/v1"),
-		CerebrasModel:   getenv("CEREBRAS_MODEL", "llama3.1-8b"),
+		GroqAPIKey:        getenv("GROQ_API_KEY", ""),
+		GroqBaseURL:       getenv("GROQ_BASE_URL", "https://api.groq.com/openai/v1"),
+		GroqModel:         getenv("GROQ_MODEL", ""),
+		CerebrasAPIKey:    getenv("CEREBRAS_API_KEY", ""),
+		CerebrasBaseURL:   getenv("CEREBRAS_BASE_URL", "https://api.cerebras.ai/v1"),
+		CerebrasModel:     getenv("CEREBRAS_MODEL", "llama-3.3-70b"),
+		OpenRouterAPIKey:  getenv("OPENROUTER_API_KEY", llmKey),
+		OpenRouterBaseURL: getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"),
+		OpenRouterModel:   getenv("OPENROUTER_MODEL", "openai/gpt-4o-mini"),
 
 		TelegramBotToken: getenv("TELEGRAM_BOT_TOKEN", ""),
 

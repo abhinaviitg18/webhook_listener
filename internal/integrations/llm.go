@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -20,6 +21,10 @@ type LLMClient struct {
 	BaseURL  string
 	Model    string
 	Client   *http.Client
+}
+
+type FallbackLLMClient struct {
+	Clients []domain.LLMClient
 }
 
 type chatReq struct {
@@ -49,6 +54,23 @@ func NewLLMClient(provider, key, baseURL, model string) *LLMClient {
 		Model:    normalizedModel,
 		Client:   &http.Client{Timeout: 8 * time.Second},
 	}
+}
+
+func NewFallbackLLMClient(clients ...domain.LLMClient) domain.LLMClient {
+	filtered := make([]domain.LLMClient, 0, len(clients))
+	for _, client := range clients {
+		if client == nil {
+			continue
+		}
+		filtered = append(filtered, client)
+	}
+	if len(filtered) == 0 {
+		return nil
+	}
+	if len(filtered) == 1 {
+		return filtered[0]
+	}
+	return &FallbackLLMClient{Clients: filtered}
 }
 
 func (l *LLMClient) SuggestAction(ctx context.Context, typeKey, payload string, memories []domain.PineconeMemory, available []string) (domain.ProcessDecision, error) {
@@ -111,6 +133,40 @@ func (l *LLMClient) SuggestAction(ctx context.Context, typeKey, payload string, 
 	return d, nil
 }
 
+func (f *FallbackLLMClient) SuggestAction(ctx context.Context, typeKey, payload string, memories []domain.PineconeMemory, available []string) (domain.ProcessDecision, error) {
+	if f == nil || len(f.Clients) == 0 {
+		return domain.ProcessDecision{ActionName: "store_mysql", Reason: "llm not configured", Params: map[string]interface{}{}}, nil
+	}
+	var (
+		lastErr      error
+		lastDecision domain.ProcessDecision
+	)
+	for idx, client := range f.Clients {
+		decision, err := client.SuggestAction(ctx, typeKey, payload, memories, available)
+		if err != nil {
+			lastErr = err
+			log.Printf("llm.fallback attempt=%d/%d type_key=%s status=error err=%v", idx+1, len(f.Clients), typeKey, err)
+			continue
+		}
+		if shouldFallbackDecision(decision) {
+			lastDecision = decision
+			log.Printf("llm.fallback attempt=%d/%d type_key=%s status=continue reason=%q", idx+1, len(f.Clients), typeKey, decision.Reason)
+			continue
+		}
+		if idx > 0 {
+			log.Printf("llm.fallback attempt=%d/%d type_key=%s status=success action=%s", idx+1, len(f.Clients), typeKey, decision.ActionName)
+		}
+		return decision, nil
+	}
+	if lastErr != nil {
+		return domain.ProcessDecision{}, lastErr
+	}
+	if lastDecision.ActionName != "" || lastDecision.Reason != "" {
+		return lastDecision, nil
+	}
+	return domain.ProcessDecision{}, errors.New("no llm clients succeeded")
+}
+
 func buildPrompt(typeKey, payload string, memories []domain.PineconeMemory, available []string) string {
 	return fmt.Sprintf(
 		"Type: %s\nPayload: %s\nRelevant context: %s\nAvailable actions: %s\nPick the best action and params. Include params.memory_write_mode if memory behavior should be overridden.",
@@ -124,14 +180,23 @@ func buildPrompt(typeKey, payload string, memories []domain.PineconeMemory, avai
 func normalizeModelAlias(provider, model string) string {
 	normalizedProvider := strings.TrimSpace(strings.ToLower(provider))
 	normalizedModel := strings.TrimSpace(model)
-	if normalizedProvider != "groq" {
-		return normalizedModel
-	}
-	switch normalizedModel {
-	case "llama3-70b-8192":
-		return "llama-3.3-70b-versatile"
-	case "llama3-8b-8192":
-		return "llama-3.1-8b-instant"
+	switch normalizedProvider {
+	case "groq":
+		switch normalizedModel {
+		case "llama3-70b-8192":
+			return "llama-3.3-70b-versatile"
+		case "llama3-8b-8192":
+			return "llama-3.1-8b-instant"
+		default:
+			return normalizedModel
+		}
+	case "cerebras":
+		switch normalizedModel {
+		case "llama3.1-70b":
+			return "llama-3.3-70b"
+		default:
+			return normalizedModel
+		}
 	default:
 		return normalizedModel
 	}
@@ -193,6 +258,16 @@ func compactMemories(memories []domain.PineconeMemory) string {
 		}
 	}
 	return strings.Join(parts, " | ")
+}
+
+func shouldFallbackDecision(decision domain.ProcessDecision) bool {
+	reason := strings.TrimSpace(strings.ToLower(decision.Reason))
+	switch reason {
+	case "llm not configured", "llm parse fallback":
+		return true
+	default:
+		return false
+	}
 }
 
 func minInt(a, b int) int {
