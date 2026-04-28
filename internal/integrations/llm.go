@@ -112,11 +112,13 @@ func (l *LLMClient) SuggestAction(ctx context.Context, typeKey, payload string, 
 }
 
 func buildPrompt(typeKey, payload string, memories []domain.PineconeMemory, available []string) string {
-	mem := make([]string, 0, len(memories))
-	for _, m := range memories {
-		mem = append(mem, m.Summary)
-	}
-	return fmt.Sprintf("Type: %s\nPayload: %s\nRelevant context: %s\nAvailable actions: %s\nPick the best action and params. Include params.memory_write_mode if memory behavior should be overridden.", typeKey, payload, strings.Join(mem, " | "), strings.Join(available, ","))
+	return fmt.Sprintf(
+		"Type: %s\nPayload: %s\nRelevant context: %s\nAvailable actions: %s\nPick the best action and params. Include params.memory_write_mode if memory behavior should be overridden.",
+		typeKey,
+		payload,
+		compactMemories(memories),
+		strings.Join(available, ","),
+	)
 }
 
 func normalizeModelAlias(provider, model string) string {
@@ -149,4 +151,53 @@ func normalizeJSONResponse(content string) string {
 		return trimmed[start : end+1]
 	}
 	return trimmed
+}
+
+func compactMemories(memories []domain.PineconeMemory) string {
+	if len(memories) == 0 {
+		return ""
+	}
+	const (
+		maxMemories     = 3
+		maxSummaryBytes = 220
+		maxTotalBytes   = 800
+	)
+	parts := make([]string, 0, minInt(len(memories), maxMemories))
+	total := 0
+	for i, memory := range memories {
+		if i >= maxMemories {
+			break
+		}
+		summary := strings.TrimSpace(memory.Summary)
+		if len(summary) > maxSummaryBytes {
+			summary = summary[:maxSummaryBytes]
+		}
+		if summary == "" {
+			continue
+		}
+		next := summary
+		if len(parts) > 0 {
+			next = " | " + next
+		}
+		if total+len(next) > maxTotalBytes {
+			remaining := maxTotalBytes - total
+			if remaining <= 0 {
+				break
+			}
+			next = next[:remaining]
+		}
+		parts = append(parts, strings.TrimPrefix(next, " | "))
+		total += len(next)
+		if total >= maxTotalBytes {
+			break
+		}
+	}
+	return strings.Join(parts, " | ")
+}
+
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }

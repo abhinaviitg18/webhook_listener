@@ -1,6 +1,11 @@
 package integrations
 
-import "testing"
+import (
+	"strings"
+	"testing"
+
+	"agenthook.store/internal/domain"
+)
 
 func TestNormalizeModelAlias(t *testing.T) {
 	tests := []struct {
@@ -42,5 +47,24 @@ func TestNormalizeJSONResponse(t *testing.T) {
 				t.Fatalf("normalizeJSONResponse(%q) = %q, want %q", tt.input, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestCompactMemories(t *testing.T) {
+	memories := []domain.PineconeMemory{
+		{Summary: "first summary " + strings.Repeat("a", 240)},
+		{Summary: "second summary"},
+		{Summary: "third summary"},
+		{Summary: "fourth summary should be dropped"},
+	}
+	got := compactMemories(memories)
+	if strings.Contains(got, "fourth summary") {
+		t.Fatalf("expected extra memories to be pruned, got %q", got)
+	}
+	if len(got) > 800 {
+		t.Fatalf("expected compacted memory context <= 800 bytes, got %d", len(got))
+	}
+	if got == "" {
+		t.Fatalf("expected non-empty memory context")
 	}
 }
