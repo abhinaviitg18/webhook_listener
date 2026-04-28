@@ -40,7 +40,15 @@ type chatResp struct {
 }
 
 func NewLLMClient(provider, key, baseURL, model string) *LLMClient {
-	return &LLMClient{Provider: provider, APIKey: strings.TrimSpace(key), BaseURL: strings.TrimSpace(baseURL), Model: model, Client: &http.Client{Timeout: 8 * time.Second}}
+	normalizedProvider := strings.TrimSpace(strings.ToLower(provider))
+	normalizedModel := normalizeModelAlias(normalizedProvider, strings.TrimSpace(model))
+	return &LLMClient{
+		Provider: normalizedProvider,
+		APIKey:   strings.TrimSpace(key),
+		BaseURL:  strings.TrimSpace(baseURL),
+		Model:    normalizedModel,
+		Client:   &http.Client{Timeout: 8 * time.Second},
+	}
 }
 
 func (l *LLMClient) SuggestAction(ctx context.Context, typeKey, payload string, memories []domain.PineconeMemory, available []string) (domain.ProcessDecision, error) {
@@ -87,7 +95,8 @@ func (l *LLMClient) SuggestAction(ctx context.Context, typeKey, payload string, 
 	log.Printf("llm.suggest success provider=%s model=%s type_key=%s response_bytes=%d", l.Provider, l.Model, typeKey, len(content))
 
 	var d domain.ProcessDecision
-	if err := json.Unmarshal([]byte(content), &d); err != nil {
+	jsonContent := normalizeJSONResponse(content)
+	if err := json.Unmarshal([]byte(jsonContent), &d); err != nil {
 		log.Printf("llm.suggest parse_fallback provider=%s model=%s type_key=%s err=%v", l.Provider, l.Model, typeKey, err)
 		return domain.ProcessDecision{ActionName: "store_mysql", Reason: "llm parse fallback", Params: map[string]interface{}{}}, nil
 	}
@@ -108,4 +117,36 @@ func buildPrompt(typeKey, payload string, memories []domain.PineconeMemory, avai
 		mem = append(mem, m.Summary)
 	}
 	return fmt.Sprintf("Type: %s\nPayload: %s\nRelevant context: %s\nAvailable actions: %s\nPick the best action and params. Include params.memory_write_mode if memory behavior should be overridden.", typeKey, payload, strings.Join(mem, " | "), strings.Join(available, ","))
+}
+
+func normalizeModelAlias(provider, model string) string {
+	normalizedProvider := strings.TrimSpace(strings.ToLower(provider))
+	normalizedModel := strings.TrimSpace(model)
+	if normalizedProvider != "groq" {
+		return normalizedModel
+	}
+	switch normalizedModel {
+	case "llama3-70b-8192":
+		return "llama-3.3-70b-versatile"
+	case "llama3-8b-8192":
+		return "llama-3.1-8b-instant"
+	default:
+		return normalizedModel
+	}
+}
+
+func normalizeJSONResponse(content string) string {
+	trimmed := strings.TrimSpace(content)
+	trimmed = strings.TrimPrefix(trimmed, "```json")
+	trimmed = strings.TrimPrefix(trimmed, "```JSON")
+	trimmed = strings.TrimPrefix(trimmed, "```")
+	trimmed = strings.TrimSuffix(trimmed, "```")
+	trimmed = strings.TrimSpace(trimmed)
+
+	start := strings.Index(trimmed, "{")
+	end := strings.LastIndex(trimmed, "}")
+	if start >= 0 && end >= start {
+		return trimmed[start : end+1]
+	}
+	return trimmed
 }

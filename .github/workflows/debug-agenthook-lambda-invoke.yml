@@ -14,6 +14,7 @@ jobs:
       AWS_DEFAULT_REGION: us-east-1
       AWS_REGION: us-east-1
       LAMBDA_FUNCTION_NAME: agenthook-app
+      LAMBDA_ORIGIN_SHARED_SECRET: ${{ secrets.LAMBDA_ORIGIN_SHARED_SECRET }}
     steps:
       - name: Create healthz payload
         run: |
@@ -25,7 +26,8 @@ jobs:
             "rawQueryString": "",
             "headers": {
               "host": "app.agenthook.store",
-              "x-forwarded-proto": "https"
+              "x-forwarded-proto": "https",
+              "x-agenthook-origin-secret": "__LAMBDA_ORIGIN_SHARED_SECRET__"
             },
             "requestContext": {
               "accountId": "anonymous",
@@ -46,6 +48,21 @@ jobs:
             "isBase64Encoded": false
           }
           JSON
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          path = Path("payload.json")
+          payload = json.loads(path.read_text())
+          payload["headers"]["x-agenthook-origin-secret"] = "__SECRET__"
+          path.write_text(json.dumps(payload))
+          PY
+          python3 - <<'PY'
+          from pathlib import Path
+          text = Path("payload.json").read_text()
+          text = text.replace("__SECRET__", Path("/dev/stdin").read_text().strip())
+          Path("payload.json").write_text(text)
+          PY <<<"$LAMBDA_ORIGIN_SHARED_SECRET"
 
       - name: Invoke lambda and capture tail logs
         run: |
@@ -71,7 +88,11 @@ jobs:
           else:
               print("<empty>")
           print("\nResponse payload:\n")
-          print(pathlib.Path("response.json").read_text())
+          response_text = pathlib.Path("response.json").read_text()
+          print(response_text)
+          response = json.loads(response_text)
+          if response.get("statusCode") != 200:
+              raise SystemExit(f"expected 200 from healthz, got {response.get('statusCode')}")
           PY
 
       - name: Upload invoke artifacts
