@@ -825,6 +825,9 @@ const SkillsTab = ({ listeners, copied, setCopied, onRefreshListeners }) => {
   const [allSkillsByType, setAllSkillsByType] = useState({});
   const [skillCounts, setSkillCounts] = useState({});
   const [expandedSkillCard, setExpandedSkillCard] = useState('');
+  const [editingSkillID, setEditingSkillID] = useState('');
+  const [editingSkillForm, setEditingSkillForm] = useState(null);
+  const [savingSkill, setSavingSkill] = useState(false);
   const [skillForm, setSkillForm] = useState({
     skill_key: '',
     skill_prompt: '',
@@ -841,6 +844,17 @@ const SkillsTab = ({ listeners, copied, setCopied, onRefreshListeners }) => {
   const [transformPayload, setTransformPayload] = useState('{"provider":"github","event":"push","repository":"agenthook"}');
   const [transformResult, setTransformResult] = useState('');
   const [testBusy, setTestBusy] = useState(false);
+  const [recentEvents, setRecentEvents] = useState([]);
+  const [loadingRecentEvents, setLoadingRecentEvents] = useState(false);
+  const [selectedEventIDs, setSelectedEventIDs] = useState({});
+  const [rerunBusy, setRerunBusy] = useState(false);
+  const [rerunNotice, setRerunNotice] = useState('');
+
+  const fetchSkillsForType = async (typeKey, includeDisabled = true) => {
+    const suffix = includeDisabled ? '&include_disabled=true' : '';
+    const data = await apiRequest(`/api/policy/skills?type_key=${encodeURIComponent(typeKey)}${suffix}`);
+    return Array.isArray(data) ? data : [];
+  };
 
   useEffect(() => {
     if (!listenerOptions.length) {
@@ -860,8 +874,7 @@ const SkillsTab = ({ listeners, copied, setCopied, onRefreshListeners }) => {
 
     Promise.all(
       listenerOptions.map(async (option) => {
-        const data = await apiRequest(`/api/policy/skills?type_key=${encodeURIComponent(option.value)}`);
-        const normalized = Array.isArray(data) ? data : [];
+        const normalized = await fetchSkillsForType(option.value, true);
         return [option.value, normalized];
       }),
     )
@@ -891,10 +904,26 @@ const SkillsTab = ({ listeners, copied, setCopied, onRefreshListeners }) => {
   useEffect(() => {
     if (!selectedTypeKey) return;
     setLoadingSkills(true);
-    apiRequest(`/api/policy/skills?type_key=${encodeURIComponent(selectedTypeKey)}`)
-      .then((data) => setSkills(Array.isArray(data) ? data : []))
+    fetchSkillsForType(selectedTypeKey, true)
+      .then((data) => setSkills(data))
       .catch((err) => setSkillNotice(err.message))
       .finally(() => setLoadingSkills(false));
+  }, [selectedTypeKey]);
+
+  useEffect(() => {
+    if (!selectedTypeKey) {
+      setRecentEvents([]);
+      setSelectedEventIDs({});
+      return;
+    }
+    setLoadingRecentEvents(true);
+    apiRequest('/api/events')
+      .then((data) => {
+        const normalized = Array.isArray(data) ? data : [];
+        setRecentEvents(normalized.filter((event) => event.type_key === selectedTypeKey));
+      })
+      .catch((err) => setRerunNotice(err.message))
+      .finally(() => setLoadingRecentEvents(false));
   }, [selectedTypeKey]);
 
   const selectedListener = listenerOptions.find((item) => item.value === selectedTypeKey)?.listener || null;
@@ -948,8 +977,7 @@ const SkillsTab = ({ listeners, copied, setCopied, onRefreshListeners }) => {
           memory_write_mode: 'update_or_insert',
         }),
       });
-      const refreshed = await apiRequest(`/api/policy/skills?type_key=${encodeURIComponent(selectedTypeKey)}`);
-      const normalized = Array.isArray(refreshed) ? refreshed : [];
+      const normalized = await fetchSkillsForType(selectedTypeKey, true);
       setSkills(normalized);
       setAllSkillsByType((current) => ({
         ...current,
@@ -1007,6 +1035,88 @@ const SkillsTab = ({ listeners, copied, setCopied, onRefreshListeners }) => {
     ...option,
     skills: allSkillsByType[option.value] || [],
   }));
+  const visibleEvents = recentEvents;
+  const selectedVisibleEventIDs = visibleEvents.filter((event) => selectedEventIDs[event.id]).map((event) => event.id);
+
+  const beginEditSkill = (listenerTypeKey, skill) => {
+    setExpandedSkillCard(`${listenerTypeKey}:${skill.id}`);
+    setEditingSkillID(skill.id);
+    setEditingSkillForm({
+      skill_key: skill.skill_key,
+      skill_prompt: skill.skill_prompt,
+      match_contains: skill.match_contains,
+      forced_action: skill.forced_action,
+      memory_write_mode: skill.memory_write_mode || 'update_or_insert',
+      priority: skill.priority || 100,
+      enabled: skill.enabled,
+    });
+  };
+
+  const cancelEditSkill = () => {
+    setEditingSkillID('');
+    setEditingSkillForm(null);
+  };
+
+  const saveSkill = async (typeKey, skillID) => {
+    if (!editingSkillForm) return;
+    setSavingSkill(true);
+    setSkillNotice('');
+    try {
+      const updated = await apiRequest(`/api/policy/skills/${skillID}`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          type_key: typeKey,
+          ...editingSkillForm,
+          priority: Number(editingSkillForm.priority) || 100,
+        }),
+      });
+      const nextSkills = (allSkillsByType[typeKey] || []).map((skill) => (skill.id === skillID ? updated : skill));
+      setAllSkillsByType((current) => ({ ...current, [typeKey]: nextSkills }));
+      if (selectedTypeKey === typeKey) {
+        setSkills(nextSkills);
+      }
+      setSkillCounts((current) => ({ ...current, [typeKey]: nextSkills.length }));
+      setSkillNotice('Skill updated successfully.');
+      cancelEditSkill();
+    } catch (err) {
+      setSkillNotice(err.message);
+    } finally {
+      setSavingSkill(false);
+    }
+  };
+
+  const toggleEventSelection = (eventID) => {
+    setSelectedEventIDs((current) => ({ ...current, [eventID]: !current[eventID] }));
+  };
+
+  const toggleAllVisibleEvents = () => {
+    const shouldSelectAll = selectedVisibleEventIDs.length !== visibleEvents.length;
+    setSelectedEventIDs((current) => {
+      const next = { ...current };
+      visibleEvents.forEach((event) => {
+        next[event.id] = shouldSelectAll;
+      });
+      return next;
+    });
+  };
+
+  const rerunSelectedEvents = async () => {
+    if (!selectedVisibleEventIDs.length) return;
+    setRerunBusy(true);
+    setRerunNotice('');
+    try {
+      await Promise.all(selectedVisibleEventIDs.map((eventID) => apiRequest(`/api/events/${eventID}/re-run`, { method: 'POST' })));
+      const refreshed = await apiRequest('/api/events');
+      const normalized = Array.isArray(refreshed) ? refreshed : [];
+      setRecentEvents(normalized.filter((event) => event.type_key === selectedTypeKey));
+      setSelectedEventIDs({});
+      setRerunNotice(`Reclassified ${selectedVisibleEventIDs.length} message${selectedVisibleEventIDs.length === 1 ? '' : 's'}.`);
+    } catch (err) {
+      setRerunNotice(err.message);
+    } finally {
+      setRerunBusy(false);
+    }
+  };
 
   return (
     <motion.div
@@ -1181,12 +1291,20 @@ const SkillsTab = ({ listeners, copied, setCopied, onRefreshListeners }) => {
                   {listenerCard.skills.map((skill) => {
                     const cardID = `${listenerCard.value}:${skill.id}`;
                     const isExpanded = expandedSkillCard === cardID;
+                    const isEditing = editingSkillID === skill.id && editingSkillForm;
                     return (
-                      <button
+                      <div
                         key={skill.id}
-                        type="button"
                         onClick={() => setExpandedSkillCard((current) => (current === cardID ? '' : cardID))}
-                        className="w-full text-left rounded-2xl border border-slate-800 bg-slate-950/30 p-4 space-y-3 transition-colors hover:border-slate-700"
+                        className="w-full text-left rounded-2xl border border-slate-800 bg-slate-950/30 p-4 space-y-3 transition-colors hover:border-slate-700 cursor-pointer"
+                        role="button"
+                        tabIndex={0}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter' || event.key === ' ') {
+                            event.preventDefault();
+                            setExpandedSkillCard((current) => (current === cardID ? '' : cardID));
+                          }
+                        }}
                       >
                         <div className="flex items-start justify-between gap-3">
                           <div>
@@ -1202,15 +1320,117 @@ const SkillsTab = ({ listeners, copied, setCopied, onRefreshListeners }) => {
                         </div>
                         {isExpanded && (
                           <div className="space-y-2 border-t border-slate-800/80 pt-3">
-                            <p className="text-slate-300 text-sm">{skill.skill_prompt || 'No prompt text saved.'}</p>
-                            <div className="grid grid-cols-1 gap-2 text-[11px] text-slate-400">
-                              <div>Type key: <code className="text-slate-300 break-all">{listenerCard.value}</code></div>
-                              <div>Memory write mode: <span className="text-slate-300">{skill.memory_write_mode || 'default'}</span></div>
-                              <div>Created: <span className="text-slate-300">{skill.created_at ? new Date(skill.created_at).toLocaleString() : 'Unknown'}</span></div>
-                            </div>
+                            {!isEditing && (
+                              <>
+                                <p className="text-slate-300 text-sm">{skill.skill_prompt || 'No prompt text saved.'}</p>
+                                <div className="grid grid-cols-1 gap-2 text-[11px] text-slate-400">
+                                  <div>Type key: <code className="text-slate-300 break-all">{listenerCard.value}</code></div>
+                                  <div>Memory write mode: <span className="text-slate-300">{skill.memory_write_mode || 'default'}</span></div>
+                                  <div>Created: <span className="text-slate-300">{skill.created_at ? new Date(skill.created_at).toLocaleString() : 'Unknown'}</span></div>
+                                </div>
+                                <div className="flex gap-2 pt-1">
+                                  <button
+                                    type="button"
+                                    onClick={(event) => {
+                                      event.stopPropagation();
+                                      beginEditSkill(listenerCard.value, skill);
+                                    }}
+                                    className="px-3 py-1.5 rounded-lg border border-slate-700 text-xs text-slate-200 hover:bg-slate-900"
+                                  >
+                                    Edit Skill
+                                  </button>
+                                </div>
+                              </>
+                            )}
+                            {isEditing && (
+                              <div
+                                className="space-y-3"
+                                onClick={(event) => event.stopPropagation()}
+                              >
+                                <FormField label="Skill Key">
+                                  <TextInput
+                                    value={editingSkillForm.skill_key}
+                                    onChange={(event) => setEditingSkillForm((current) => ({ ...current, skill_key: event.target.value }))}
+                                  />
+                                </FormField>
+                                <FormField label="Skill Prompt">
+                                  <TextArea
+                                    value={editingSkillForm.skill_prompt}
+                                    onChange={(event) => setEditingSkillForm((current) => ({ ...current, skill_prompt: event.target.value }))}
+                                  />
+                                </FormField>
+                                <FormField label="Match Contains">
+                                  <TextInput
+                                    value={editingSkillForm.match_contains}
+                                    onChange={(event) => setEditingSkillForm((current) => ({ ...current, match_contains: event.target.value }))}
+                                  />
+                                </FormField>
+                                <div className="grid grid-cols-2 gap-3">
+                                  <FormField label="Forced Action">
+                                    <Select
+                                      value={editingSkillForm.forced_action}
+                                      onChange={(event) => setEditingSkillForm((current) => ({ ...current, forced_action: event.target.value }))}
+                                    >
+                                      {FORCED_ACTION_OPTIONS.map((item) => (
+                                        <option key={item} value={item}>
+                                          {item}
+                                        </option>
+                                      ))}
+                                    </Select>
+                                  </FormField>
+                                  <FormField label="Memory Write Mode">
+                                    <Select
+                                      value={editingSkillForm.memory_write_mode}
+                                      onChange={(event) => setEditingSkillForm((current) => ({ ...current, memory_write_mode: event.target.value }))}
+                                    >
+                                      {MEMORY_WRITE_MODES.map((item) => (
+                                        <option key={item} value={item}>
+                                          {item}
+                                        </option>
+                                      ))}
+                                    </Select>
+                                  </FormField>
+                                </div>
+                                <div className="grid grid-cols-2 gap-3">
+                                  <FormField label="Priority">
+                                    <TextInput
+                                      type="number"
+                                      value={editingSkillForm.priority}
+                                      onChange={(event) => setEditingSkillForm((current) => ({ ...current, priority: event.target.value }))}
+                                    />
+                                  </FormField>
+                                  <FormField label="Enabled">
+                                    <Select
+                                      value={String(editingSkillForm.enabled)}
+                                      onChange={(event) => setEditingSkillForm((current) => ({ ...current, enabled: event.target.value === 'true' }))}
+                                    >
+                                      <option value="true">Enabled</option>
+                                      <option value="false">Disabled</option>
+                                    </Select>
+                                  </FormField>
+                                </div>
+                                <div className="flex gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={() => saveSkill(listenerCard.value, skill.id)}
+                                    disabled={savingSkill}
+                                    className="px-3 py-1.5 rounded-lg bg-primary text-on-primary text-xs font-semibold disabled:opacity-50"
+                                  >
+                                    {savingSkill ? 'Saving...' : 'Save'}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={cancelEditSkill}
+                                    className="px-3 py-1.5 rounded-lg border border-slate-700 text-xs text-slate-200 hover:bg-slate-900"
+                                  >
+                                    Cancel
+                                  </button>
+                                </div>
+                              </div>
+                            )}
                           </div>
                         )}
-                      </button>
+                      </div>
                     );
                   })}
 
@@ -1224,6 +1444,64 @@ const SkillsTab = ({ listeners, copied, setCopied, onRefreshListeners }) => {
               {!listenerCards.some((listenerCard) => listenerCard.skills.length > 0) && !loadingSkills && (
                 <p className="text-slate-500 text-center py-6">
                   No skills exist for this account yet. Use the preset or create one manually.
+                </p>
+              )}
+            </div>
+          </Panel>
+
+          <Panel
+            title="Existing Messages"
+            subtitle="Select one or more recent messages for this listener and reclassify them with the latest skill rules."
+            action={loadingRecentEvents ? <RefreshCw size={16} className="text-primary animate-spin" /> : null}
+          >
+            {rerunNotice && (
+              <InlineNotice tone={rerunNotice.toLowerCase().includes('reclassified') ? 'success' : 'info'}>
+                {rerunNotice}
+              </InlineNotice>
+            )}
+            {!!visibleEvents.length && (
+              <div className="flex items-center justify-between gap-3">
+                <label className="flex items-center gap-2 text-xs text-slate-300">
+                  <input
+                    type="checkbox"
+                    checked={visibleEvents.length > 0 && selectedVisibleEventIDs.length === visibleEvents.length}
+                    onChange={toggleAllVisibleEvents}
+                  />
+                  Select all visible
+                </label>
+                <button
+                  onClick={rerunSelectedEvents}
+                  disabled={rerunBusy || selectedVisibleEventIDs.length === 0}
+                  className="px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-white text-xs font-semibold disabled:opacity-50"
+                >
+                  {rerunBusy ? 'Reclassifying...' : `Reclassify Selected (${selectedVisibleEventIDs.length})`}
+                </button>
+              </div>
+            )}
+            <div className="space-y-2">
+              {visibleEvents.map((event) => (
+                <label key={event.id} className="flex items-start gap-3 rounded-2xl border border-slate-800 bg-slate-950/30 p-3">
+                  <input
+                    type="checkbox"
+                    checked={!!selectedEventIDs[event.id]}
+                    onChange={() => toggleEventSelection(event.id)}
+                    className="mt-1"
+                  />
+                  <div className="min-w-0 flex-1 space-y-1">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-[11px] text-slate-500">{new Date(event.created_at).toLocaleString()}</span>
+                      <StatusBadge status={event.status || 'ACTIVE'} />
+                    </div>
+                    <p className="text-[11px] text-slate-400">Action: {event.action_selected || 'unknown'}</p>
+                    <pre className="whitespace-pre-wrap break-words font-code-snippet text-[11px] leading-relaxed text-slate-300">
+                      {payloadPreview(event) || `Event ${event.id}`}
+                    </pre>
+                  </div>
+                </label>
+              ))}
+              {!visibleEvents.length && !loadingRecentEvents && (
+                <p className="text-slate-500 text-center py-6">
+                  No recent messages found for this listener yet.
                 </p>
               )}
             </div>

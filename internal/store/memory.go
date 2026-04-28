@@ -624,14 +624,25 @@ func (s *MemoryStore) CreateWebhookSkill(_ context.Context, skill domain.Webhook
 }
 
 func (s *MemoryStore) ListWebhookSkills(_ context.Context, accountID, typeKey string) ([]domain.WebhookSkill, error) {
+	return s.listWebhookSkills(accountID, typeKey, false), nil
+}
+
+func (s *MemoryStore) ListWebhookSkillsIncludingDisabled(_ context.Context, accountID, typeKey string) ([]domain.WebhookSkill, error) {
+	return s.listWebhookSkills(accountID, typeKey, true), nil
+}
+
+func (s *MemoryStore) listWebhookSkills(accountID, typeKey string, includeDisabled bool) []domain.WebhookSkill {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	out := []domain.WebhookSkill{}
 	for _, sk := range s.skills {
-		if sk.AccountID != accountID || !sk.Enabled {
+		if sk.AccountID != accountID {
 			continue
 		}
 		if sk.TypeKey != typeKey {
+			continue
+		}
+		if !includeDisabled && !sk.Enabled {
 			continue
 		}
 		out = append(out, sk)
@@ -642,7 +653,25 @@ func (s *MemoryStore) ListWebhookSkills(_ context.Context, accountID, typeKey st
 		}
 		return out[i].Priority < out[j].Priority
 	})
-	return out, nil
+	return out
+}
+
+func (s *MemoryStore) UpdateWebhookSkill(_ context.Context, skill domain.WebhookSkill) (domain.WebhookSkill, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	current, ok := s.skills[skill.ID]
+	if !ok || current.AccountID != skill.AccountID {
+		return domain.WebhookSkill{}, errors.New("skill not found")
+	}
+	if skill.Priority == 0 {
+		skill.Priority = 100
+	}
+	if skill.MemoryWriteMode == "" {
+		skill.MemoryWriteMode = "update_or_insert"
+	}
+	skill.CreatedAt = current.CreatedAt
+	s.skills[skill.ID] = skill
+	return skill, nil
 }
 
 func (s *MemoryStore) UpsertAutoPromoteState(_ context.Context, state domain.AutoPromoteState) (domain.AutoPromoteState, error) {

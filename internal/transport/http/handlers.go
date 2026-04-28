@@ -74,6 +74,7 @@ func NewRouter(h *Handler, verifier auth.RequestVerifier) http.Handler {
 		ar.Get("/api/policy/master", h.GetMasterPromptPolicy)
 		ar.Post("/api/policy/skills", h.CreateWebhookSkill)
 		ar.Get("/api/policy/skills", h.ListWebhookSkills)
+		ar.Put("/api/policy/skills/{skillID}", h.UpdateWebhookSkill)
 		ar.Post("/api/policy/skills/dry-run", h.DryRunSkills)
 		ar.Get("/api/me", h.UserInfo)
 
@@ -1644,7 +1645,69 @@ func (h *Handler) ListWebhookSkills(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "type_key required")
 		return
 	}
-	out, err := h.Store.ListWebhookSkills(r.Context(), acct.ID, typeKey)
+	includeDisabled := strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("include_disabled")), "true")
+	var (
+		out []domain.WebhookSkill
+		err error
+	)
+	if includeDisabled {
+		out, err = h.Store.ListWebhookSkillsIncludingDisabled(r.Context(), acct.ID, typeKey)
+	} else {
+		out, err = h.Store.ListWebhookSkills(r.Context(), acct.ID, typeKey)
+	}
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (h *Handler) UpdateWebhookSkill(w http.ResponseWriter, r *http.Request) {
+	acct, ok := auth.AccountFromContext(r.Context())
+	if !ok {
+		writeErr(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	skillID := strings.TrimSpace(chi.URLParam(r, "skillID"))
+	if skillID == "" {
+		writeErr(w, http.StatusBadRequest, "skill id required")
+		return
+	}
+	var body struct {
+		TypeKey         string `json:"type_key"`
+		SkillKey        string `json:"skill_key"`
+		SkillPrompt     string `json:"skill_prompt"`
+		MatchContains   string `json:"match_contains"`
+		ForcedAction    string `json:"forced_action"`
+		MemoryWriteMode string `json:"memory_write_mode"`
+		Priority        int    `json:"priority"`
+		Enabled         *bool  `json:"enabled"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid json")
+		return
+	}
+	enabled := true
+	if body.Enabled != nil {
+		enabled = *body.Enabled
+	}
+	skill := domain.WebhookSkill{
+		ID:              skillID,
+		AccountID:       acct.ID,
+		TypeKey:         strings.TrimSpace(body.TypeKey),
+		SkillKey:        strings.TrimSpace(body.SkillKey),
+		SkillPrompt:     strings.TrimSpace(body.SkillPrompt),
+		MatchContains:   strings.TrimSpace(body.MatchContains),
+		ForcedAction:    strings.TrimSpace(body.ForcedAction),
+		MemoryWriteMode: strings.TrimSpace(body.MemoryWriteMode),
+		Priority:        body.Priority,
+		Enabled:         enabled,
+	}
+	if skill.TypeKey == "" || skill.SkillKey == "" {
+		writeErr(w, http.StatusBadRequest, "type_key and skill_key required")
+		return
+	}
+	out, err := h.Store.UpdateWebhookSkill(r.Context(), skill)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return

@@ -564,11 +564,24 @@ VALUES(?,?,?,?,?,?,?,?,?,?,UTC_TIMESTAMP())`,
 }
 
 func (s *MySQLStore) ListWebhookSkills(ctx context.Context, accountID, typeKey string) ([]domain.WebhookSkill, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	return s.listWebhookSkills(ctx, accountID, typeKey, false)
+}
+
+func (s *MySQLStore) ListWebhookSkillsIncludingDisabled(ctx context.Context, accountID, typeKey string) ([]domain.WebhookSkill, error) {
+	return s.listWebhookSkills(ctx, accountID, typeKey, true)
+}
+
+func (s *MySQLStore) listWebhookSkills(ctx context.Context, accountID, typeKey string, includeDisabled bool) ([]domain.WebhookSkill, error) {
+	query := `
 SELECT id, account_id, type_key, skill_key, skill_prompt, match_contains, forced_action, memory_write_mode, priority, enabled, created_at
 FROM webhook_skills
-WHERE account_id=? AND type_key=? AND enabled=1
-ORDER BY priority ASC, created_at ASC`, accountID, typeKey)
+WHERE account_id=? AND type_key=?`
+	if !includeDisabled {
+		query += ` AND enabled=1`
+	}
+	query += `
+ORDER BY priority ASC, created_at ASC`
+	rows, err := s.db.QueryContext(ctx, query, accountID, typeKey)
 	if err != nil {
 		return nil, err
 	}
@@ -580,6 +593,36 @@ ORDER BY priority ASC, created_at ASC`, accountID, typeKey)
 			return nil, err
 		}
 		out = append(out, sk)
+	}
+	return out, nil
+}
+
+func (s *MySQLStore) UpdateWebhookSkill(ctx context.Context, skill domain.WebhookSkill) (domain.WebhookSkill, error) {
+	if strings.TrimSpace(skill.ID) == "" {
+		return domain.WebhookSkill{}, errors.New("skill id required")
+	}
+	if skill.Priority == 0 {
+		skill.Priority = 100
+	}
+	if strings.TrimSpace(skill.MemoryWriteMode) == "" {
+		skill.MemoryWriteMode = "update_or_insert"
+	}
+	_, err := s.db.ExecContext(ctx, `
+UPDATE webhook_skills
+SET type_key=?, skill_key=?, skill_prompt=?, match_contains=?, forced_action=?, memory_write_mode=?, priority=?, enabled=?
+WHERE id=? AND account_id=?`,
+		skill.TypeKey, skill.SkillKey, skill.SkillPrompt, skill.MatchContains, skill.ForcedAction, skill.MemoryWriteMode, skill.Priority, skill.Enabled, skill.ID, skill.AccountID)
+	if err != nil {
+		return domain.WebhookSkill{}, err
+	}
+	var out domain.WebhookSkill
+	err = s.db.QueryRowContext(ctx, `
+SELECT id, account_id, type_key, skill_key, skill_prompt, match_contains, forced_action, memory_write_mode, priority, enabled, created_at
+FROM webhook_skills
+WHERE id=? AND account_id=? LIMIT 1`, skill.ID, skill.AccountID).
+		Scan(&out.ID, &out.AccountID, &out.TypeKey, &out.SkillKey, &out.SkillPrompt, &out.MatchContains, &out.ForcedAction, &out.MemoryWriteMode, &out.Priority, &out.Enabled, &out.CreatedAt)
+	if err != nil {
+		return domain.WebhookSkill{}, err
 	}
 	return out, nil
 }

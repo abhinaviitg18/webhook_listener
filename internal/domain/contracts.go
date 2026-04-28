@@ -48,6 +48,8 @@ type Store interface {
 	GetMasterPromptPolicy(ctx context.Context, accountID string) (MasterPromptPolicy, error)
 	CreateWebhookSkill(ctx context.Context, skill WebhookSkill) (WebhookSkill, error)
 	ListWebhookSkills(ctx context.Context, accountID, typeKey string) ([]WebhookSkill, error)
+	ListWebhookSkillsIncludingDisabled(ctx context.Context, accountID, typeKey string) ([]WebhookSkill, error)
+	UpdateWebhookSkill(ctx context.Context, skill WebhookSkill) (WebhookSkill, error)
 	UpsertAutoPromoteState(ctx context.Context, state AutoPromoteState) (AutoPromoteState, error)
 	GetAutoPromoteState(ctx context.Context, accountID, typeKey string) (AutoPromoteState, error)
 
