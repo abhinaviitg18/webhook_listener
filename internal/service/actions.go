@@ -2,8 +2,10 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"sort"
 	"strconv"
@@ -187,6 +189,7 @@ func (p *Processor) ReprocessEvent(ctx context.Context, accountID, eventID strin
 	}
 
 	// For re-processing, we use the already stored PayloadJSON (which might be canonically transformed)
+	log.Printf("reprocess.start account_id=%s event_id=%s type_key=%s payload_bytes=%d payload_sha256=%x", accountID, eventID, event.TypeKey, len(event.PayloadJSON), payloadFingerprint(event.PayloadJSON))
 	return p.processWithPolicy(ctx, account, whType, event, event.PayloadJSON)
 }
 
@@ -199,6 +202,7 @@ func (p *Processor) processWithPolicy(ctx context.Context, account domain.Accoun
 
 	decision := domain.ProcessDecision{ActionName: "store_mysql", Reason: "default", Params: map[string]interface{}{}}
 	skill, matched := chooseSkill(policyCtx.Skills, payload)
+	log.Printf("reprocess.policy event_id=%s type_key=%s matched_skill=%t skill_key=%s payload_bytes=%d payload_sha256=%x skill_count=%d memories=%d", event.ID, whType.TypeKey, matched, skill.SkillKey, len(payload), payloadFingerprint(payload), len(policyCtx.Skills), len(memories))
 	if matched && strings.TrimSpace(skill.ForcedAction) != "" {
 		decision.ActionName = strings.TrimSpace(skill.ForcedAction)
 		decision.Reason = "skill:" + skill.SkillKey
@@ -213,6 +217,7 @@ func (p *Processor) processWithPolicy(ctx context.Context, account domain.Accoun
 	}
 
 	needsLLM := (whType.UseLLMFallback && decision.ActionName == "store_mysql") || policyCtx.MasterPrompt != "" || (matched && skill.SkillPrompt != "")
+	log.Printf("reprocess.llm_decision event_id=%s type_key=%s needs_llm=%t deterministic_only=%t use_llm_fallback=%t matched_skill_prompt=%t master_prompt=%t initial_action=%s", event.ID, whType.TypeKey, needsLLM, p.IsDeterministicOnlyType(whType.TypeKey), whType.UseLLMFallback, matched && strings.TrimSpace(skill.SkillPrompt) != "", policyCtx.MasterPrompt != "", decision.ActionName)
 	if needsLLM && !p.IsDeterministicOnlyType(whType.TypeKey) {
 		// Resolve LLM client: prefer per-account BYOK key, fall back to global
 		llmClient := p.LLM
@@ -231,11 +236,13 @@ func (p *Processor) processWithPolicy(ctx context.Context, account domain.Accoun
 				if matched && strings.TrimSpace(skill.ForcedAction) != "" {
 					// Deterministic action wins, but use LLM's processed text
 					decision.ProcessedText = d.ProcessedText
+					decision.Tags = d.Tags
 				} else {
 					decision = d
 				}
 			} else {
 				decision.Reason = "llm processing failed: " + derr.Error()
+				log.Printf("reprocess.llm_error event_id=%s type_key=%s err=%v", event.ID, whType.TypeKey, derr)
 			}
 		}
 	}
@@ -244,6 +251,7 @@ func (p *Processor) processWithPolicy(ctx context.Context, account domain.Accoun
 	err := p.Executor.Execute(ctx, decision, account, event, targets)
 	if err != nil {
 		_ = p.Store.UpdateEventStatus(ctx, event.ID, "failed", decision.ActionName)
+		log.Printf("reprocess.execute_failed event_id=%s type_key=%s action=%s err=%v", event.ID, whType.TypeKey, decision.ActionName, err)
 		return event, decision, err
 	}
 	_ = p.Store.UpdateEventStatus(ctx, event.ID, "processed", decision.ActionName)
@@ -272,7 +280,12 @@ func (p *Processor) processWithPolicy(ctx context.Context, account domain.Accoun
 		_ = p.Store.UpdateEventTags(ctx, event.ID, event.TagsJSON)
 	}
 	event.CreatedAt = time.Now().UTC()
+	log.Printf("reprocess.complete event_id=%s type_key=%s action=%s reason=%q processed_text_bytes=%d tags=%d", event.ID, whType.TypeKey, decision.ActionName, decision.Reason, len(event.ProcessedText), len(decision.Tags))
 	return event, decision, nil
+}
+
+func payloadFingerprint(payload string) [32]byte {
+	return sha256.Sum256([]byte(payload))
 }
 
 func (p *Processor) IsDeterministicOnlyType(typeKey string) bool {
