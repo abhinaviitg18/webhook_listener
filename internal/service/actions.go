@@ -157,6 +157,7 @@ func (p *Processor) ProcessWebhook(ctx context.Context, account domain.Account, 
 			}
 		}
 	}
+	workingPayload := sanitizePayloadForProcessing(payload)
 
 	event, err := p.Store.CreateEvent(ctx, domain.WebhookEvent{
 		AccountID:      account.ID,
@@ -167,14 +168,14 @@ func (p *Processor) ProcessWebhook(ctx context.Context, account domain.Account, 
 		TypeKey:        whType.TypeKey,
 		RawPayloadJSON: rawPayload,
 		PayloadJSON:    payload,
-		ProcessedText:  payloadToText(payload),
+		ProcessedText:  payloadToText(workingPayload),
 		Status:         "processing",
 	})
 	if err != nil {
 		return domain.WebhookEvent{}, domain.ProcessDecision{}, err
 	}
 
-	return p.processWithPolicy(ctx, account, whType, event, payload, "process")
+	return p.processWithPolicy(ctx, account, whType, event, payload, workingPayload, "process")
 }
 
 func (p *Processor) ReprocessEvent(ctx context.Context, accountID, eventID string) (domain.WebhookEvent, domain.ProcessDecision, error) {
@@ -193,18 +194,18 @@ func (p *Processor) ReprocessEvent(ctx context.Context, accountID, eventID strin
 
 	// For re-processing, we use the already stored PayloadJSON (which might be canonically transformed)
 	log.Printf("reprocess.start account_id=%s event_id=%s type_key=%s payload_bytes=%d payload_sha256=%x", accountID, eventID, event.TypeKey, len(event.PayloadJSON), payloadFingerprint(event.PayloadJSON))
-	return p.processWithPolicy(ctx, account, whType, event, event.PayloadJSON, "reprocess")
+	return p.processWithPolicy(ctx, account, whType, event, event.PayloadJSON, sanitizePayloadForProcessing(event.PayloadJSON), "reprocess")
 }
 
-func (p *Processor) processWithPolicy(ctx context.Context, account domain.Account, whType domain.WebhookType, event domain.WebhookEvent, payload string, operation string) (domain.WebhookEvent, domain.ProcessDecision, error) {
+func (p *Processor) processWithPolicy(ctx context.Context, account domain.Account, whType domain.WebhookType, event domain.WebhookEvent, payload string, workingPayload string, operation string) (domain.WebhookEvent, domain.ProcessDecision, error) {
 	policyCtx := p.loadPolicyContext(ctx, account.ID, whType.TypeKey)
 	memories := []domain.PineconeMemory{}
 	if p.Pinecone != nil {
-		memories, _ = p.Pinecone.Query(ctx, account.ID, payload, 5)
+		memories, _ = p.Pinecone.Query(ctx, account.ID, workingPayload, 5)
 	}
 
 	decision := domain.ProcessDecision{ActionName: "store_mysql", Reason: "default", Params: map[string]interface{}{}}
-	skill, matched := chooseSkill(policyCtx.Skills, payload)
+	skill, matched := chooseSkill(policyCtx.Skills, workingPayload)
 	log.Printf("reprocess.policy event_id=%s type_key=%s matched_skill=%t skill_key=%s payload_bytes=%d payload_sha256=%x skill_count=%d memories=%d", event.ID, whType.TypeKey, matched, skill.SkillKey, len(payload), payloadFingerprint(payload), len(policyCtx.Skills), len(memories))
 	if matched && strings.TrimSpace(skill.ForcedAction) != "" {
 		decision.ActionName = strings.TrimSpace(skill.ForcedAction)
@@ -231,7 +232,7 @@ func (p *Processor) processWithPolicy(ctx context.Context, account domain.Accoun
 			}
 		}
 		if llmClient != nil {
-			compaction := compactPayloadForLLM(payload, p.LLMCompaction)
+			compaction := compactPayloadForLLM(workingPayload, p.LLMCompaction)
 			if p.Tracer != nil {
 				llmTrace = p.Tracer.StartLLMDecision(ctx, observability.LLMDecisionMetadata{
 					TraceID:               event.ID + "-llm",
@@ -299,9 +300,9 @@ func (p *Processor) processWithPolicy(ctx context.Context, account domain.Accoun
 		case memoryModeNone:
 			// Explicitly skip vector write.
 		case memoryModeInsertOnly:
-			_ = p.Pinecone.UpsertOrUpdate(ctx, account.ID, whType.TypeKey, event.ID, payload, nil)
+			_ = p.Pinecone.UpsertOrUpdate(ctx, account.ID, whType.TypeKey, event.ID, workingPayload, nil)
 		default:
-			_ = p.Pinecone.UpsertOrUpdate(ctx, account.ID, whType.TypeKey, event.ID, payload, memories)
+			_ = p.Pinecone.UpsertOrUpdate(ctx, account.ID, whType.TypeKey, event.ID, workingPayload, memories)
 		}
 	}
 	event.Status = "processed"
@@ -309,7 +310,7 @@ func (p *Processor) processWithPolicy(ctx context.Context, account domain.Accoun
 	if strings.TrimSpace(decision.ProcessedText) != "" {
 		event.ProcessedText = decision.ProcessedText
 	} else {
-		event.ProcessedText = payloadToText(payload)
+		event.ProcessedText = payloadToText(workingPayload)
 	}
 	if err := p.Store.UpdateEventProcessedText(ctx, event.ID, event.ProcessedText); err != nil {
 		log.Printf("reprocess.persist_processed_text_failed event_id=%s type_key=%s err=%v", event.ID, whType.TypeKey, err)
@@ -350,14 +351,6 @@ func (p *Processor) IsDeterministicOnlyType(typeKey string) bool {
 		return false
 	}
 	return isDeterministicOnly(typeKey, p.DeterministicOnly)
-}
-
-func payloadToText(payload string) string {
-	trimmed := strings.TrimSpace(payload)
-	if len(trimmed) <= 1200 {
-		return trimmed
-	}
-	return trimmed[:1200]
 }
 
 func llmFallbackChainSize(client domain.LLMClient) int {

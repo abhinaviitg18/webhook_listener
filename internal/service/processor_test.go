@@ -23,17 +23,21 @@ type capturingPinecone struct {
 	queryOut   []domain.PineconeMemory
 	upserted   int
 	lastPriorN int
+	lastQuery  string
+	lastUpsert string
 }
 
-func (f *capturingPinecone) Query(_ context.Context, _ string, _ string, _ int) ([]domain.PineconeMemory, error) {
+func (f *capturingPinecone) Query(_ context.Context, _ string, payload string, _ int) ([]domain.PineconeMemory, error) {
+	f.lastQuery = payload
 	if f.queryOut == nil {
 		return []domain.PineconeMemory{{ID: "m1", Summary: "past similar alert"}}, nil
 	}
 	return f.queryOut, nil
 }
-func (f *capturingPinecone) UpsertOrUpdate(_ context.Context, _ string, _ string, _ string, _ string, prior []domain.PineconeMemory) error {
+func (f *capturingPinecone) UpsertOrUpdate(_ context.Context, _ string, _ string, _ string, payload string, prior []domain.PineconeMemory) error {
 	f.upserted++
 	f.lastPriorN = len(prior)
+	f.lastUpsert = payload
 	return nil
 }
 
@@ -431,6 +435,42 @@ func TestProcessor_SkillForcedActionKeepsTagsWithCompactedPayload(t *testing.T) 
 	compactedPayload, _ := wrapped["payload"].(string)
 	if !strings.Contains(compactedPayload, `"_compaction"`) {
 		t.Fatalf("expected compacted payload to be embedded in policy wrapper")
+	}
+}
+
+func TestProcessor_StripsHTMLBeforeMatchingAndFallbackText(t *testing.T) {
+	st := store.NewMemoryStore()
+	acct, _, _ := st.CreateAccount(context.Background(), "7204909316@agentmail.to")
+	wt, _ := st.CreateWebhookType(context.Background(), acct.ID, "generic-json", "", false)
+	sec, _, _ := st.CreateSecret(context.Background(), acct.ID, wt.ID)
+	_, _ = st.CreateWebhookSkill(context.Background(), domain.WebhookSkill{
+		AccountID:       acct.ID,
+		TypeKey:         wt.TypeKey,
+		SkillKey:        "otp-mail",
+		MatchContains:   "verification code",
+		ForcedAction:    "no_action",
+		MemoryWriteMode: "none",
+		Priority:        1,
+		Enabled:         true,
+	})
+	pine := &capturingPinecone{}
+	p := &Processor{Store: st, Pinecone: pine, LLM: &countingLLM{action: "store_mysql"}, Executor: &fakeExec{}}
+	payload := `{"message":{"subject":"Your code","html":"<div><p>Your <strong>verification code</strong> is <span>123456</span>.</p></div>"}}`
+	ev, d, err := p.ProcessWebhook(context.Background(), acct, wt, sec, "r12", payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d.ActionName != "no_action" {
+		t.Fatalf("expected sanitized html text to trigger skill match, got %s", d.ActionName)
+	}
+	if strings.Contains(ev.ProcessedText, "<div>") {
+		t.Fatalf("expected processed text to strip html, got %q", ev.ProcessedText)
+	}
+	if !strings.Contains(ev.ProcessedText, "verification code") {
+		t.Fatalf("expected processed text to keep readable content, got %q", ev.ProcessedText)
+	}
+	if strings.Contains(pine.lastQuery, "<strong>") || !strings.Contains(pine.lastQuery, "verification code") {
+		t.Fatalf("expected pinecone query payload to be sanitized, got %q", pine.lastQuery)
 	}
 }
 
