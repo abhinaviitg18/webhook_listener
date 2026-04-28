@@ -24,10 +24,15 @@ type Config struct {
 	PineconeIndexURL  string
 	PineconeNamespace string
 
-	LLMProvider string
-	LLMAPIKey   string
-	LLMBaseURL  string
-	LLMModel    string
+	LLMProvider                  string
+	LLMAPIKey                    string
+	LLMBaseURL                   string
+	LLMModel                     string
+	LLMCompactionEnabled         bool
+	LLMCompactionThresholdBytes  int
+	LLMCompactionMaxStringBytes  int
+	LLMCompactionMaxArrayItems   int
+	LLMCompactionMaxObjectFields int
 
 	GroqAPIKey      string
 	GroqBaseURL     string
@@ -79,10 +84,15 @@ func Load() Config {
 		PineconeIndexURL:  pineconeHost,
 		PineconeNamespace: getenv("PINECONE_NAMESPACE", "default"),
 
-		LLMProvider: getenv("LLM_PROVIDER", "openrouter"),
-		LLMAPIKey:   llmKey,
-		LLMBaseURL:  getenv("LLM_BASE_URL", "https://openrouter.ai/api/v1"),
-		LLMModel:    getenv("LLM_MODEL", "openai/gpt-4o-mini"),
+		LLMProvider:                  getenv("LLM_PROVIDER", "openrouter"),
+		LLMAPIKey:                    llmKey,
+		LLMBaseURL:                   getenv("LLM_BASE_URL", "https://openrouter.ai/api/v1"),
+		LLMModel:                     getenv("LLM_MODEL", "openai/gpt-4o-mini"),
+		LLMCompactionEnabled:         getbool("LLM_COMPACTION_ENABLED", true),
+		LLMCompactionThresholdBytes:  getint("LLM_COMPACTION_THRESHOLD_BYTES", 6000),
+		LLMCompactionMaxStringBytes:  getint("LLM_COMPACTION_MAX_STRING_BYTES", 400),
+		LLMCompactionMaxArrayItems:   getint("LLM_COMPACTION_MAX_ARRAY_ITEMS", 8),
+		LLMCompactionMaxObjectFields: getint("LLM_COMPACTION_MAX_OBJECT_FIELDS", 20),
 
 		GroqAPIKey:      getenv("GROQ_API_KEY", ""),
 		GroqBaseURL:     getenv("GROQ_BASE_URL", "https://api.groq.com/openai/v1"),

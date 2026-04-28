@@ -114,6 +114,7 @@ type Processor struct {
 	Transformer       *TransformService
 	DeterministicOnly map[string]struct{}
 	BYOKResolver      func(ctx context.Context, accountID string) domain.LLMClient
+	LLMCompaction     LLMCompactionConfig
 }
 
 type memoryWriteMode string
@@ -227,11 +228,28 @@ func (p *Processor) processWithPolicy(ctx context.Context, account domain.Accoun
 			}
 		}
 		if llmClient != nil {
-			llmPayload := payload
+			compaction := compactPayloadForLLM(payload, p.LLMCompaction)
+			llmPayloadSource := compaction.CompactedPayload
 			if policyCtx.MasterPrompt != "" || len(policyCtx.Skills) > 0 {
-				llmPayload = buildPolicyAwarePayload(payload, policyCtx)
+				llmPayloadSource = buildPolicyAwarePayload(compaction.CompactedPayload, policyCtx)
 			}
-			d, derr := llmClient.SuggestAction(ctx, whType.TypeKey, llmPayload, memories, p.Executor.AvailableActions())
+			ratio := 1.0
+			if compaction.OriginalBytes > 0 {
+				ratio = float64(compaction.CompactedBytes) / float64(compaction.OriginalBytes)
+			}
+			log.Printf(
+				"reprocess.llm_payload event_id=%s type_key=%s compacted=%t original_bytes=%d compacted_bytes=%d ratio=%.3f dropped_fields=%d truncated_strings=%d truncated_arrays=%d",
+				event.ID,
+				whType.TypeKey,
+				compaction.WasCompacted,
+				compaction.OriginalBytes,
+				compaction.CompactedBytes,
+				ratio,
+				compaction.DroppedFields,
+				compaction.TruncatedStrings,
+				compaction.TruncatedArrays,
+			)
+			d, derr := llmClient.SuggestAction(ctx, whType.TypeKey, llmPayloadSource, memories, p.Executor.AvailableActions())
 			if derr == nil {
 				if matched && strings.TrimSpace(skill.ForcedAction) != "" {
 					// Deterministic action wins, but use LLM's processed text

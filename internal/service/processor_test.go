@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"encoding/json"
+	"strings"
 	"testing"
 
 	"agenthook.store/internal/domain"
@@ -49,6 +51,16 @@ type countingLLM struct {
 func (c *countingLLM) SuggestAction(_ context.Context, _ string, _ string, _ []domain.PineconeMemory, _ []string) (domain.ProcessDecision, error) {
 	c.called++
 	return domain.ProcessDecision{ActionName: c.action, Reason: "mock", Params: map[string]interface{}{}}, nil
+}
+
+type captureLLM struct {
+	payloads []string
+	decision domain.ProcessDecision
+}
+
+func (c *captureLLM) SuggestAction(_ context.Context, _ string, payload string, _ []domain.PineconeMemory, _ []string) (domain.ProcessDecision, error) {
+	c.payloads = append(c.payloads, payload)
+	return c.decision, nil
 }
 
 type fakeExec struct{ seen string }
@@ -242,6 +254,167 @@ func TestProcessor_DeterministicOnlySkipsLLMFallback(t *testing.T) {
 	}
 	if d.ActionName != "store_mysql" {
 		t.Fatalf("expected deterministic default action, got %s", d.ActionName)
+	}
+}
+
+func TestProcessor_CompactsOversizedPayloadForLLMOnly(t *testing.T) {
+	st := store.NewMemoryStore()
+	acct, _, _ := st.CreateAccount(context.Background(), "7204909316@agentmail.to")
+	wt, _ := st.CreateWebhookType(context.Background(), acct.ID, "github-workflow", "", true)
+	sec, _, _ := st.CreateSecret(context.Background(), acct.ID, wt.ID)
+	llm := &captureLLM{
+		decision: domain.ProcessDecision{
+			ActionName:    "store_mysql",
+			Reason:        "mock",
+			ProcessedText: "summarized workflow result",
+			Tags:          []string{"ci", "workflow"},
+			Params:        map[string]interface{}{},
+		},
+	}
+	exec := &fakeExec{}
+	p := &Processor{
+		Store:    st,
+		Pinecone: fakePinecone{},
+		LLM:      llm,
+		Executor: exec,
+		LLMCompaction: LLMCompactionConfig{
+			Enabled:         true,
+			ThresholdBytes:  500,
+			MaxStringBytes:  120,
+			MaxArrayItems:   3,
+			MaxObjectFields: 6,
+		},
+	}
+	payload := `{"workflow":"Deploy AWS Lambda","repository":{"full_name":"abhinaviitg18/webhook_listener"},"jobs":[{"name":"build"},{"name":"test"},{"name":"deploy"},{"name":"cleanup"}],"logs":"` + strings.Repeat("x", 5000) + `"}`
+	ev, d, err := p.ProcessWebhook(context.Background(), acct, wt, sec, "r9", payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(llm.payloads) != 1 {
+		t.Fatalf("expected exactly one llm call, got %d", len(llm.payloads))
+	}
+	if !strings.Contains(llm.payloads[0], `"_compaction"`) {
+		t.Fatalf("expected llm payload to include compaction metadata")
+	}
+	if strings.Contains(llm.payloads[0], strings.Repeat("x", 1000)) {
+		t.Fatalf("expected long raw payload text to be trimmed before llm call")
+	}
+	stored, err := st.GetEvent(context.Background(), acct.ID, ev.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.PayloadJSON != payload {
+		t.Fatalf("expected full payload to remain stored unchanged")
+	}
+	if d.ProcessedText != "summarized workflow result" {
+		t.Fatalf("expected llm processed text to propagate, got %q", d.ProcessedText)
+	}
+	if ev.ProcessedText != "summarized workflow result" {
+		t.Fatalf("expected event processed text to use llm summary, got %q", ev.ProcessedText)
+	}
+	if ev.TagsJSON == "" {
+		t.Fatalf("expected llm tags to be stored on returned event")
+	}
+}
+
+func TestProcessor_SmallPayloadBypassesCompaction(t *testing.T) {
+	st := store.NewMemoryStore()
+	acct, _, _ := st.CreateAccount(context.Background(), "7204909316@agentmail.to")
+	wt, _ := st.CreateWebhookType(context.Background(), acct.ID, "generic-json", "", true)
+	sec, _, _ := st.CreateSecret(context.Background(), acct.ID, wt.ID)
+	llm := &captureLLM{decision: domain.ProcessDecision{ActionName: "store_mysql", Reason: "mock", Params: map[string]interface{}{}}}
+	p := &Processor{
+		Store:    st,
+		Pinecone: fakePinecone{},
+		LLM:      llm,
+		Executor: &fakeExec{},
+		LLMCompaction: LLMCompactionConfig{
+			Enabled:        true,
+			ThresholdBytes: 2048,
+		},
+	}
+	payload := `{"message":"short body"}`
+	if _, _, err := p.ProcessWebhook(context.Background(), acct, wt, sec, "r10", payload); err != nil {
+		t.Fatal(err)
+	}
+	if len(llm.payloads) != 1 {
+		t.Fatalf("expected one llm call, got %d", len(llm.payloads))
+	}
+	if llm.payloads[0] != payload {
+		t.Fatalf("expected small payload to bypass compaction, got %q", llm.payloads[0])
+	}
+}
+
+func TestProcessor_SkillForcedActionKeepsTagsWithCompactedPayload(t *testing.T) {
+	st := store.NewMemoryStore()
+	acct, _, _ := st.CreateAccount(context.Background(), "7204909316@agentmail.to")
+	wt, _ := st.CreateWebhookType(context.Background(), acct.ID, "github-workflow", "", true)
+	sec, _, _ := st.CreateSecret(context.Background(), acct.ID, wt.ID)
+	_, _ = st.CreateWebhookSkill(context.Background(), domain.WebhookSkill{
+		AccountID:       acct.ID,
+		TypeKey:         wt.TypeKey,
+		SkillKey:        "devops_workflow_monitor",
+		SkillPrompt:     "Summarize workflow result",
+		MatchContains:   "workflow,deploy",
+		ForcedAction:    "store_mysql",
+		MemoryWriteMode: "update_or_insert",
+		Priority:        1,
+		Enabled:         true,
+	})
+	llm := &captureLLM{
+		decision: domain.ProcessDecision{
+			ActionName:    "forward_http",
+			Reason:        "mock",
+			ProcessedText: "workflow deployed successfully",
+			Tags:          []string{"workflow", "success"},
+			Params:        map[string]interface{}{},
+		},
+	}
+	exec := &fakeExec{}
+	p := &Processor{
+		Store:    st,
+		Pinecone: fakePinecone{},
+		LLM:      llm,
+		Executor: exec,
+		LLMCompaction: LLMCompactionConfig{
+			Enabled:         true,
+			ThresholdBytes:  300,
+			MaxStringBytes:  100,
+			MaxArrayItems:   3,
+			MaxObjectFields: 6,
+		},
+	}
+	payload := `{"workflow":"deploy","repository":"webhook_listener","details":"` + strings.Repeat("signal ", 500) + `"}`
+	ev, d, err := p.ProcessWebhook(context.Background(), acct, wt, sec, "r11", payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d.ActionName != "store_mysql" {
+		t.Fatalf("expected skill forced action to win, got %s", d.ActionName)
+	}
+	if ev.ProcessedText != "workflow deployed successfully" {
+		t.Fatalf("expected llm summary to be preserved on event, got %q", ev.ProcessedText)
+	}
+	if ev.TagsJSON == "" {
+		t.Fatalf("expected tags json to be stored")
+	}
+	var tags []string
+	if err := json.Unmarshal([]byte(ev.TagsJSON), &tags); err != nil {
+		t.Fatalf("expected valid tags json: %v", err)
+	}
+	if len(tags) != 2 {
+		t.Fatalf("expected llm tags to be preserved, got %v", tags)
+	}
+	if len(llm.payloads) != 1 {
+		t.Fatalf("expected exactly one llm call, got %d", len(llm.payloads))
+	}
+	var wrapped map[string]interface{}
+	if err := json.Unmarshal([]byte(llm.payloads[0]), &wrapped); err != nil {
+		t.Fatalf("expected policy-aware llm payload to be valid json: %v", err)
+	}
+	compactedPayload, _ := wrapped["payload"].(string)
+	if !strings.Contains(compactedPayload, `"_compaction"`) {
+		t.Fatalf("expected compacted payload to be embedded in policy wrapper")
 	}
 }
 

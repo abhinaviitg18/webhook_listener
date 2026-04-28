@@ -49,6 +49,13 @@ func BuildHTTPHandler(ctx context.Context, cfg config.Config) (http.Handler, err
 
 	processor := &service.Processor{
 		Store: st, Pinecone: pine, LLM: llm, Executor: actions, Resolver: resolver, Transformer: transformer, DeterministicOnly: deterministicOnly,
+		LLMCompaction: service.LLMCompactionConfig{
+			Enabled:         cfg.LLMCompactionEnabled,
+			ThresholdBytes:  cfg.LLMCompactionThresholdBytes,
+			MaxStringBytes:  cfg.LLMCompactionMaxStringBytes,
+			MaxArrayItems:   cfg.LLMCompactionMaxArrayItems,
+			MaxObjectFields: cfg.LLMCompactionMaxObjectFields,
+		},
 		BYOKResolver: func(ctx context.Context, accountID string) domain.LLMClient {
 			byokCfg, err := st.GetDefaultBYOKConfig(ctx, accountID)
 			if err != nil {
