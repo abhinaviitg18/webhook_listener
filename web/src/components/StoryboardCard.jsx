@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Database, Send, Terminal, Brain, ChevronDown, ChevronUp, Tag } from 'lucide-react';
+import { Database, Send, Terminal, Brain, ChevronDown, ChevronUp, RotateCcw, Tag } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 function safeJSONParse(text) {
@@ -81,7 +81,7 @@ const TagPill = ({ tag, onClick, isMarketing }) => {
     );
 };
 
-export const StoryboardCard = ({ event, onTagClick }) => {
+export const StoryboardCard = ({ event, onTagClick, onReclassify }) => {
     const [expanded, setExpanded] = useState(false);
 
     const tags = safeJSONParse(event.tagsJson) || [];
@@ -92,6 +92,7 @@ export const StoryboardCard = ({ event, onTagClick }) => {
     // Fallback: if no processed text, show payload as the primary content
     const displayText = processedText || rawPayload || `Received ${event.typeKey || 'webhook'} payload.`;
     const displayLabel = processedText ? 'Processed Summary' : 'Payload';
+    const displaySource = processedText ? 'Processed' : 'Raw';
     const hasRawBehind = processedText && rawPayload && rawPayload !== processedText;
     const { truncated, isTruncated } = truncateLines(displayText);
 
@@ -133,8 +134,13 @@ export const StoryboardCard = ({ event, onTagClick }) => {
 
             {/* Primary content - collapsed */}
             <div className="mb-3 rounded-xl border border-slate-800 bg-slate-950/60 p-3">
-                <div className="mb-2 text-[10px] font-label-caps text-slate-500">
-                    {displayLabel}
+                <div className="mb-2 flex items-center justify-between gap-2">
+                    <div className="text-[10px] font-label-caps text-slate-500">
+                        {displayLabel}
+                    </div>
+                    <span className={`rounded-full border px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide ${displaySource === 'Processed' ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-300' : 'border-amber-500/20 bg-amber-500/10 text-amber-300'}`}>
+                        {displaySource}
+                    </span>
                 </div>
                 <pre className="whitespace-pre-wrap break-words font-code-snippet text-[11px] leading-relaxed text-indigo-300">
                     {expanded ? displayText : truncated}
@@ -194,6 +200,14 @@ export const StoryboardCard = ({ event, onTagClick }) => {
 
             {/* Actions */}
             <div className="flex items-center gap-2 flex-wrap">
+                <button
+                    onClick={() => onReclassify?.(event.id)}
+                    disabled={event.reclassifying}
+                    className="flex items-center gap-1.5 bg-slate-900 px-2 py-1 rounded border border-slate-800 text-[10px] text-slate-300 hover:border-slate-700 disabled:opacity-50"
+                >
+                    <RotateCcw size={12} className={event.reclassifying ? 'animate-spin' : ''} />
+                    {event.reclassifying ? 'RECLASSIFYING' : 'RECLASSIFY'}
+                </button>
                 {event.actions.map((action, i) => (
                     <motion.div
                         key={i}

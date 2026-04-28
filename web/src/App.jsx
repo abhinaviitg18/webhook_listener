@@ -182,6 +182,7 @@ function App() {
   const [listeners, setListeners] = useState([]);
   const [fetching, setFetching] = useState(false);
   const [activeTag, setActiveTag] = useState(null);
+  const [reclassifyingEventIDs, setReclassifyingEventIDs] = useState({});
 
   const accountSlug = user?.slug || '[account]';
   const ingressTemplate = listeners.length > 0
@@ -220,6 +221,27 @@ function App() {
 
   const handleTagClick = (tag) => {
     setActiveTag(prev => prev === tag ? null : tag);
+  };
+
+  const reclassifyEvent = async (eventID) => {
+    setReclassifyingEventIDs((current) => ({ ...current, [eventID]: true }));
+    try {
+      const result = await apiRequest(`/api/events/${eventID}/re-run`, { method: 'POST' });
+      const updatedEvent = result?.event;
+      if (updatedEvent?.id) {
+        setEvents((current) => current.map((event) => (event.id === updatedEvent.id ? updatedEvent : event)));
+      } else {
+        await fetchEvents(activeTag);
+      }
+    } catch (err) {
+      console.error('Failed to reclassify event', err);
+    } finally {
+      setReclassifyingEventIDs((current) => {
+        const next = { ...current };
+        delete next[eventID];
+        return next;
+      });
+    }
   };
 
   if (loading) {
@@ -336,6 +358,7 @@ function App() {
                   <StoryboardCard
                     key={event.id || i}
                     event={{
+                      id: event.id,
                       status: event.status,
                       time: new Date(event.created_at).toLocaleTimeString([], {
                         hour: '2-digit',
@@ -347,8 +370,10 @@ function App() {
                       tagsJson: event.tags_json || '[]',
                       typeKey: event.type_key || 'webhook',
                       actions: event.action_selected ? [event.action_selected] : ['LOGGED'],
+                      reclassifying: !!reclassifyingEventIDs[event.id],
                     }}
                     onTagClick={handleTagClick}
+                    onReclassify={reclassifyEvent}
                   />
                 ))}
               </section>
