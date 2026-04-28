@@ -28,6 +28,7 @@ type Store interface {
 
 	CreateEvent(ctx context.Context, event WebhookEvent) (WebhookEvent, error)
 	UpdateEventStatus(ctx context.Context, eventID, status, action string) error
+	UpdateEventProcessedText(ctx context.Context, eventID, processedText string) error
 	ListEvents(ctx context.Context, accountID string, limit int) ([]WebhookEvent, error)
 	GetEvent(ctx context.Context, accountID, eventID string) (WebhookEvent, error)
 	FindEventBySourceEventID(ctx context.Context, accountID, sourceEventID string) (WebhookEvent, error)

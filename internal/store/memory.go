@@ -335,6 +335,18 @@ func (s *MemoryStore) UpdateEventStatus(_ context.Context, eventID, status, acti
 	return nil
 }
 
+func (s *MemoryStore) UpdateEventProcessedText(_ context.Context, eventID, processedText string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	e, ok := s.events[eventID]
+	if !ok {
+		return errors.New("event not found")
+	}
+	e.ProcessedText = processedText
+	s.events[eventID] = e
+	return nil
+}
+
 func (s *MemoryStore) GetEvent(_ context.Context, accountID, eventID string) (domain.WebhookEvent, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

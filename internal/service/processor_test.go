@@ -306,6 +306,12 @@ func TestProcessor_CompactsOversizedPayloadForLLMOnly(t *testing.T) {
 	if stored.PayloadJSON != payload {
 		t.Fatalf("expected full payload to remain stored unchanged")
 	}
+	if stored.ProcessedText != "summarized workflow result" {
+		t.Fatalf("expected processed text to persist, got %q", stored.ProcessedText)
+	}
+	if stored.TagsJSON == "" {
+		t.Fatalf("expected tags json to persist")
+	}
 	if d.ProcessedText != "summarized workflow result" {
 		t.Fatalf("expected llm processed text to propagate, got %q", d.ProcessedText)
 	}
@@ -404,6 +410,16 @@ func TestProcessor_SkillForcedActionKeepsTagsWithCompactedPayload(t *testing.T) 
 	}
 	if len(tags) != 2 {
 		t.Fatalf("expected llm tags to be preserved, got %v", tags)
+	}
+	stored, err := st.GetEvent(context.Background(), acct.ID, ev.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.ProcessedText != "workflow deployed successfully" {
+		t.Fatalf("expected processed text to persist, got %q", stored.ProcessedText)
+	}
+	if stored.TagsJSON == "" {
+		t.Fatalf("expected persisted tags json")
 	}
 	if len(llm.payloads) != 1 {
 		t.Fatalf("expected exactly one llm call, got %d", len(llm.payloads))

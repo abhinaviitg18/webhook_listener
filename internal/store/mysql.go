@@ -288,6 +288,15 @@ func (s *MySQLStore) UpdateEventStatus(ctx context.Context, eventID, status, act
 	return err
 }
 
+func (s *MySQLStore) UpdateEventProcessedText(ctx context.Context, eventID, processedText string) error {
+	s.ensureEventSchemaCapabilities()
+	if !s.hasProcessedText {
+		return nil
+	}
+	_, err := s.db.ExecContext(ctx, `UPDATE webhook_events SET processed_text=? WHERE id=?`, nullIfEmpty(processedText), eventID)
+	return err
+}
+
 func (s *MySQLStore) ListEvents(ctx context.Context, accountID string, limit int) ([]domain.WebhookEvent, error) {
 	s.ensureEventSchemaCapabilities()
 	if limit <= 0 {

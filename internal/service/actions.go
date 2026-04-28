@@ -292,6 +292,7 @@ func (p *Processor) processWithPolicy(ctx context.Context, account domain.Accoun
 	} else {
 		event.ProcessedText = payloadToText(payload)
 	}
+	_ = p.Store.UpdateEventProcessedText(ctx, event.ID, event.ProcessedText)
 	if len(decision.Tags) > 0 {
 		tagsBytes, _ := json.Marshal(decision.Tags)
 		event.TagsJSON = string(tagsBytes)
