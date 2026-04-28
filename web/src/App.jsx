@@ -1300,6 +1300,9 @@ const SkillsTab = ({ listeners, copied, setCopied, onRefreshListeners }) => {
                         role="button"
                         tabIndex={0}
                         onKeyDown={(event) => {
+                          if (event.target !== event.currentTarget) {
+                            return;
+                          }
                           if (event.key === 'Enter' || event.key === ' ') {
                             event.preventDefault();
                             setExpandedSkillCard((current) => (current === cardID ? '' : cardID));
