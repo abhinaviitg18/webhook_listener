@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"log"
 	"strings"
 	"sync"
 	"time"
@@ -50,6 +51,7 @@ func (s *MySQLStore) ensureEventSchemaCapabilities() {
 	s.schemaCheckOnce.Do(func() {
 		s.hasRawPayloadJSON = s.columnExists("webhook_events", "raw_payload_json")
 		s.hasProcessedText = s.columnExists("webhook_events", "processed_text")
+		log.Printf("mysql.event_schema_capabilities has_raw_payload_json=%t has_processed_text=%t", s.hasRawPayloadJSON, s.hasProcessedText)
 	})
 }
 
@@ -291,6 +293,7 @@ func (s *MySQLStore) UpdateEventStatus(ctx context.Context, eventID, status, act
 func (s *MySQLStore) UpdateEventProcessedText(ctx context.Context, eventID, processedText string) error {
 	s.ensureEventSchemaCapabilities()
 	if !s.hasProcessedText {
+		log.Printf("mysql.update_event_processed_text_skipped event_id=%s reason=processed_text_column_unavailable", eventID)
 		return nil
 	}
 	_, err := s.db.ExecContext(ctx, `UPDATE webhook_events SET processed_text=? WHERE id=?`, nullIfEmpty(processedText), eventID)

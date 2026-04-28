@@ -292,11 +292,15 @@ func (p *Processor) processWithPolicy(ctx context.Context, account domain.Accoun
 	} else {
 		event.ProcessedText = payloadToText(payload)
 	}
-	_ = p.Store.UpdateEventProcessedText(ctx, event.ID, event.ProcessedText)
+	if err := p.Store.UpdateEventProcessedText(ctx, event.ID, event.ProcessedText); err != nil {
+		log.Printf("reprocess.persist_processed_text_failed event_id=%s type_key=%s err=%v", event.ID, whType.TypeKey, err)
+	}
 	if len(decision.Tags) > 0 {
 		tagsBytes, _ := json.Marshal(decision.Tags)
 		event.TagsJSON = string(tagsBytes)
-		_ = p.Store.UpdateEventTags(ctx, event.ID, event.TagsJSON)
+		if err := p.Store.UpdateEventTags(ctx, event.ID, event.TagsJSON); err != nil {
+			log.Printf("reprocess.persist_tags_failed event_id=%s type_key=%s err=%v", event.ID, whType.TypeKey, err)
+		}
 	}
 	event.CreatedAt = time.Now().UTC()
 	log.Printf("reprocess.complete event_id=%s type_key=%s action=%s reason=%q processed_text_bytes=%d tags=%d", event.ID, whType.TypeKey, decision.ActionName, decision.Reason, len(event.ProcessedText), len(decision.Tags))
