@@ -13,6 +13,17 @@ func TestLoadEnvFilesPrefersExistingProcessEnv(t *testing.T) {
 		t.Fatalf("write env file: %v", err)
 	}
 	t.Setenv("LANGFUSE_ENABLED", "false")
+	originalHost, hadHost := os.LookupEnv("LANGFUSE_HOST")
+	if err := os.Unsetenv("LANGFUSE_HOST"); err != nil {
+		t.Fatalf("unset LANGFUSE_HOST: %v", err)
+	}
+	t.Cleanup(func() {
+		if hadHost {
+			_ = os.Setenv("LANGFUSE_HOST", originalHost)
+			return
+		}
+		_ = os.Unsetenv("LANGFUSE_HOST")
+	})
 	if err := LoadEnvFiles(path); err != nil {
 		t.Fatalf("LoadEnvFiles: %v", err)
 	}

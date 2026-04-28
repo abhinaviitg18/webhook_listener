@@ -25,6 +25,12 @@ func TestLoadFallsBackToTiDBDSN(t *testing.T) {
 }
 
 func TestLoadLLMCompactionDefaults(t *testing.T) {
+	t.Setenv("LLM_COMPACTION_ENABLED", "")
+	t.Setenv("LLM_COMPACTION_THRESHOLD_BYTES", "")
+	t.Setenv("LLM_COMPACTION_MAX_STRING_BYTES", "")
+	t.Setenv("LLM_COMPACTION_MAX_ARRAY_ITEMS", "")
+	t.Setenv("LLM_COMPACTION_MAX_OBJECT_FIELDS", "")
+
 	cfg := Load()
 	if !cfg.LLMCompactionEnabled {
 		t.Fatalf("expected compaction enabled by default")
@@ -69,6 +75,11 @@ func TestLoadLLMCompactionEnvOverrides(t *testing.T) {
 }
 
 func TestLoadLangfuseDefaults(t *testing.T) {
+	t.Setenv("LANGFUSE_ENABLED", "")
+	t.Setenv("LANGFUSE_HOST", "")
+	t.Setenv("LANGFUSE_PUBLIC_KEY", "")
+	t.Setenv("LANGFUSE_SECRET_KEY", "")
+
 	cfg := Load()
 	if cfg.LangfuseEnabled {
 		t.Fatalf("expected Langfuse disabled by default")
