@@ -10,10 +10,23 @@ function prettyJSON(value) {
     return JSON.stringify(value, null, 2);
 }
 
-function formatPayload(raw) {
-    if (!raw || typeof raw !== 'string' || !raw.trim()) return '';
+function isStructurallyEmpty(value) {
+    if (value === null || value === undefined) return true;
+    if (typeof value === 'string') return value.trim() === '';
+    if (Array.isArray(value)) return value.length === 0;
+    if (typeof value === 'object') return Object.keys(value).length === 0;
+    return false;
+}
+
+function formatPayload(raw, options = {}) {
+    const { treatStructuralEmptyAsEmpty = false } = options;
+    if (!raw || typeof raw !== 'string' || !raw.trim() || raw.trim() === 'null') return '';
     const parsed = safeJSONParse(raw);
-    return parsed ? prettyJSON(parsed) : raw.trim();
+    if (parsed !== null) {
+        if (treatStructuralEmptyAsEmpty && isStructurallyEmpty(parsed)) return '';
+        return prettyJSON(parsed);
+    }
+    return raw.trim();
 }
 
 function truncateLines(text, maxLines = 35) {
@@ -74,9 +87,13 @@ export const StoryboardCard = ({ event, onTagClick }) => {
     const tags = safeJSONParse(event.tagsJson) || [];
     const isMarketing = tags.some(t => ['marketing', 'promotion', 'newsletter'].includes(t?.toLowerCase?.()));
 
-    const processedText = formatPayload(event.processedText);
+    const processedText = formatPayload(event.processedText, { treatStructuralEmptyAsEmpty: true });
     const rawPayload = formatPayload(event.rawPayload);
-    const { truncated, isTruncated } = truncateLines(processedText);
+    // Fallback: if no processed text, show payload as the primary content
+    const displayText = processedText || rawPayload || `Received ${event.typeKey || 'webhook'} payload.`;
+    const displayLabel = processedText ? 'Processed Summary' : 'Payload';
+    const hasRawBehind = processedText && rawPayload && rawPayload !== processedText;
+    const { truncated, isTruncated } = truncateLines(displayText);
 
     const borderColors = {
         ACTIVE: 'border-stage-active/20',
@@ -114,30 +131,37 @@ export const StoryboardCard = ({ event, onTagClick }) => {
                 <StatusBadge status={event.status} />
             </div>
 
-            {/* Processed text - collapsed */}
-            {processedText && (
-                <div className="mb-3 rounded-xl border border-slate-800 bg-slate-950/60 p-3">
-                    <div className="mb-2 text-[10px] font-label-caps text-slate-500">
-                        Processed Summary
-                    </div>
-                    <pre className="whitespace-pre-wrap break-words font-code-snippet text-[11px] leading-relaxed text-indigo-300">
-                        {expanded ? processedText : truncated}
-                    </pre>
-                    {isTruncated && (
-                        <button
-                            onClick={() => setExpanded(!expanded)}
-                            className="mt-2 flex items-center gap-1 text-[10px] text-primary font-semibold hover:brightness-125 transition-all"
-                        >
-                            {expanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
-                            {expanded ? 'Show less' : `Show full (${processedText.split('\n').length} lines)`}
-                        </button>
-                    )}
+            {/* Primary content - collapsed */}
+            <div className="mb-3 rounded-xl border border-slate-800 bg-slate-950/60 p-3">
+                <div className="mb-2 text-[10px] font-label-caps text-slate-500">
+                    {displayLabel}
                 </div>
-            )}
+                <pre className="whitespace-pre-wrap break-words font-code-snippet text-[11px] leading-relaxed text-indigo-300">
+                    {expanded ? displayText : truncated}
+                </pre>
+                {isTruncated && (
+                    <button
+                        onClick={() => setExpanded(!expanded)}
+                        className="mt-2 flex items-center gap-1 text-[10px] text-primary font-semibold hover:brightness-125 transition-all"
+                    >
+                        {expanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+                        {expanded ? 'Show less' : `Show full (${displayText.split('\n').length} lines)`}
+                    </button>
+                )}
+                {!isTruncated && hasRawBehind && (
+                    <button
+                        onClick={() => setExpanded(!expanded)}
+                        className="mt-2 flex items-center gap-1 text-[10px] text-primary font-semibold hover:brightness-125 transition-all"
+                    >
+                        {expanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+                        {expanded ? 'Hide raw payload' : 'Show raw payload'}
+                    </button>
+                )}
+            </div>
 
-            {/* Expanded: raw payload */}
+            {/* Expanded: raw payload (only when there's a distinct processed text) */}
             <AnimatePresence>
-                {expanded && rawPayload && (
+                {expanded && hasRawBehind && (
                     <motion.div
                         initial={{ opacity: 0, height: 0 }}
                         animate={{ opacity: 1, height: 'auto' }}
