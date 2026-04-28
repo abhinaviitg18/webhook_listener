@@ -10,6 +10,12 @@ type Account struct {
 	CreatedAt  time.Time `json:"created_at"`
 }
 
+type AccountToken struct {
+	ID        string    `json:"id"`
+	AccountID string    `json:"account_id"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
 type WebhookType struct {
 	ID              string    `json:"id"`
 	AccountID       string    `json:"account_id"`

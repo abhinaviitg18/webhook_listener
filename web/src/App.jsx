@@ -470,11 +470,25 @@ const UrlsTab = ({ listeners, user, onRefresh, copied, setCopied }) => {
   const [error, setError] = useState('');
   const [apiToken, setApiToken] = useState('');
   const [tokenBusy, setTokenBusy] = useState(false);
+  const [apiTokensList, setApiTokensList] = useState([]);
+  const [loadingTokens, setLoadingTokens] = useState(false);
   const [secretMap, setSecretMap] = useState({});
   const [secretsHistory, setSecretsHistory] = useState({});
   const [loadingSecrets, setLoadingSecrets] = useState(false);
 
   const accountSlug = user?.slug || '[account]';
+
+  const fetchTokens = async () => {
+    setLoadingTokens(true);
+    try {
+      const data = await apiRequest('/v1/auth/tokens');
+      setApiTokensList(Array.isArray(data) ? data : []);
+    } catch (err) {
+      console.error('Failed to fetch tokens', err);
+    } finally {
+      setLoadingTokens(false);
+    }
+  };
 
   const fetchSecrets = async (listener) => {
     try {
@@ -489,6 +503,7 @@ const UrlsTab = ({ listeners, user, onRefresh, copied, setCopied }) => {
   };
 
   useEffect(() => {
+    fetchTokens();
     if (listeners.length === 0) return;
     setLoadingSecrets(true);
     Promise.allSettled(listeners.map((listener) => fetchSecrets(listener))).finally(() => setLoadingSecrets(false));
@@ -558,10 +573,21 @@ const UrlsTab = ({ listeners, user, onRefresh, copied, setCopied }) => {
         method: 'POST',
       });
       setApiToken(created?.token || '');
+      await fetchTokens();
     } catch (err) {
       setError(err.message);
     } finally {
       setTokenBusy(false);
+    }
+  };
+
+  const revokeToken = async (id) => {
+    if (!window.confirm('Revoke this token? Any scripts using it will fail immediately.')) return;
+    try {
+      await apiRequest(`/v1/auth/tokens/${id}`, { method: 'DELETE' });
+      await fetchTokens();
+    } catch (err) {
+      setError(err.message);
     }
   };
 
@@ -633,8 +659,8 @@ const UrlsTab = ({ listeners, user, onRefresh, copied, setCopied }) => {
       </Panel>
 
       <Panel
-        title="API Token"
-        subtitle="Generate a token for curl, scripts, or direct API testing while you validate each ingress setup."
+        title="API Tokens"
+        subtitle="Manage and generate tokens for curl, scripts, or direct API testing."
         action={<KeyRound size={18} className="text-primary" />}
       >
         <button
@@ -645,9 +671,32 @@ const UrlsTab = ({ listeners, user, onRefresh, copied, setCopied }) => {
           {tokenBusy ? 'CREATING...' : 'CREATE API TOKEN'}
         </button>
         {apiToken && (
-          <div className="flex items-center gap-2 bg-slate-950/50 px-3 py-2 rounded-lg border border-slate-800">
-            <code className="text-indigo-300 font-code-snippet text-xs truncate">{apiToken}</code>
-            <CopyButton value={apiToken} copiedKey={copied} setCopiedKey={setCopied} copyKey="api-token" />
+          <div className="flex flex-col gap-2 bg-slate-950/50 px-3 py-2 rounded-lg border border-slate-800">
+            <span className="text-[10px] text-emerald-400 font-label-caps">New token created (copy now, won't be shown again)</span>
+            <div className="flex items-center gap-2">
+              <code className="text-indigo-300 font-code-snippet text-xs truncate break-all">{apiToken}</code>
+              <CopyButton value={apiToken} copiedKey={copied} setCopiedKey={setCopied} copyKey="api-token" />
+            </div>
+          </div>
+        )}
+
+        {apiTokensList.length > 0 && (
+          <div className="space-y-1.5 pt-2">
+            <div className="flex items-center justify-between px-1">
+              <p className="text-[10px] text-slate-500 font-label-caps">Active Tokens ({apiTokensList.length})</p>
+              {loadingTokens && <RefreshCw size={10} className="text-slate-500 animate-spin" />}
+            </div>
+            {apiTokensList.map((t) => (
+              <div key={t.id} className="flex items-center justify-between gap-2 bg-slate-900/40 px-3 py-2 rounded-lg border border-slate-800/50 text-[11px]">
+                <code className="text-slate-400 font-code-snippet truncate">...{t.id.slice(-8)}</code>
+                <div className="flex items-center gap-3">
+                  <span className="text-slate-500">{new Date(t.created_at).toLocaleDateString()}</span>
+                  <button onClick={() => revokeToken(t.id)} className="text-slate-500 hover:text-red-400 transition-colors uppercase font-bold text-[9px]">
+                    Revoke
+                  </button>
+                </div>
+              </div>
+            ))}
           </div>
         )}
       </Panel>

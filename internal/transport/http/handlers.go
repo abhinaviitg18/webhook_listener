@@ -83,7 +83,9 @@ func NewRouter(h *Handler, verifier auth.RequestVerifier) http.Handler {
 		ar.Post("/v1/listeners/{listenerID}/secrets", h.CreateListenerSecret)
 		ar.Get("/v1/listeners/{listenerID}/secrets", h.ListListenerSecrets)
 		ar.Get("/v1/listeners/{listenerID}/events", h.ListListenerEvents)
+		ar.Get("/v1/auth/tokens", h.ListAPITokens)
 		ar.Post("/v1/auth/tokens", h.CreateAPIToken)
+		ar.Delete("/v1/auth/tokens/{tokenID}", h.RevokeAPIToken)
 		ar.Post("/v1/presets/webhook-processing", h.ApplyWebhookProcessingPreset)
 		ar.Post("/v1/byok/providers/test", h.TestBYOKProviders)
 		ar.Post("/v1/byok/providers", h.UpsertBYOKProvider)
@@ -673,6 +675,38 @@ func (h *Handler) CreateAPIToken(w http.ResponseWriter, r *http.Request) {
 		"account": acct.Slug,
 		"note":    "new API token created",
 	})
+}
+
+func (h *Handler) ListAPITokens(w http.ResponseWriter, r *http.Request) {
+	acct, ok := auth.AccountFromContext(r.Context())
+	if !ok {
+		writeErr(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	tokens, err := h.Store.ListAccountTokens(r.Context(), acct.ID)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, tokens)
+}
+
+func (h *Handler) RevokeAPIToken(w http.ResponseWriter, r *http.Request) {
+	acct, ok := auth.AccountFromContext(r.Context())
+	if !ok {
+		writeErr(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	tokenID := chi.URLParam(r, "tokenID")
+	if tokenID == "" {
+		writeErr(w, http.StatusBadRequest, "token id required")
+		return
+	}
+	if err := h.Store.RevokeAccountToken(r.Context(), acct.ID, tokenID); err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"revoked": true})
 }
 
 func (h *Handler) ApplyWebhookProcessingPreset(w http.ResponseWriter, r *http.Request) {

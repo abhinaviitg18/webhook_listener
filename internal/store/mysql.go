@@ -109,6 +109,28 @@ LIMIT 1`, h).Scan(&a.ID, &a.Slug, &a.OwnerEmail, &a.CreatedAt)
 	return a, nil
 }
 
+func (s *MySQLStore) ListAccountTokens(ctx context.Context, accountID string) ([]domain.AccountToken, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT id, account_id, created_at FROM account_tokens WHERE account_id=? AND revoked_at IS NULL ORDER BY created_at DESC`, accountID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []domain.AccountToken
+	for rows.Next() {
+		var t domain.AccountToken
+		if err := rows.Scan(&t.ID, &t.AccountID, &t.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, t)
+	}
+	return out, nil
+}
+
+func (s *MySQLStore) RevokeAccountToken(ctx context.Context, accountID, tokenID string) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE account_tokens SET revoked_at=UTC_TIMESTAMP() WHERE id=? AND account_id=? AND revoked_at IS NULL`, tokenID, accountID)
+	return err
+}
+
 func (s *MySQLStore) CreateWebhookType(ctx context.Context, accountID, typeKey, plainTextAction string, useLLMFallback bool) (domain.WebhookType, error) {
 	id := uuid.NewString()
 	_, err := s.db.ExecContext(ctx, `INSERT INTO webhook_types(id, account_id, type_key, plain_text_action, use_llm_fallback, created_at) VALUES(?,?,?,?,?,UTC_TIMESTAMP())`, id, accountID, typeKey, plainTextAction, useLLMFallback)

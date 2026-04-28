@@ -8,6 +8,9 @@ type Store interface {
 	GetAccountByToken(ctx context.Context, token string) (Account, error)
 	GetAccount(ctx context.Context, id string) (Account, error)
 
+	ListAccountTokens(ctx context.Context, accountID string) ([]AccountToken, error)
+	RevokeAccountToken(ctx context.Context, accountID, tokenID string) error
+
 	CreateWebhookType(ctx context.Context, accountID, typeKey, plainTextAction string, useLLMFallback bool) (WebhookType, error)
 	ListWebhookTypes(ctx context.Context, accountID string) ([]WebhookType, error)
 	GetWebhookTypeByAccountAndKey(ctx context.Context, accountID, typeKey string) (WebhookType, error)

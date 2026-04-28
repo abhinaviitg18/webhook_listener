@@ -113,6 +113,32 @@ func (s *MemoryStore) GetAccountByToken(_ context.Context, token string) (domain
 	return s.accountsByID[id], nil
 }
 
+func (s *MemoryStore) ListAccountTokens(_ context.Context, accountID string) ([]domain.AccountToken, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var out []domain.AccountToken
+	for tokenHash, storedAccountID := range s.tokens {
+		if storedAccountID == accountID {
+			out = append(out, domain.AccountToken{
+				ID:        tokenHash,
+				AccountID: accountID,
+				CreatedAt: time.Now().UTC(),
+			})
+		}
+	}
+	return out, nil
+}
+
+func (s *MemoryStore) RevokeAccountToken(_ context.Context, accountID, tokenID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if storedAccountID, ok := s.tokens[tokenID]; ok && storedAccountID == accountID {
+		delete(s.tokens, tokenID)
+		return nil
+	}
+	return errors.New("token not found")
+}
+
 func (s *MemoryStore) GetAccount(_ context.Context, id string) (domain.Account, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
