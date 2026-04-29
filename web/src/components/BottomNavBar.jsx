@@ -1,13 +1,14 @@
 import React from 'react';
-import { Activity, BrainCircuit, Link as LinkIcon, Settings } from 'lucide-react';
+import { Activity, BrainCircuit, Cable, Cpu, Link as LinkIcon } from 'lucide-react';
 import { motion } from 'framer-motion';
 
 export const BottomNavBar = ({ activeTab, onTabChange }) => {
     const tabs = [
         { id: 'storyboard', label: 'Storyboard', icon: Activity },
         { id: 'skills', label: 'Skills', icon: BrainCircuit },
+        { id: 'integrations', label: 'Integrations', icon: Cable },
         { id: 'urls', label: 'URLs', icon: LinkIcon },
-        { id: 'settings', label: 'Settings', icon: Settings },
+        { id: 'byok', label: 'BYOK', icon: Cpu },
     ];
 
     return (

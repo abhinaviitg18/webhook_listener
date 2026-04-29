@@ -25,6 +25,8 @@ type Store interface {
 
 	CreateForwardTarget(ctx context.Context, accountID, targetType, configJSON string) (ForwardTarget, error)
 	ListForwardTargets(ctx context.Context, accountID string) ([]ForwardTarget, error)
+	UpdateForwardTarget(ctx context.Context, target ForwardTarget) (ForwardTarget, error)
+	DeleteForwardTarget(ctx context.Context, accountID, targetID string) error
 
 	CreateEvent(ctx context.Context, event WebhookEvent) (WebhookEvent, error)
 	UpdateEventStatus(ctx context.Context, eventID, status, action string) error

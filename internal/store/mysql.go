@@ -276,6 +276,25 @@ func (s *MySQLStore) ListForwardTargets(ctx context.Context, accountID string) (
 	return out, nil
 }
 
+func (s *MySQLStore) UpdateForwardTarget(ctx context.Context, target domain.ForwardTarget) (domain.ForwardTarget, error) {
+	_, err := s.db.ExecContext(ctx, `UPDATE forward_targets SET target_type=?, config_json=? WHERE id=? AND account_id=?`, target.TargetType, target.ConfigJSON, target.ID, target.AccountID)
+	if err != nil {
+		return domain.ForwardTarget{}, err
+	}
+	var updated domain.ForwardTarget
+	err = s.db.QueryRowContext(ctx, `SELECT id, account_id, target_type, config_json, created_at FROM forward_targets WHERE id=? AND account_id=? LIMIT 1`, target.ID, target.AccountID).
+		Scan(&updated.ID, &updated.AccountID, &updated.TargetType, &updated.ConfigJSON, &updated.CreatedAt)
+	if err != nil {
+		return domain.ForwardTarget{}, err
+	}
+	return updated, nil
+}
+
+func (s *MySQLStore) DeleteForwardTarget(ctx context.Context, accountID, targetID string) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM forward_targets WHERE id=? AND account_id=?`, targetID, accountID)
+	return err
+}
+
 func (s *MySQLStore) CreateEvent(ctx context.Context, e domain.WebhookEvent) (domain.WebhookEvent, error) {
 	e.ID = uuid.NewString()
 	e.CreatedAt = time.Now().UTC()

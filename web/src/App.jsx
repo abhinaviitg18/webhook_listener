@@ -17,11 +17,17 @@ import {
   Sparkles,
   ChevronDown,
   ChevronUp,
+  Cable,
+  MessageSquareQuote,
+  Mail,
+  BadgeCheck,
+  Save,
+  Trash2,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from './context/AuthContext';
 
-const VALID_TABS = new Set(['storyboard', 'skills', 'urls', 'settings']);
+const VALID_TABS = new Set(['storyboard', 'skills', 'integrations', 'urls', 'byok']);
 
 const PROVIDER_OPTIONS = [
   'github',
@@ -35,7 +41,174 @@ const PROVIDER_OPTIONS = [
 
 const MEMORY_WRITE_MODES = ['update_or_insert', 'insert_only', 'disabled'];
 
-const FORCED_ACTION_OPTIONS = ['store_mysql', 'forward_http', 'log_only'];
+const FORCED_ACTION_OPTIONS = ['store_mysql', 'no_action', 'manual_review', 'forward_http', 'forward_telegram', 'slack_notify', 'crm_upsert', 'ticket_create'];
+const INTEGRATION_TARGET_TYPES = ['http', 'telegram', 'openclaw', 'custom'];
+const INTEGRATION_ACTION_OPTIONS = ['forward_http', 'forward_telegram', 'slack_notify', 'crm_upsert', 'ticket_create'];
+
+const INTEGRATION_PRESETS = {
+  openclaw: {
+    target_key: 'openclaw_primary',
+    target_type: 'http',
+    purpose: 'Forward structured leads and tickets into OpenClaw.',
+    enabled: true,
+    allowed_actions: ['forward_http', 'crm_upsert', 'ticket_create'],
+    config: {
+      url: 'https://api.openclaw.example/v1/intake',
+      method: 'POST',
+      headers: {
+        Authorization: 'Bearer ${OPENCLAW_API_KEY}',
+      },
+    },
+    schema: {
+      entity_payload: 'object',
+      source: 'agenthook',
+    },
+  },
+  forward_url: {
+    target_key: 'forward_url_primary',
+    target_type: 'http',
+    purpose: 'Forward events to any custom HTTP endpoint.',
+    enabled: true,
+    allowed_actions: ['forward_http', 'slack_notify'],
+    config: {
+      url: 'https://example.com/webhook',
+      method: 'POST',
+      headers: {
+        'x-agenthook-source': 'listener',
+      },
+    },
+    schema: {},
+  },
+};
+
+const SKILL_PACKS = {
+  whatsapp: {
+    label: 'WhatsApp Pack',
+    specificMatchContains: 'whatsapp',
+    skills: [
+      {
+        skill_key: 'channel_whatsapp_router',
+        skill_prompt: 'Route conversational WhatsApp messages into lead capture, support escalation, or spam filtering.',
+        match_contains: 'whatsapp,message,phone,chat',
+        forced_action: 'store_mysql',
+        memory_write_mode: 'update_or_insert',
+        priority: 10,
+        enabled: true,
+      },
+      {
+        skill_key: 'whatsapp_spam_filter',
+        skill_prompt: 'Detect promotional or low-value WhatsApp outreach and suppress it.',
+        match_contains: 'promo,offer,discount,click here,unsubscribe',
+        forced_action: 'no_action',
+        memory_write_mode: 'disabled',
+        priority: 20,
+        enabled: true,
+      },
+      {
+        skill_key: 'whatsapp_lead_capture',
+        skill_prompt: 'Extract lead name, company, and intent from WhatsApp messages and prepare CRM-ready output.',
+        match_contains: 'demo,pricing,interested,company,trial',
+        forced_action: 'crm_upsert',
+        memory_write_mode: 'update_or_insert',
+        priority: 30,
+        enabled: true,
+      },
+      {
+        skill_key: 'whatsapp_support_escalation',
+        skill_prompt: 'Summarize urgent support issues from WhatsApp and notify the operations team.',
+        match_contains: 'urgent,error,broken,down,issue,help',
+        forced_action: 'slack_notify',
+        memory_write_mode: 'update_or_insert',
+        priority: 40,
+        enabled: true,
+      },
+    ],
+  },
+  email: {
+    label: 'Email Pack',
+    specificMatchContains: 'email',
+    skills: [
+      {
+        skill_key: 'channel_email_router',
+        skill_prompt: 'Route email-style traffic into marketing noise, sales leads, or finance approvals.',
+        match_contains: 'subject,from,to,email,inbox',
+        forced_action: 'store_mysql',
+        memory_write_mode: 'update_or_insert',
+        priority: 10,
+        enabled: true,
+      },
+      {
+        skill_key: 'email_marketing_noise_filter',
+        skill_prompt: 'Suppress newsletters and low-signal email campaigns.',
+        match_contains: 'newsletter,unsubscribe,discount,offer,promo',
+        forced_action: 'no_action',
+        memory_write_mode: 'disabled',
+        priority: 20,
+        enabled: true,
+      },
+      {
+        skill_key: 'email_sales_lead_router',
+        skill_prompt: 'Extract qualified inbound lead details from email and prepare a CRM upsert.',
+        match_contains: 'demo,enterprise,pricing,quote,trial',
+        forced_action: 'crm_upsert',
+        memory_write_mode: 'update_or_insert',
+        priority: 30,
+        enabled: true,
+      },
+      {
+        skill_key: 'email_invoice_approval',
+        skill_prompt: 'Detect invoice and approval emails that need finance follow-up or ticketing.',
+        match_contains: 'invoice,approval,payment,approve,overdue',
+        forced_action: 'ticket_create',
+        memory_write_mode: 'update_or_insert',
+        priority: 40,
+        enabled: true,
+      },
+    ],
+  },
+  gate: {
+    label: 'GetApproval Pack',
+    specificMatchContains: 'approval',
+    skills: [
+      {
+        skill_key: 'channel_getapproval_router',
+        skill_prompt: 'Route approval workflow events into request, escalation, or archive behavior.',
+        match_contains: 'approval,approver,pending,request_status,approval_url',
+        forced_action: 'store_mysql',
+        memory_write_mode: 'update_or_insert',
+        priority: 10,
+        enabled: true,
+      },
+      {
+        skill_key: 'approval_request_classifier',
+        skill_prompt: 'Summarize standard approval requests and capture who needs to decide and by when.',
+        match_contains: 'approval requested,pending approval,requester',
+        forced_action: 'manual_review',
+        memory_write_mode: 'update_or_insert',
+        priority: 20,
+        enabled: true,
+      },
+      {
+        skill_key: 'approval_urgent_escalation',
+        skill_prompt: 'Escalate urgent approval messages to ops or finance immediately.',
+        match_contains: 'urgent approval,blocked,release,critical',
+        forced_action: 'slack_notify',
+        memory_write_mode: 'update_or_insert',
+        priority: 30,
+        enabled: true,
+      },
+      {
+        skill_key: 'approval_auto_archive',
+        skill_prompt: 'Track completed approval events without triggering downstream action.',
+        match_contains: 'approved,rejected,completed',
+        forced_action: 'store_mysql',
+        memory_write_mode: 'insert_only',
+        priority: 40,
+        enabled: true,
+      },
+    ],
+  },
+};
 
 function safeJSONParse(text, fallback = null) {
   try {
@@ -67,6 +240,43 @@ async function apiRequest(path, options = {}) {
 
 function prettyJSON(value) {
   return JSON.stringify(value, null, 2);
+}
+
+function parseJSONText(text, fallback) {
+  if (typeof text !== 'string' || text.trim() === '') {
+    return fallback;
+  }
+  const parsed = safeJSONParse(text, fallback);
+  return parsed ?? fallback;
+}
+
+function arrayFromJSONText(text) {
+  const parsed = parseJSONText(text, []);
+  return Array.isArray(parsed) ? parsed : [];
+}
+
+function objectFromJSONText(text) {
+  const parsed = parseJSONText(text, {});
+  return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+}
+
+function targetConfigFromRecord(target) {
+  const parsed = objectFromJSONText(target?.config_json);
+  if (parsed.config && typeof parsed.config === 'object' && !Array.isArray(parsed.config)) {
+    return parsed.config;
+  }
+  return parsed;
+}
+
+function parseObjectOrThrow(text, label) {
+  if (typeof text !== 'string' || text.trim() === '') {
+    return {};
+  }
+  const parsed = safeJSONParse(text, undefined);
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error(`${label} must be valid JSON object`);
+  }
+  return parsed;
 }
 
 function payloadPreview(event) {
@@ -402,15 +612,27 @@ function App() {
             />
           )}
 
-          {activeTab === 'settings' && (
+          {activeTab === 'integrations' && (
             <motion.div
-              key="settings"
+              key="integrations"
+              initial={{ opacity: 0, x: -20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: 20 }}
+              className="space-y-4"
+            >
+              <IntegrationsTab />
+            </motion.div>
+          )}
+
+          {activeTab === 'byok' && (
+            <motion.div
+              key="byok"
               initial={{ opacity: 0, x: -20 }}
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: 20 }}
               className="space-y-6"
             >
-              <h2 className="px-1 text-white">Settings</h2>
+              <h2 className="px-1 text-white">BYOK</h2>
               <BYOKSettings />
             </motion.div>
           )}
@@ -433,8 +655,28 @@ function App() {
 const BYOKSettings = () => {
   const [provider, setProvider] = useState('groq');
   const [apiKey, setApiKey] = useState('');
+  const [baseURL, setBaseURL] = useState('');
+  const [model, setModel] = useState('');
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState('');
+  const [providers, setProviders] = useState([]);
+  const [loadingProviders, setLoadingProviders] = useState(false);
+
+  const fetchProviders = async () => {
+    setLoadingProviders(true);
+    try {
+      const data = await apiRequest('/v1/byok/providers');
+      setProviders(Array.isArray(data) ? data : []);
+    } catch (err) {
+      setNotice(err.message);
+    } finally {
+      setLoadingProviders(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchProviders();
+  }, []);
 
   const save = async () => {
     setSaving(true);
@@ -442,8 +684,12 @@ const BYOKSettings = () => {
     try {
       await apiRequest('/v1/byok/providers', {
         method: 'POST',
-        body: JSON.stringify({ provider, api_key: apiKey, is_default: true }),
+        body: JSON.stringify({ provider, api_key: apiKey, base_url: baseURL, model, is_default: true }),
       });
+      setApiKey('');
+      setBaseURL('');
+      setModel('');
+      await fetchProviders();
       setNotice('Provider config saved.');
     } catch (err) {
       setNotice(err.message);
@@ -454,8 +700,8 @@ const BYOKSettings = () => {
 
   return (
     <Panel
-      title="LLM Provider (BYOK)"
-      subtitle="Bring your own provider credentials for model-driven classification and response flows."
+      title="LLM Providers"
+      subtitle="Manage your provider credentials separately from webhook settings, with model and endpoint overrides when needed."
     >
       <div className="space-y-3">
         <FormField label="Provider">
@@ -474,6 +720,22 @@ const BYOKSettings = () => {
             placeholder="sk-..."
           />
         </FormField>
+        <div className="grid grid-cols-2 gap-3">
+          <FormField label="Base URL">
+            <TextInput
+              value={baseURL}
+              onChange={(e) => setBaseURL(e.target.value)}
+              placeholder="Optional override"
+            />
+          </FormField>
+          <FormField label="Model">
+            <TextInput
+              value={model}
+              onChange={(e) => setModel(e.target.value)}
+              placeholder="Optional override"
+            />
+          </FormField>
+        </div>
         {notice && <InlineNotice tone={notice.includes('saved') ? 'success' : 'error'}>{notice}</InlineNotice>}
         <button
           onClick={save}
@@ -482,8 +744,385 @@ const BYOKSettings = () => {
         >
           {saving ? 'SAVING...' : 'SAVE CONFIG'}
         </button>
+
+        <div className="space-y-2 pt-2">
+          <div className="flex items-center justify-between px-1">
+            <p className="text-[10px] text-slate-500 font-label-caps">Saved Providers</p>
+            {loadingProviders && <RefreshCw size={12} className="text-slate-500 animate-spin" />}
+          </div>
+          {providers.map((item) => (
+            <div key={item.id || item.provider} className="rounded-xl border border-slate-800 bg-slate-950/40 p-3 space-y-1">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-sm text-white font-medium">{item.provider}</span>
+                <StatusBadge status={item.is_default ? 'ACTIVE' : 'SHADOW'} />
+              </div>
+              <p className="text-[11px] text-slate-400 break-all">{item.model || 'default model'}</p>
+              <p className="text-[11px] text-slate-500 break-all">{item.base_url || 'default endpoint'}</p>
+            </div>
+          ))}
+          {!providers.length && !loadingProviders && (
+            <p className="text-slate-500 text-xs text-center py-3">No BYOK providers saved yet.</p>
+          )}
+        </div>
       </div>
     </Panel>
+  );
+};
+
+const IntegrationsTab = () => {
+  const [targets, setTargets] = useState([]);
+  const [loadingTargets, setLoadingTargets] = useState(false);
+  const [savingTarget, setSavingTarget] = useState(false);
+  const [notice, setNotice] = useState('');
+  const [expandedTargetID, setExpandedTargetID] = useState('');
+  const [editingTargetID, setEditingTargetID] = useState('');
+  const [form, setForm] = useState({
+    target_key: '',
+    target_type: 'http',
+    purpose: '',
+    enabled: true,
+    allowed_actions: ['forward_http'],
+    config_text: prettyJSON({ url: 'https://example.com/webhook', method: 'POST' }),
+    schema_text: prettyJSON({}),
+  });
+
+  const fetchTargets = async () => {
+    setLoadingTargets(true);
+    try {
+      const data = await apiRequest('/api/forward-targets');
+      setTargets(Array.isArray(data) ? data : []);
+    } catch (err) {
+      setNotice(err.message);
+    } finally {
+      setLoadingTargets(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchTargets();
+  }, []);
+
+  const applyIntegrationPreset = (presetKey) => {
+    const preset = INTEGRATION_PRESETS[presetKey];
+    if (!preset) return;
+    setForm({
+      target_key: preset.target_key,
+      target_type: preset.target_type,
+      purpose: preset.purpose,
+      enabled: preset.enabled,
+      allowed_actions: preset.allowed_actions,
+      config_text: prettyJSON(preset.config),
+      schema_text: prettyJSON(preset.schema),
+    });
+    setEditingTargetID('');
+    setNotice(`${preset.target_key} template loaded. Review the URL and headers before saving.`);
+  };
+
+  const persistTarget = async () => {
+    setSavingTarget(true);
+    setNotice('');
+    try {
+      const payload = {
+        target_key: form.target_key,
+        target_type: form.target_type === 'openclaw' ? 'http' : form.target_type,
+        purpose: form.purpose,
+        enabled: form.enabled,
+        allowed_actions: form.allowed_actions,
+        config: parseObjectOrThrow(form.config_text, 'Config JSON'),
+        schema: parseObjectOrThrow(form.schema_text, 'Schema JSON'),
+      };
+      if (!payload.target_key.trim()) {
+        throw new Error('target_key is required');
+      }
+      const path = editingTargetID ? `/api/forward-targets/${editingTargetID}` : '/api/forward-targets';
+      const method = editingTargetID ? 'PUT' : 'POST';
+      await apiRequest(path, {
+        method,
+        body: JSON.stringify(payload),
+      });
+      await fetchTargets();
+      setEditingTargetID('');
+      setForm({
+        target_key: '',
+        target_type: 'http',
+        purpose: '',
+        enabled: true,
+        allowed_actions: ['forward_http'],
+        config_text: prettyJSON({ url: 'https://example.com/webhook', method: 'POST' }),
+        schema_text: prettyJSON({}),
+      });
+      setNotice(`Integration ${method === 'POST' ? 'created' : 'updated'} successfully.`);
+    } catch (err) {
+      setNotice(err.message);
+    } finally {
+      setSavingTarget(false);
+    }
+  };
+
+  const beginEditTarget = (target) => {
+    const config = targetConfigFromRecord(target);
+    const schema = objectFromJSONText(target.schema_json);
+    const allowedActions = arrayFromJSONText(target.allowed_actions_json);
+    setEditingTargetID(target.id);
+    setExpandedTargetID(target.id);
+    setForm({
+      target_key: target.target_key || '',
+      target_type: target.target_type || 'http',
+      purpose: target.purpose || '',
+      enabled: target.enabled !== false,
+      allowed_actions: allowedActions.length ? allowedActions : ['forward_http'],
+      config_text: prettyJSON(config),
+      schema_text: prettyJSON(schema),
+    });
+  };
+
+  const deleteTarget = async (target) => {
+    if (!window.confirm(`Delete integration "${target.target_key || target.id}"?`)) return;
+    try {
+      await apiRequest(`/api/forward-targets/${target.id}`, { method: 'DELETE' });
+      if (editingTargetID === target.id) {
+        setEditingTargetID('');
+      }
+      await fetchTargets();
+      setNotice('Integration deleted.');
+    } catch (err) {
+      setNotice(err.message);
+    }
+  };
+
+  const toggleAction = (action) => {
+    setForm((current) => {
+      const exists = current.allowed_actions.includes(action);
+      return {
+        ...current,
+        allowed_actions: exists
+          ? current.allowed_actions.filter((item) => item !== action)
+          : [...current.allowed_actions, action],
+      };
+    });
+  };
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, x: -20 }}
+      animate={{ opacity: 1, x: 0 }}
+      exit={{ opacity: 0, x: 20 }}
+      className="space-y-4"
+    >
+      <h2 className="px-1 text-white">Integrations</h2>
+
+      <Panel
+        title="Create Integration"
+        subtitle="Define reusable named targets for OpenClaw, custom forward URLs, or any downstream system your skills can call."
+        action={<Cable size={18} className="text-primary" />}
+      >
+        <div className="flex flex-wrap gap-2">
+          <button
+            onClick={() => applyIntegrationPreset('openclaw')}
+            className="px-3 py-1.5 rounded-lg border border-slate-700 text-xs text-slate-200 hover:bg-slate-900"
+          >
+            Load OpenClaw Template
+          </button>
+          <button
+            onClick={() => applyIntegrationPreset('forward_url')}
+            className="px-3 py-1.5 rounded-lg border border-slate-700 text-xs text-slate-200 hover:bg-slate-900"
+          >
+            Load Forward URL Template
+          </button>
+        </div>
+        <div className="grid grid-cols-1 gap-3">
+          <FormField label="Target Key" hint="Skills and router outputs reference this stable key.">
+            <TextInput
+              value={form.target_key}
+              onChange={(e) => setForm((current) => ({ ...current, target_key: e.target.value }))}
+              placeholder="openclaw_primary"
+            />
+          </FormField>
+          <div className="grid grid-cols-2 gap-3">
+            <FormField label="Target Type">
+              <Select
+                value={form.target_type}
+                onChange={(e) => setForm((current) => ({ ...current, target_type: e.target.value }))}
+              >
+                {INTEGRATION_TARGET_TYPES.map((item) => (
+                  <option key={item} value={item}>
+                    {item}
+                  </option>
+                ))}
+              </Select>
+            </FormField>
+            <FormField label="Enabled">
+              <Select
+                value={String(form.enabled)}
+                onChange={(e) => setForm((current) => ({ ...current, enabled: e.target.value === 'true' }))}
+              >
+                <option value="true">Enabled</option>
+                <option value="false">Disabled</option>
+              </Select>
+            </FormField>
+          </div>
+          <FormField label="Purpose">
+            <TextInput
+              value={form.purpose}
+              onChange={(e) => setForm((current) => ({ ...current, purpose: e.target.value }))}
+              placeholder="Forward leads to OpenClaw or a generic intake URL."
+            />
+          </FormField>
+          <FormField label="Allowed Actions">
+            <div className="flex flex-wrap gap-2">
+              {INTEGRATION_ACTION_OPTIONS.map((action) => (
+                <label key={action} className="inline-flex items-center gap-2 rounded-lg border border-slate-800 bg-slate-950/40 px-3 py-2 text-xs text-slate-200">
+                  <input
+                    type="checkbox"
+                    checked={form.allowed_actions.includes(action)}
+                    onChange={() => toggleAction(action)}
+                  />
+                  {action}
+                </label>
+              ))}
+            </div>
+          </FormField>
+          <FormField label="Config JSON" hint="Store the endpoint, headers, auth placeholders, and any destination-specific options here.">
+            <TextArea
+              value={form.config_text}
+              onChange={(e) => setForm((current) => ({ ...current, config_text: e.target.value }))}
+              className="min-h-36 font-code-snippet"
+            />
+          </FormField>
+          <FormField label="Schema JSON" hint="Optional hints for what params the skill or router should produce.">
+            <TextArea
+              value={form.schema_text}
+              onChange={(e) => setForm((current) => ({ ...current, schema_text: e.target.value }))}
+              className="min-h-24 font-code-snippet"
+            />
+          </FormField>
+        </div>
+        {notice && <InlineNotice tone={notice.toLowerCase().includes('success') || notice.toLowerCase().includes('created') || notice.toLowerCase().includes('updated') ? 'success' : 'info'}>{notice}</InlineNotice>}
+        <div className="flex gap-2">
+          <button
+            onClick={persistTarget}
+            disabled={savingTarget}
+            className="flex-1 bg-primary text-on-primary font-bold py-2 rounded-lg text-sm active:scale-95 transition-transform disabled:opacity-50"
+          >
+            {savingTarget ? 'SAVING...' : editingTargetID ? 'SAVE INTEGRATION' : 'CREATE INTEGRATION'}
+          </button>
+          {editingTargetID && (
+            <button
+              onClick={() => {
+                setEditingTargetID('');
+                setForm({
+                  target_key: '',
+                  target_type: 'http',
+                  purpose: '',
+                  enabled: true,
+                  allowed_actions: ['forward_http'],
+                  config_text: prettyJSON({ url: 'https://example.com/webhook', method: 'POST' }),
+                  schema_text: prettyJSON({}),
+                });
+              }}
+              className="px-4 border border-slate-800 rounded-lg text-sm text-slate-200 hover:bg-slate-900"
+            >
+              Reset
+            </button>
+          )}
+        </div>
+      </Panel>
+
+      <Panel
+        title="Configured Integrations"
+        subtitle="Every saved target is reusable across skills and router outputs. Expand a card to inspect the schema and config."
+        action={
+          <button onClick={fetchTargets} className="text-slate-400 hover:text-white" title="Refresh integrations">
+            <RefreshCw size={16} className={loadingTargets ? 'animate-spin' : ''} />
+          </button>
+        }
+      >
+        <div className="space-y-3">
+          {targets.map((target) => {
+            const allowedActions = arrayFromJSONText(target.allowed_actions_json);
+            const config = targetConfigFromRecord(target);
+            const schema = objectFromJSONText(target.schema_json);
+            const isExpanded = expandedTargetID === target.id;
+            return (
+              <div
+                key={target.id}
+                className="rounded-2xl border border-slate-800 bg-slate-950/30 p-4 space-y-3 cursor-pointer"
+                onClick={() => setExpandedTargetID((current) => (current === target.id ? '' : target.id))}
+                role="button"
+                tabIndex={0}
+                onKeyDown={(event) => {
+                  if (event.target !== event.currentTarget) return;
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    setExpandedTargetID((current) => (current === target.id ? '' : target.id));
+                  }
+                }}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-white text-sm font-medium">{target.target_key || target.id}</p>
+                    <p className="text-slate-500 text-[11px] mt-1">{target.target_type} · {target.purpose || 'No purpose yet'}</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <StatusBadge status={target.enabled ? 'ACTIVE' : 'LEARNING'} />
+                    {isExpanded ? <ChevronUp size={16} className="text-slate-500" /> : <ChevronDown size={16} className="text-slate-500" />}
+                  </div>
+                </div>
+                {isExpanded && (
+                  <div className="space-y-3 border-t border-slate-800/80 pt-3" onClick={(event) => event.stopPropagation()}>
+                    <div className="flex flex-wrap gap-2">
+                      {allowedActions.map((action) => (
+                        <span key={action} className="rounded-full border border-slate-700 px-2 py-1 text-[10px] text-slate-300">
+                          {action}
+                        </span>
+                      ))}
+                      {!allowedActions.length && (
+                        <span className="rounded-full border border-slate-700 px-2 py-1 text-[10px] text-slate-500">
+                          default actions
+                        </span>
+                      )}
+                    </div>
+                    <div className="grid grid-cols-1 gap-2 text-[11px] text-slate-400">
+                      <div>Created: <span className="text-slate-300">{target.created_at ? new Date(target.created_at).toLocaleString() : 'Unknown'}</span></div>
+                      <div>Target ID: <code className="text-slate-300 break-all">{target.id}</code></div>
+                    </div>
+                    <FormField label="Config Snapshot">
+                      <pre className="text-xs text-slate-300 bg-slate-950/80 p-3 rounded-xl overflow-auto border border-slate-800">{prettyJSON(config)}</pre>
+                    </FormField>
+                    <FormField label="Schema Snapshot">
+                      <pre className="text-xs text-slate-300 bg-slate-950/80 p-3 rounded-xl overflow-auto border border-slate-800">{prettyJSON(schema)}</pre>
+                    </FormField>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => beginEditTarget(target)}
+                        className="px-3 py-1.5 rounded-lg border border-slate-700 text-xs text-slate-200 hover:bg-slate-900"
+                      >
+                        <Save size={12} className="inline mr-1" />
+                        Edit Integration
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => deleteTarget(target)}
+                        className="px-3 py-1.5 rounded-lg border border-red-900/60 text-xs text-red-300 hover:bg-red-950/40"
+                      >
+                        <Trash2 size={12} className="inline mr-1" />
+                        Delete
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+          {!targets.length && !loadingTargets && (
+            <p className="text-slate-500 text-center py-6">
+              No integrations saved yet. Create an OpenClaw or generic forward URL target above.
+            </p>
+          )}
+        </div>
+      </Panel>
+    </motion.div>
   );
 };
 
@@ -540,12 +1179,12 @@ const UrlsTab = ({ listeners, user, onRefresh, copied, setCopied }) => {
     if (!window.confirm(`Delete listener "${listener.listener_id}" (${listener.provider})? This will revoke all its secrets.`)) return;
     try {
       await apiRequest(`/v1/listeners/${listener.listener_id}?provider=${listener.provider}`, { method: 'DELETE' });
-      setListeners((prev) => prev.filter((l) => l.listener_id !== listener.listener_id || l.provider !== listener.provider));
       setSecretsHistory((prev) => {
         const next = { ...prev };
         delete next[`${listener.provider}:${listener.listener_id}`];
         return next;
       });
+      await onRefresh();
     } catch (err) {
       setError(`Failed to delete listener: ${err.message}`);
     }
@@ -1021,6 +1660,49 @@ const SkillsTab = ({ listeners, copied, setCopied, onRefreshListeners }) => {
     }
   };
 
+  const applySkillPack = async (packKey) => {
+    if (!selectedTypeKey || !selectedListener) return;
+    const pack = SKILL_PACKS[packKey];
+    if (!pack) return;
+    setPresetBusy(true);
+    setSkillNotice('');
+    try {
+      const existing = await fetchSkillsForType(selectedTypeKey, true);
+      const existingKeys = new Set(existing.map((skill) => skill.skill_key));
+      const toCreate = pack.skills.filter((skill) => !existingKeys.has(skill.skill_key));
+      if (!toCreate.length) {
+        setSkillNotice(`${pack.label} is already installed for this listener.`);
+        return;
+      }
+      await Promise.all(
+        toCreate.map((skill) =>
+          apiRequest('/api/policy/skills', {
+            method: 'POST',
+            body: JSON.stringify({
+              type_key: selectedTypeKey,
+              ...skill,
+            }),
+          }),
+        ),
+      );
+      const normalized = await fetchSkillsForType(selectedTypeKey, true);
+      setSkills(normalized);
+      setAllSkillsByType((current) => ({
+        ...current,
+        [selectedTypeKey]: normalized,
+      }));
+      setSkillCounts((current) => ({
+        ...current,
+        [selectedTypeKey]: normalized.length,
+      }));
+      setSkillNotice(`${pack.label} created for ${selectedListener.provider}.`);
+    } catch (err) {
+      setSkillNotice(err.message);
+    } finally {
+      setPresetBusy(false);
+    }
+  };
+
   const runClassify = async () => {
     setTestBusy(true);
     setClassifyResult('');
@@ -1200,7 +1882,7 @@ const SkillsTab = ({ listeners, copied, setCopied, onRefreshListeners }) => {
 
           <Panel
             title="Bootstrap Provider Skills"
-            subtitle="Create a sensible baseline automatically, then fine-tune prompts for specific message patterns."
+            subtitle="Create a sensible baseline automatically, then layer in channel-specific packs like WhatsApp, email, or GetApproval."
             action={<Wand2 size={18} className="text-primary" />}
           >
             {skillNotice && (
@@ -1215,6 +1897,32 @@ const SkillsTab = ({ listeners, copied, setCopied, onRefreshListeners }) => {
             >
               {presetBusy ? 'APPLYING...' : 'APPLY WEBHOOK PROCESSING PRESET'}
             </button>
+            <div className="grid grid-cols-1 gap-2 pt-2">
+              <button
+                onClick={() => applySkillPack('whatsapp')}
+                disabled={presetBusy || !selectedListener}
+                className="w-full flex items-center justify-center gap-2 bg-slate-950/60 border border-slate-800 text-white font-semibold py-2 rounded-lg text-sm active:scale-95 transition-transform disabled:opacity-50"
+              >
+                <MessageSquareQuote size={16} />
+                {presetBusy ? 'APPLYING...' : 'CREATE WHATSAPP SKILLS'}
+              </button>
+              <button
+                onClick={() => applySkillPack('email')}
+                disabled={presetBusy || !selectedListener}
+                className="w-full flex items-center justify-center gap-2 bg-slate-950/60 border border-slate-800 text-white font-semibold py-2 rounded-lg text-sm active:scale-95 transition-transform disabled:opacity-50"
+              >
+                <Mail size={16} />
+                {presetBusy ? 'APPLYING...' : 'CREATE EMAIL SKILLS'}
+              </button>
+              <button
+                onClick={() => applySkillPack('gate')}
+                disabled={presetBusy || !selectedListener}
+                className="w-full flex items-center justify-center gap-2 bg-slate-950/60 border border-slate-800 text-white font-semibold py-2 rounded-lg text-sm active:scale-95 transition-transform disabled:opacity-50"
+              >
+                <BadgeCheck size={16} />
+                {presetBusy ? 'APPLYING...' : 'CREATE GETAPPROVAL SKILLS'}
+              </button>
+            </div>
           </Panel>
 
           <Panel

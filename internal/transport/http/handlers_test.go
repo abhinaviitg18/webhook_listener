@@ -425,4 +425,50 @@ func TestCreateAndListForwardTargetsWithMetadata(t *testing.T) {
 	if targets[0]["purpose"] != "Primary CRM" {
 		t.Fatalf("expected purpose to round-trip, got %v", targets[0]["purpose"])
 	}
+
+	targetID, _ := created["id"].(string)
+	updateReq := []byte(`{"target_key":"openclaw_primary","target_type":"http","purpose":"OpenClaw intake","enabled":true,"allowed_actions":["forward_http","crm_upsert"],"config":{"url":"https://example.com/openclaw","headers":{"x-source":"agenthook"}}}`)
+	req3, _ := http.NewRequest(http.MethodPut, ts.URL+"/api/forward-targets/"+targetID, bytes.NewReader(updateReq))
+	req3.Header.Set("Authorization", "Bearer "+token)
+	req3.Header.Set("Content-Type", "application/json")
+	resp4, err := http.DefaultClient.Do(req3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp4.Body.Close()
+	if resp4.StatusCode != http.StatusOK {
+		t.Fatalf("update forward target status %d", resp4.StatusCode)
+	}
+	var updated map[string]interface{}
+	_ = json.NewDecoder(resp4.Body).Decode(&updated)
+	if updated["target_key"] != "openclaw_primary" {
+		t.Fatalf("expected updated target key, got %v", updated["target_key"])
+	}
+
+	req4, _ := http.NewRequest(http.MethodDelete, ts.URL+"/api/forward-targets/"+targetID, nil)
+	req4.Header.Set("Authorization", "Bearer "+token)
+	resp5, err := http.DefaultClient.Do(req4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp5.Body.Close()
+	if resp5.StatusCode != http.StatusOK {
+		t.Fatalf("delete forward target status %d", resp5.StatusCode)
+	}
+
+	req5, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/forward-targets", nil)
+	req5.Header.Set("Authorization", "Bearer "+token)
+	resp6, err := http.DefaultClient.Do(req5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp6.Body.Close()
+	if resp6.StatusCode != http.StatusOK {
+		t.Fatalf("list forward targets after delete status %d", resp6.StatusCode)
+	}
+	var afterDelete []map[string]interface{}
+	_ = json.NewDecoder(resp6.Body).Decode(&afterDelete)
+	if len(afterDelete) != 0 {
+		t.Fatalf("expected 0 forward targets after delete, got %d", len(afterDelete))
+	}
 }

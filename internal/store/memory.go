@@ -305,6 +305,30 @@ func (s *MemoryStore) ListForwardTargets(_ context.Context, accountID string) ([
 	return out, nil
 }
 
+func (s *MemoryStore) UpdateForwardTarget(_ context.Context, target domain.ForwardTarget) (domain.ForwardTarget, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	current, ok := s.targets[target.ID]
+	if !ok || current.AccountID != target.AccountID {
+		return domain.ForwardTarget{}, errors.New("forward target not found")
+	}
+	current.TargetType = target.TargetType
+	current.ConfigJSON = target.ConfigJSON
+	s.targets[target.ID] = current
+	return current, nil
+}
+
+func (s *MemoryStore) DeleteForwardTarget(_ context.Context, accountID, targetID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	target, ok := s.targets[targetID]
+	if !ok || target.AccountID != accountID {
+		return errors.New("forward target not found")
+	}
+	delete(s.targets, targetID)
+	return nil
+}
+
 func (s *MemoryStore) CreateEvent(_ context.Context, e domain.WebhookEvent) (domain.WebhookEvent, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

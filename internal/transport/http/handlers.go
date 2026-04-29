@@ -61,6 +61,8 @@ func NewRouter(h *Handler, verifier auth.RequestVerifier) http.Handler {
 		ar.Delete("/api/webhooks/secrets/{secretID}", h.DeleteSecret)
 		ar.Post("/api/forward-targets", h.CreateForwardTarget)
 		ar.Get("/api/forward-targets", h.ListForwardTargets)
+		ar.Put("/api/forward-targets/{targetID}", h.UpdateForwardTarget)
+		ar.Delete("/api/forward-targets/{targetID}", h.DeleteForwardTarget)
 		ar.Get("/api/events", h.ListEvents)
 		ar.Get("/api/events/by-tag", h.ListEventsByTag)
 		ar.Post("/api/events/{eventID}/re-run", h.ReprocessEvent)
@@ -650,6 +652,94 @@ func (h *Handler) ListForwardTargets(w http.ResponseWriter, r *http.Request) {
 		targets[i] = service.HydrateForwardTarget(targets[i])
 	}
 	writeJSON(w, http.StatusOK, targets)
+}
+
+func (h *Handler) UpdateForwardTarget(w http.ResponseWriter, r *http.Request) {
+	acct, ok := auth.AccountFromContext(r.Context())
+	if !ok {
+		writeErr(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	targetID := strings.TrimSpace(chi.URLParam(r, "targetID"))
+	if targetID == "" {
+		writeErr(w, http.StatusBadRequest, "targetID required")
+		return
+	}
+	var body struct {
+		TargetKey      string                 `json:"target_key"`
+		TargetType     string                 `json:"target_type"`
+		Purpose        string                 `json:"purpose"`
+		Enabled        *bool                  `json:"enabled"`
+		AllowedActions []string               `json:"allowed_actions"`
+		Schema         map[string]interface{} `json:"schema"`
+		Config         map[string]interface{} `json:"config"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid json")
+		return
+	}
+	targetType := strings.TrimSpace(body.TargetType)
+	if targetType == "" {
+		writeErr(w, http.StatusBadRequest, "target_type required")
+		return
+	}
+	targets, err := h.Store.ListForwardTargets(r.Context(), acct.ID)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	var existing domain.ForwardTarget
+	for _, candidate := range targets {
+		if candidate.ID == targetID {
+			existing = service.HydrateForwardTarget(candidate)
+			break
+		}
+	}
+	if existing.ID == "" {
+		writeErr(w, http.StatusNotFound, "forward target not found")
+		return
+	}
+	targetKey := strings.TrimSpace(body.TargetKey)
+	if targetKey == "" {
+		targetKey = existing.TargetKey
+	}
+	if targetKey == "" {
+		targetKey = strings.ToLower(targetType) + "-" + shortID()
+	}
+	enabled := existing.Enabled
+	if body.Enabled != nil {
+		enabled = *body.Enabled
+	}
+	configJSON := service.BuildIntegrationTargetConfig(targetKey, body.Purpose, enabled, body.AllowedActions, body.Schema, body.Config)
+	updated, err := h.Store.UpdateForwardTarget(r.Context(), domain.ForwardTarget{
+		ID:         targetID,
+		AccountID:  acct.ID,
+		TargetType: targetType,
+		ConfigJSON: configJSON,
+	})
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, service.HydrateForwardTarget(updated))
+}
+
+func (h *Handler) DeleteForwardTarget(w http.ResponseWriter, r *http.Request) {
+	acct, ok := auth.AccountFromContext(r.Context())
+	if !ok {
+		writeErr(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	targetID := strings.TrimSpace(chi.URLParam(r, "targetID"))
+	if targetID == "" {
+		writeErr(w, http.StatusBadRequest, "targetID required")
+		return
+	}
+	if err := h.Store.DeleteForwardTarget(r.Context(), acct.ID, targetID); err != nil {
+		writeErr(w, http.StatusNotFound, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"deleted": true, "target_id": targetID})
 }
 
 func (h *Handler) ListEvents(w http.ResponseWriter, r *http.Request) {
