@@ -27,9 +27,10 @@ type MemoryStore struct {
 	secretsByID  map[string]domain.WebhookSecret
 	secretByHash map[string]string
 
-	targets       map[string]domain.ForwardTarget
-	events        map[string]domain.WebhookEvent
-	eventBySource map[string]string
+	targets            map[string]domain.ForwardTarget
+	integrationSecrets map[string]domain.IntegrationSecret
+	events             map[string]domain.WebhookEvent
+	eventBySource      map[string]string
 
 	signatures map[string]domain.WebhookTypeSignature
 	transforms map[string]domain.WebhookTransform
@@ -43,22 +44,23 @@ type MemoryStore struct {
 
 func NewMemoryStore() *MemoryStore {
 	return &MemoryStore{
-		accountsByID:      map[string]domain.Account{},
-		accountsBySlug:    map[string]string{},
-		tokens:            map[string]string{},
-		typesByID:         map[string]domain.WebhookType{},
-		typesByAccountKey: map[string]string{},
-		secretsByID:       map[string]domain.WebhookSecret{},
-		secretByHash:      map[string]string{},
-		targets:           map[string]domain.ForwardTarget{},
-		events:            map[string]domain.WebhookEvent{},
-		eventBySource:     map[string]string{},
-		signatures:        map[string]domain.WebhookTypeSignature{},
-		transforms:        map[string]domain.WebhookTransform{},
-		runs:              map[string]domain.TransformRun{},
-		policiesByAccount: map[string]domain.MasterPromptPolicy{},
-		skills:            map[string]domain.WebhookSkill{},
-		autoStates:        map[string]domain.AutoPromoteState{},
+		accountsByID:       map[string]domain.Account{},
+		accountsBySlug:     map[string]string{},
+		tokens:             map[string]string{},
+		typesByID:          map[string]domain.WebhookType{},
+		typesByAccountKey:  map[string]string{},
+		secretsByID:        map[string]domain.WebhookSecret{},
+		secretByHash:       map[string]string{},
+		targets:            map[string]domain.ForwardTarget{},
+		integrationSecrets: map[string]domain.IntegrationSecret{},
+		events:             map[string]domain.WebhookEvent{},
+		eventBySource:      map[string]string{},
+		signatures:         map[string]domain.WebhookTypeSignature{},
+		transforms:         map[string]domain.WebhookTransform{},
+		runs:               map[string]domain.TransformRun{},
+		policiesByAccount:  map[string]domain.MasterPromptPolicy{},
+		skills:             map[string]domain.WebhookSkill{},
+		autoStates:         map[string]domain.AutoPromoteState{},
 	}
 }
 
@@ -327,6 +329,87 @@ func (s *MemoryStore) DeleteForwardTarget(_ context.Context, accountID, targetID
 	}
 	delete(s.targets, targetID)
 	return nil
+}
+
+func (s *MemoryStore) CreateIntegrationSecret(_ context.Context, secret domain.IntegrationSecret) (domain.IntegrationSecret, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if secret.ID == "" {
+		secret.ID = uuid.NewString()
+	}
+	secret.CreatedAt = time.Now().UTC()
+	secret.UpdatedAt = secret.CreatedAt
+	for _, existing := range s.integrationSecrets {
+		if existing.AccountID == secret.AccountID && strings.EqualFold(existing.SecretKey, secret.SecretKey) {
+			return domain.IntegrationSecret{}, errors.New("integration secret key already exists")
+		}
+	}
+	s.integrationSecrets[secret.ID] = secret
+	secret.SecretValue = ""
+	return secret, nil
+}
+
+func (s *MemoryStore) ListIntegrationSecrets(_ context.Context, accountID string) ([]domain.IntegrationSecret, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := []domain.IntegrationSecret{}
+	for _, secret := range s.integrationSecrets {
+		if secret.AccountID != accountID {
+			continue
+		}
+		secret.SecretValue = ""
+		out = append(out, secret)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.Before(out[j].CreatedAt) })
+	return out, nil
+}
+
+func (s *MemoryStore) UpdateIntegrationSecret(_ context.Context, secret domain.IntegrationSecret) (domain.IntegrationSecret, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	current, ok := s.integrationSecrets[secret.ID]
+	if !ok || current.AccountID != secret.AccountID {
+		return domain.IntegrationSecret{}, errors.New("integration secret not found")
+	}
+	for id, existing := range s.integrationSecrets {
+		if id == secret.ID {
+			continue
+		}
+		if existing.AccountID == secret.AccountID && strings.EqualFold(existing.SecretKey, secret.SecretKey) {
+			return domain.IntegrationSecret{}, errors.New("integration secret key already exists")
+		}
+	}
+	current.SecretKey = secret.SecretKey
+	current.Purpose = secret.Purpose
+	if strings.TrimSpace(secret.SecretValue) != "" {
+		current.SecretValue = secret.SecretValue
+	}
+	current.UpdatedAt = time.Now().UTC()
+	s.integrationSecrets[secret.ID] = current
+	current.SecretValue = ""
+	return current, nil
+}
+
+func (s *MemoryStore) DeleteIntegrationSecret(_ context.Context, accountID, secretID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	secret, ok := s.integrationSecrets[secretID]
+	if !ok || secret.AccountID != accountID {
+		return errors.New("integration secret not found")
+	}
+	delete(s.integrationSecrets, secretID)
+	return nil
+}
+
+func (s *MemoryStore) ResolveIntegrationSecretValue(_ context.Context, accountID, secretKey string) (string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, secret := range s.integrationSecrets {
+		if secret.AccountID == accountID && strings.EqualFold(secret.SecretKey, secretKey) {
+			return secret.SecretValue, nil
+		}
+	}
+	return "", errors.New("integration secret not found")
 }
 
 func (s *MemoryStore) CreateEvent(_ context.Context, e domain.WebhookEvent) (domain.WebhookEvent, error) {

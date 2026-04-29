@@ -558,7 +558,7 @@ func TestProcessor_RouterSelectsSkillAndStructuredIntegrationAction(t *testing.T
 		Priority:        10,
 		Enabled:         true,
 	})
-	_, _ = st.CreateForwardTarget(context.Background(), acct.ID, "http", BuildIntegrationTargetConfig("hubspot_primary", "Primary CRM", true, []string{"crm_upsert"}, nil, map[string]interface{}{"url": "https://example.com/hubspot"}))
+	_, _ = st.CreateForwardTarget(context.Background(), acct.ID, "http", BuildIntegrationTargetConfig("hubspot_primary", "Primary CRM", true, []string{"crm_upsert"}, nil, map[string]interface{}{"url": "https://example.com/hubspot"}, IntegrationTargetAuthConfig{}, nil, nil))
 	llm := &stagedLLM{}
 	exec := &fakeExec{}
 	p := &Processor{Store: st, Pinecone: fakePinecone{}, LLM: llm, Executor: exec}
@@ -596,7 +596,7 @@ func TestProcessor_InvalidStructuredIntegrationFallsBackToManualReview(t *testin
 		Priority:        10,
 		Enabled:         true,
 	})
-	_, _ = st.CreateForwardTarget(context.Background(), acct.ID, "http", BuildIntegrationTargetConfig("hubspot_primary", "Primary CRM", true, []string{"crm_upsert"}, nil, map[string]interface{}{"url": "https://example.com/hubspot"}))
+	_, _ = st.CreateForwardTarget(context.Background(), acct.ID, "http", BuildIntegrationTargetConfig("hubspot_primary", "Primary CRM", true, []string{"crm_upsert"}, nil, map[string]interface{}{"url": "https://example.com/hubspot"}, IntegrationTargetAuthConfig{}, nil, nil))
 	exec := &fakeExec{}
 	p := &Processor{Store: st, Pinecone: fakePinecone{}, LLM: invalidIntegrationLLM{}, Executor: exec}
 	payload := `{"subject":"New enterprise lead from Acme Corp","message":{"text":"Need a hiring automation demo"}}`

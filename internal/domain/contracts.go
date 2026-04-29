@@ -27,6 +27,11 @@ type Store interface {
 	ListForwardTargets(ctx context.Context, accountID string) ([]ForwardTarget, error)
 	UpdateForwardTarget(ctx context.Context, target ForwardTarget) (ForwardTarget, error)
 	DeleteForwardTarget(ctx context.Context, accountID, targetID string) error
+	CreateIntegrationSecret(ctx context.Context, secret IntegrationSecret) (IntegrationSecret, error)
+	ListIntegrationSecrets(ctx context.Context, accountID string) ([]IntegrationSecret, error)
+	UpdateIntegrationSecret(ctx context.Context, secret IntegrationSecret) (IntegrationSecret, error)
+	DeleteIntegrationSecret(ctx context.Context, accountID, secretID string) error
+	ResolveIntegrationSecretValue(ctx context.Context, accountID, secretKey string) (string, error)
 
 	CreateEvent(ctx context.Context, event WebhookEvent) (WebhookEvent, error)
 	UpdateEventStatus(ctx context.Context, eventID, status, action string) error

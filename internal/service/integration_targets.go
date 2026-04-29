@@ -9,13 +9,25 @@ import (
 	"agenthook.store/internal/domain"
 )
 
+type IntegrationTargetAuthConfig struct {
+	Type       string `json:"type,omitempty"`
+	SecretRef  string `json:"secret_ref,omitempty"`
+	HeaderName string `json:"header_name,omitempty"`
+	Prefix     string `json:"prefix,omitempty"`
+	QueryParam string `json:"query_param,omitempty"`
+	EnvVar     string `json:"env_var,omitempty"`
+}
+
 type integrationTargetConfig struct {
-	TargetKey      string                 `json:"target_key"`
-	Purpose        string                 `json:"purpose"`
-	Enabled        *bool                  `json:"enabled,omitempty"`
-	AllowedActions []string               `json:"allowed_actions,omitempty"`
-	Schema         map[string]interface{} `json:"schema,omitempty"`
-	Config         map[string]interface{} `json:"config,omitempty"`
+	TargetKey        string                      `json:"target_key"`
+	Purpose          string                      `json:"purpose"`
+	Enabled          *bool                       `json:"enabled,omitempty"`
+	AllowedActions   []string                    `json:"allowed_actions,omitempty"`
+	Schema           map[string]interface{}      `json:"schema,omitempty"`
+	Config           map[string]interface{}      `json:"config,omitempty"`
+	Auth             IntegrationTargetAuthConfig `json:"auth,omitempty"`
+	HeaderSecretRefs map[string]string           `json:"header_secret_refs,omitempty"`
+	HeaderEnvRefs    map[string]string           `json:"header_env_refs,omitempty"`
 }
 
 var allowedActionFamilies = map[string]struct{}{
@@ -60,17 +72,26 @@ func parseIntegrationTargetConfig(targetType, raw string) integrationTargetConfi
 	if cfg.Config == nil {
 		cfg.Config = map[string]interface{}{}
 	}
+	if cfg.HeaderSecretRefs == nil {
+		cfg.HeaderSecretRefs = map[string]string{}
+	}
+	if cfg.HeaderEnvRefs == nil {
+		cfg.HeaderEnvRefs = map[string]string{}
+	}
 	return cfg
 }
 
-func BuildIntegrationTargetConfig(targetKey, purpose string, enabled bool, allowedActions []string, schema map[string]interface{}, config map[string]interface{}) string {
+func BuildIntegrationTargetConfig(targetKey, purpose string, enabled bool, allowedActions []string, schema map[string]interface{}, config map[string]interface{}, auth IntegrationTargetAuthConfig, headerSecretRefs map[string]string, headerEnvRefs map[string]string) string {
 	payload := integrationTargetConfig{
-		TargetKey:      strings.TrimSpace(targetKey),
-		Purpose:        strings.TrimSpace(purpose),
-		Enabled:        &enabled,
-		AllowedActions: allowedActions,
-		Schema:         schema,
-		Config:         config,
+		TargetKey:        strings.TrimSpace(targetKey),
+		Purpose:          strings.TrimSpace(purpose),
+		Enabled:          &enabled,
+		AllowedActions:   allowedActions,
+		Schema:           schema,
+		Config:           config,
+		Auth:             auth,
+		HeaderSecretRefs: headerSecretRefs,
+		HeaderEnvRefs:    headerEnvRefs,
 	}
 	b, _ := json.Marshal(payload)
 	return string(b)

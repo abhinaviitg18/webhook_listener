@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -31,36 +33,38 @@ func shouldSkipTransform(ctx context.Context) bool {
 }
 
 type ActionService struct {
-	Telegram *integrations.TelegramClient
-	Client   *http.Client
+	Telegram  *integrations.TelegramClient
+	Client    *http.Client
+	Store     domain.Store
+	LookupEnv func(string) (string, bool)
 }
 
 func NewActionService(telegram *integrations.TelegramClient) *ActionService {
-	return &ActionService{Telegram: telegram, Client: &http.Client{Timeout: 5 * time.Second}}
+	return &ActionService{Telegram: telegram, Client: &http.Client{Timeout: 5 * time.Second}, LookupEnv: os.LookupEnv}
 }
 
 func (a *ActionService) AvailableActions() []string {
 	return []string{"store_mysql", "forward_http", "forward_telegram", "slack_notify", "crm_upsert", "ticket_create", "no_action", "manual_review"}
 }
 
-func (a *ActionService) Execute(ctx context.Context, action domain.ProcessDecision, _ domain.Account, event domain.WebhookEvent, targets []domain.ForwardTarget) error {
+func (a *ActionService) Execute(ctx context.Context, action domain.ProcessDecision, account domain.Account, event domain.WebhookEvent, targets []domain.ForwardTarget) error {
 	switch action.ActionName {
 	case "store_mysql", "no_action", "manual_review":
 		return nil
 	case "forward_http":
-		return a.forwardHTTP(ctx, action, event, targets)
+		return a.forwardHTTP(ctx, action, account, event, targets)
 	case "forward_telegram":
-		return a.forwardTelegram(ctx, action, event, targets)
+		return a.forwardTelegram(ctx, action, account, event, targets)
 	case "slack_notify":
-		return a.notifyIntegration(ctx, action, event, targets)
+		return a.notifyIntegration(ctx, action, account, event, targets)
 	case "crm_upsert", "ticket_create":
-		return a.postStructuredIntegration(ctx, action, event, targets)
+		return a.postStructuredIntegration(ctx, action, account, event, targets)
 	default:
 		return fmt.Errorf("unknown action: %s", action.ActionName)
 	}
 }
 
-func (a *ActionService) forwardHTTP(ctx context.Context, action domain.ProcessDecision, event domain.WebhookEvent, targets []domain.ForwardTarget) error {
+func (a *ActionService) forwardHTTP(ctx context.Context, action domain.ProcessDecision, account domain.Account, event domain.WebhookEvent, targets []domain.ForwardTarget) error {
 	payload := event.PayloadJSON
 	targetKey, _ := action.Params["integration_target_key"].(string)
 	targetKey = strings.TrimSpace(targetKey)
@@ -69,21 +73,21 @@ func (a *ActionService) forwardHTTP(ctx context.Context, action domain.ProcessDe
 		if !ok {
 			return fmt.Errorf("integration target not found: %s", targetKey)
 		}
-		return a.postJSONToHTTP(ctx, HydrateForwardTarget(target), payload)
+		return a.postJSONToHTTP(ctx, account, event, HydrateForwardTarget(target), payload)
 	}
 	for _, t := range targets {
 		target := HydrateForwardTarget(t)
 		if target.TargetType != "http" || !target.Enabled {
 			continue
 		}
-		if err := a.postJSONToHTTP(ctx, target, payload); err != nil {
+		if err := a.postJSONToHTTP(ctx, account, event, target, payload); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (a *ActionService) forwardTelegram(ctx context.Context, action domain.ProcessDecision, event domain.WebhookEvent, targets []domain.ForwardTarget) error {
+func (a *ActionService) forwardTelegram(ctx context.Context, action domain.ProcessDecision, account domain.Account, event domain.WebhookEvent, targets []domain.ForwardTarget) error {
 	if a.Telegram == nil {
 		return fmt.Errorf("telegram client unavailable")
 	}
@@ -95,7 +99,7 @@ func (a *ActionService) forwardTelegram(ctx context.Context, action domain.Proce
 			if target.TargetType != "telegram" || !target.Enabled {
 				continue
 			}
-			if err := a.sendTelegramMessage(ctx, target, buildIntegrationEnvelope(action, event)); err != nil {
+			if err := a.sendTelegramMessage(ctx, account, event, target, buildIntegrationEnvelope(action, event)); err != nil {
 				return err
 			}
 		}
@@ -105,10 +109,10 @@ func (a *ActionService) forwardTelegram(ctx context.Context, action domain.Proce
 	if !ok {
 		return fmt.Errorf("integration target not found: %s", targetKey)
 	}
-	return a.sendTelegramMessage(ctx, HydrateForwardTarget(target), buildIntegrationEnvelope(action, event))
+	return a.sendTelegramMessage(ctx, account, event, HydrateForwardTarget(target), buildIntegrationEnvelope(action, event))
 }
 
-func (a *ActionService) notifyIntegration(ctx context.Context, action domain.ProcessDecision, event domain.WebhookEvent, targets []domain.ForwardTarget) error {
+func (a *ActionService) notifyIntegration(ctx context.Context, action domain.ProcessDecision, account domain.Account, event domain.WebhookEvent, targets []domain.ForwardTarget) error {
 	targetKey, _ := action.Params["integration_target_key"].(string)
 	target, ok := resolveIntegrationTarget(targets, strings.TrimSpace(targetKey), action.ActionName)
 	if !ok {
@@ -118,15 +122,15 @@ func (a *ActionService) notifyIntegration(ctx context.Context, action domain.Pro
 	message := buildNotificationMessage(action, event)
 	switch target.TargetType {
 	case "telegram":
-		return a.sendTelegramMessage(ctx, target, message)
+		return a.sendTelegramMessage(ctx, account, event, target, message)
 	case "http":
-		return a.postJSONToHTTP(ctx, target, buildIntegrationEnvelope(action, event))
+		return a.postJSONToHTTP(ctx, account, event, target, buildIntegrationEnvelope(action, event))
 	default:
 		return fmt.Errorf("unsupported target type for slack_notify: %s", target.TargetType)
 	}
 }
 
-func (a *ActionService) postStructuredIntegration(ctx context.Context, action domain.ProcessDecision, event domain.WebhookEvent, targets []domain.ForwardTarget) error {
+func (a *ActionService) postStructuredIntegration(ctx context.Context, action domain.ProcessDecision, account domain.Account, event domain.WebhookEvent, targets []domain.ForwardTarget) error {
 	targetKey, _ := action.Params["integration_target_key"].(string)
 	target, ok := resolveIntegrationTarget(targets, strings.TrimSpace(targetKey), action.ActionName)
 	if !ok {
@@ -136,15 +140,19 @@ func (a *ActionService) postStructuredIntegration(ctx context.Context, action do
 	if target.TargetType != "http" {
 		return fmt.Errorf("structured integration target must be http, got %s", target.TargetType)
 	}
-	return a.postJSONToHTTP(ctx, target, buildIntegrationEnvelope(action, event))
+	return a.postJSONToHTTP(ctx, account, event, target, buildIntegrationEnvelope(action, event))
 }
 
-func (a *ActionService) sendTelegramMessage(ctx context.Context, target domain.ForwardTarget, text string) error {
+func (a *ActionService) sendTelegramMessage(ctx context.Context, account domain.Account, event domain.WebhookEvent, target domain.ForwardTarget, text string) error {
 	if a.Telegram == nil {
 		return fmt.Errorf("telegram client unavailable")
 	}
 	cfg := parseIntegrationTargetConfig(target.TargetType, target.ConfigJSON)
-	chatID, _ := cfg.Config["chat_id"].(string)
+	resolved, err := a.resolveTargetConfig(ctx, account, event, target, cfg)
+	if err != nil {
+		return err
+	}
+	chatID, _ := resolved["chat_id"].(string)
 	chatID = strings.TrimSpace(chatID)
 	if chatID == "" {
 		return fmt.Errorf("telegram target %s missing chat_id", target.TargetKey)
@@ -155,24 +163,261 @@ func (a *ActionService) sendTelegramMessage(ctx context.Context, target domain.F
 	return a.Telegram.SendMessage(ctx, chatID, text)
 }
 
-func (a *ActionService) postJSONToHTTP(ctx context.Context, target domain.ForwardTarget, payload string) error {
+func (a *ActionService) postJSONToHTTP(ctx context.Context, account domain.Account, event domain.WebhookEvent, target domain.ForwardTarget, payload string) error {
 	cfg := parseIntegrationTargetConfig(target.TargetType, target.ConfigJSON)
-	url, _ := cfg.Config["url"].(string)
-	url = strings.TrimSpace(url)
-	if url == "" {
-		return fmt.Errorf("http target %s missing url", target.TargetKey)
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, strings.NewReader(payload))
+	req, err := a.buildHTTPRequest(ctx, account, event, target, cfg, payload)
 	if err != nil {
 		return err
 	}
-	req.Header.Set("Content-Type", "application/json")
 	resp, err := a.Client.Do(req)
 	if err != nil {
 		return err
 	}
 	_ = resp.Body.Close()
 	return nil
+}
+
+func (a *ActionService) buildHTTPRequest(ctx context.Context, account domain.Account, event domain.WebhookEvent, target domain.ForwardTarget, cfg integrationTargetConfig, payload string) (*http.Request, error) {
+	resolvedConfig, err := a.resolveTargetConfig(ctx, account, event, target, cfg)
+	if err != nil {
+		return nil, err
+	}
+	rawURL, _ := resolvedConfig["url"].(string)
+	rawURL = strings.TrimSpace(rawURL)
+	if rawURL == "" {
+		return nil, fmt.Errorf("http target %s missing url", target.TargetKey)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, rawURL, strings.NewReader(payload))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if headers, ok := resolvedConfig["headers"].(map[string]interface{}); ok {
+		for key, raw := range headers {
+			value, _ := raw.(string)
+			value = strings.TrimSpace(value)
+			if value == "" {
+				continue
+			}
+			resolvedValue, rErr := a.resolveLegacyHeaderTemplate(target, value)
+			if rErr != nil {
+				return nil, rErr
+			}
+			req.Header.Set(key, resolvedValue)
+		}
+	}
+	if err := a.applyAuthToRequest(ctx, req, account, event, target, cfg); err != nil {
+		return nil, err
+	}
+	return req, nil
+}
+
+func (a *ActionService) resolveTargetConfig(ctx context.Context, account domain.Account, event domain.WebhookEvent, target domain.ForwardTarget, cfg integrationTargetConfig) (map[string]interface{}, error) {
+	resolved := map[string]interface{}{}
+	for key, value := range cfg.Config {
+		resolved[key] = value
+	}
+	for headerName, secretRef := range cfg.HeaderSecretRefs {
+		value, source, err := a.resolveSecretValue(ctx, account, event, target, strings.TrimSpace(secretRef), "")
+		if err != nil {
+			log.Printf("integration.secret_resolution target_key=%s target_type=%s deployment_mode=%s source_kind=secret_ref status=failed reason=%v", target.TargetKey, target.TargetType, deploymentModeFromTypeKey(event.TypeKey), err)
+			return nil, err
+		}
+		headers := getOrCreateConfigMap(resolved, "headers")
+		headers[headerName] = value
+		log.Printf("integration.secret_resolution target_key=%s target_type=%s deployment_mode=%s source_kind=%s status=resolved reason=header_secret_ref", target.TargetKey, target.TargetType, deploymentModeFromTypeKey(event.TypeKey), source)
+	}
+	for headerName, envVar := range cfg.HeaderEnvRefs {
+		value, ok := a.lookupEnv(strings.TrimSpace(envVar))
+		if !ok || strings.TrimSpace(value) == "" {
+			log.Printf("integration.secret_resolution target_key=%s target_type=%s deployment_mode=%s source_kind=env status=failed reason=missing_env_var", target.TargetKey, target.TargetType, deploymentModeFromTypeKey(event.TypeKey))
+			return nil, fmt.Errorf("env var %s not found for header %s", envVar, headerName)
+		}
+		headers := getOrCreateConfigMap(resolved, "headers")
+		headers[headerName] = value
+		log.Printf("integration.secret_resolution target_key=%s target_type=%s deployment_mode=%s source_kind=explicit_env status=resolved reason=header_env_ref", target.TargetKey, target.TargetType, deploymentModeFromTypeKey(event.TypeKey))
+	}
+	return resolved, nil
+}
+
+func (a *ActionService) applyAuthToRequest(ctx context.Context, req *http.Request, account domain.Account, event domain.WebhookEvent, target domain.ForwardTarget, cfg integrationTargetConfig) error {
+	authType := strings.TrimSpace(strings.ToLower(cfg.Auth.Type))
+	if authType == "" {
+		return nil
+	}
+	value, source, err := a.resolveSecretValue(ctx, account, event, target, strings.TrimSpace(cfg.Auth.SecretRef), strings.TrimSpace(cfg.Auth.EnvVar))
+	if err != nil {
+		log.Printf("integration.secret_resolution target_key=%s target_type=%s deployment_mode=%s source_kind=auth status=failed reason=%v", target.TargetKey, target.TargetType, deploymentModeFromTypeKey(event.TypeKey), err)
+		return err
+	}
+	switch authType {
+	case "bearer_header":
+		headerName := strings.TrimSpace(cfg.Auth.HeaderName)
+		if headerName == "" {
+			headerName = "Authorization"
+		}
+		prefix := cfg.Auth.Prefix
+		if prefix == "" {
+			prefix = "Bearer "
+		}
+		req.Header.Set(headerName, prefix+value)
+	case "custom_header":
+		headerName := strings.TrimSpace(cfg.Auth.HeaderName)
+		if headerName == "" {
+			return fmt.Errorf("custom_header auth requires header_name")
+		}
+		req.Header.Set(headerName, cfg.Auth.Prefix+value)
+	case "query_param":
+		param := strings.TrimSpace(cfg.Auth.QueryParam)
+		if param == "" {
+			return fmt.Errorf("query_param auth requires query_param")
+		}
+		u, err := url.Parse(req.URL.String())
+		if err != nil {
+			return err
+		}
+		q := u.Query()
+		q.Set(param, value)
+		u.RawQuery = q.Encode()
+		req.URL = u
+	default:
+		return fmt.Errorf("unsupported auth type: %s", authType)
+	}
+	log.Printf("integration.secret_resolution target_key=%s target_type=%s deployment_mode=%s source_kind=%s status=resolved reason=auth", target.TargetKey, target.TargetType, deploymentModeFromTypeKey(event.TypeKey), source)
+	return nil
+}
+
+func (a *ActionService) resolveSecretValue(ctx context.Context, account domain.Account, event domain.WebhookEvent, target domain.ForwardTarget, secretRef, explicitEnvVar string) (string, string, error) {
+	if strings.TrimSpace(secretRef) != "" && a.Store != nil {
+		value, err := a.Store.ResolveIntegrationSecretValue(ctx, account.ID, secretRef)
+		if err == nil && strings.TrimSpace(value) != "" {
+			return value, "secret_ref", nil
+		}
+	}
+	if deploymentModeFromTypeKey(event.TypeKey) == "single_tenant" {
+		for _, candidate := range envFallbackCandidates(event.TypeKey, target, secretRef) {
+			if value, ok := a.lookupEnv(candidate); ok && strings.TrimSpace(value) != "" {
+				return value, "env_fallback", nil
+			}
+		}
+	}
+	if strings.TrimSpace(explicitEnvVar) != "" {
+		if value, ok := a.lookupEnv(strings.TrimSpace(explicitEnvVar)); ok && strings.TrimSpace(value) != "" {
+			return value, "explicit_env", nil
+		}
+	}
+	if strings.TrimSpace(secretRef) != "" {
+		return "", "", fmt.Errorf("missing_secret_ref")
+	}
+	if strings.TrimSpace(explicitEnvVar) != "" {
+		return "", "", fmt.Errorf("missing_env_var")
+	}
+	return "", "", fmt.Errorf("missing_auth_secret")
+}
+
+func (a *ActionService) resolveLegacyHeaderTemplate(target domain.ForwardTarget, value string) (string, error) {
+	if !strings.Contains(value, "${") {
+		return value, nil
+	}
+	start := strings.Index(value, "${")
+	end := strings.Index(value[start:], "}")
+	if start < 0 || end <= 1 {
+		return value, nil
+	}
+	end = start + end
+	envVar := strings.TrimSpace(value[start+2 : end])
+	envValue, ok := a.lookupEnv(envVar)
+	if !ok || strings.TrimSpace(envValue) == "" {
+		return "", fmt.Errorf("env var %s not found for legacy header template on %s", envVar, target.TargetKey)
+	}
+	return strings.ReplaceAll(value, "${"+envVar+"}", envValue), nil
+}
+
+func (a *ActionService) lookupEnv(key string) (string, bool) {
+	if a.LookupEnv == nil {
+		return os.LookupEnv(key)
+	}
+	return a.LookupEnv(key)
+}
+
+func getOrCreateConfigMap(config map[string]interface{}, key string) map[string]interface{} {
+	if existing, ok := config[key].(map[string]interface{}); ok {
+		return existing
+	}
+	next := map[string]interface{}{}
+	config[key] = next
+	return next
+}
+
+func deploymentModeFromTypeKey(typeKey string) string {
+	parts := strings.Split(strings.TrimSpace(typeKey), "::")
+	if len(parts) >= 4 {
+		mode := strings.TrimSpace(strings.ToLower(parts[len(parts)-1]))
+		if mode == "single_tenant" {
+			return "single_tenant"
+		}
+	}
+	return "multitenant"
+}
+
+func envFallbackCandidates(typeKey string, target domain.ForwardTarget, secretRef string) []string {
+	provider := ""
+	parts := strings.Split(strings.TrimSpace(typeKey), "::")
+	if len(parts) >= 2 {
+		provider = parts[1]
+	}
+	candidates := []string{}
+	appendCandidate := func(raw string) {
+		raw = normalizeEnvKey(raw)
+		if raw == "" {
+			return
+		}
+		for _, suffix := range []string{"API_KEY", "TOKEN"} {
+			candidate := raw
+			if !strings.HasSuffix(candidate, "_"+suffix) {
+				candidate = candidate + "_" + suffix
+			}
+			for _, existing := range candidates {
+				if existing == candidate {
+					return
+				}
+			}
+			candidates = append(candidates, candidate)
+		}
+	}
+	appendCandidate(secretRef)
+	appendCandidate(target.TargetKey)
+	appendCandidate(trimCommonTargetSuffix(target.TargetKey))
+	appendCandidate(target.TargetType)
+	appendCandidate(provider)
+	return candidates
+}
+
+func normalizeEnvKey(raw string) string {
+	raw = strings.TrimSpace(strings.ToUpper(raw))
+	if raw == "" {
+		return ""
+	}
+	replacer := strings.NewReplacer("-", "_", " ", "_", ".", "_", ":", "_")
+	raw = replacer.Replace(raw)
+	for strings.Contains(raw, "__") {
+		raw = strings.ReplaceAll(raw, "__", "_")
+	}
+	return strings.Trim(raw, "_")
+}
+
+func trimCommonTargetSuffix(raw string) string {
+	parts := strings.Split(normalizeEnvKey(raw), "_")
+	if len(parts) <= 1 {
+		return normalizeEnvKey(raw)
+	}
+	last := parts[len(parts)-1]
+	switch last {
+	case "PRIMARY", "DEFAULT", "PROD", "PRODUCTION", "STAGING", "DEV":
+		return strings.Join(parts[:len(parts)-1], "_")
+	default:
+		return strings.Join(parts, "_")
+	}
 }
 
 func buildIntegrationEnvelope(action domain.ProcessDecision, event domain.WebhookEvent) string {

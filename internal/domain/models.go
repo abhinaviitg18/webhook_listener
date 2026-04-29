@@ -48,6 +48,16 @@ type ForwardTarget struct {
 	CreatedAt          time.Time `json:"created_at"`
 }
 
+type IntegrationSecret struct {
+	ID          string    `json:"id"`
+	AccountID   string    `json:"account_id"`
+	SecretKey   string    `json:"secret_key"`
+	Purpose     string    `json:"purpose,omitempty"`
+	SecretValue string    `json:"-"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
 type WebhookEvent struct {
 	ID             string    `json:"id"`
 	AccountID      string    `json:"account_id"`

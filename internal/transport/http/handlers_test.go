@@ -389,7 +389,7 @@ func TestCreateAndListForwardTargetsWithMetadata(t *testing.T) {
 	_ = json.NewDecoder(resp.Body).Decode(&reg)
 	token := reg["token"].(string)
 
-	targetReq := []byte(`{"target_key":"hubspot_primary","target_type":"http","purpose":"Primary CRM","enabled":true,"allowed_actions":["crm_upsert"],"config":{"url":"https://example.com/hubspot"}}`)
+	targetReq := []byte(`{"target_key":"hubspot_primary","target_type":"http","purpose":"Primary CRM","enabled":true,"allowed_actions":["crm_upsert"],"auth":{"type":"bearer_header","secret_ref":"hubspot_api_key","header_name":"Authorization","prefix":"Bearer "},"config":{"url":"https://example.com/hubspot"}}`)
 	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/forward-targets", bytes.NewReader(targetReq))
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Content-Type", "application/json")
@@ -405,6 +405,10 @@ func TestCreateAndListForwardTargetsWithMetadata(t *testing.T) {
 	_ = json.NewDecoder(resp2.Body).Decode(&created)
 	if created["target_key"] != "hubspot_primary" {
 		t.Fatalf("expected target_key hubspot_primary, got %v", created["target_key"])
+	}
+	configJSON, _ := created["config_json"].(string)
+	if !strings.Contains(configJSON, `"secret_ref":"hubspot_api_key"`) {
+		t.Fatalf("expected auth secret ref in config json, got %s", configJSON)
 	}
 
 	req2, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/forward-targets", nil)
@@ -470,5 +474,94 @@ func TestCreateAndListForwardTargetsWithMetadata(t *testing.T) {
 	_ = json.NewDecoder(resp6.Body).Decode(&afterDelete)
 	if len(afterDelete) != 0 {
 		t.Fatalf("expected 0 forward targets after delete, got %d", len(afterDelete))
+	}
+}
+
+func TestCreateAndRotateIntegrationSecrets(t *testing.T) {
+	st := store.NewMemoryStore()
+	proc := &service.Processor{Store: st, Pinecone: integrations.NewPineconeClient("", "", "default"), LLM: integrations.NewLLMClient("", "", "", ""), Executor: service.NewActionService(nil)}
+	h := &Handler{Store: st, Processor: proc}
+	r := NewRouter(h, auth.TokenVerifier{Store: st})
+	ts := httptest.NewServer(r)
+	defer ts.Close()
+
+	regBody := []byte(`{"email":"7204909316@agentmail.to"}`)
+	resp, err := http.Post(ts.URL+"/api/register/email", "application/json", bytes.NewReader(regBody))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var reg map[string]interface{}
+	_ = json.NewDecoder(resp.Body).Decode(&reg)
+	token := reg["token"].(string)
+
+	createReq := []byte(`{"secret_key":"openclaw_api_key","purpose":"OpenClaw token","secret_value":"super-secret-token"}`)
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/integration-secrets", bytes.NewReader(createReq))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	resp2, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp2.Body.Close()
+	if resp2.StatusCode != http.StatusCreated {
+		t.Fatalf("create integration secret status %d", resp2.StatusCode)
+	}
+	var created map[string]interface{}
+	_ = json.NewDecoder(resp2.Body).Decode(&created)
+	if created["secret_value"] != nil {
+		t.Fatalf("secret value should never be returned")
+	}
+	secretID, _ := created["id"].(string)
+
+	req2, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/integration-secrets", nil)
+	req2.Header.Set("Authorization", "Bearer "+token)
+	resp3, err := http.DefaultClient.Do(req2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp3.Body.Close()
+	if resp3.StatusCode != http.StatusOK {
+		t.Fatalf("list integration secrets status %d", resp3.StatusCode)
+	}
+	var secrets []map[string]interface{}
+	_ = json.NewDecoder(resp3.Body).Decode(&secrets)
+	if len(secrets) != 1 {
+		t.Fatalf("expected 1 secret, got %d", len(secrets))
+	}
+	if secrets[0]["secret_key"] != "openclaw_api_key" {
+		t.Fatalf("expected secret key to round-trip, got %v", secrets[0]["secret_key"])
+	}
+
+	updateReq := []byte(`{"secret_key":"openclaw_api_key","purpose":"Rotated","secret_value":"rotated-secret-token"}`)
+	req3, _ := http.NewRequest(http.MethodPut, ts.URL+"/api/integration-secrets/"+secretID, bytes.NewReader(updateReq))
+	req3.Header.Set("Authorization", "Bearer "+token)
+	req3.Header.Set("Content-Type", "application/json")
+	resp4, err := http.DefaultClient.Do(req3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp4.Body.Close()
+	if resp4.StatusCode != http.StatusOK {
+		t.Fatalf("update integration secret status %d", resp4.StatusCode)
+	}
+
+	resolved, err := st.ResolveIntegrationSecretValue(context.Background(), secrets[0]["account_id"].(string), "openclaw_api_key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved != "rotated-secret-token" {
+		t.Fatalf("expected rotated secret value to persist, got %q", resolved)
+	}
+
+	req4, _ := http.NewRequest(http.MethodDelete, ts.URL+"/api/integration-secrets/"+secretID, nil)
+	req4.Header.Set("Authorization", "Bearer "+token)
+	resp5, err := http.DefaultClient.Do(req4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp5.Body.Close()
+	if resp5.StatusCode != http.StatusOK {
+		t.Fatalf("delete integration secret status %d", resp5.StatusCode)
 	}
 }

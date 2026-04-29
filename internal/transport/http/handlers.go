@@ -63,6 +63,10 @@ func NewRouter(h *Handler, verifier auth.RequestVerifier) http.Handler {
 		ar.Get("/api/forward-targets", h.ListForwardTargets)
 		ar.Put("/api/forward-targets/{targetID}", h.UpdateForwardTarget)
 		ar.Delete("/api/forward-targets/{targetID}", h.DeleteForwardTarget)
+		ar.Post("/api/integration-secrets", h.CreateIntegrationSecret)
+		ar.Get("/api/integration-secrets", h.ListIntegrationSecrets)
+		ar.Put("/api/integration-secrets/{secretID}", h.UpdateIntegrationSecret)
+		ar.Delete("/api/integration-secrets/{secretID}", h.DeleteIntegrationSecret)
 		ar.Get("/api/events", h.ListEvents)
 		ar.Get("/api/events/by-tag", h.ListEventsByTag)
 		ar.Post("/api/events/{eventID}/re-run", h.ReprocessEvent)
@@ -603,13 +607,16 @@ func (h *Handler) CreateForwardTarget(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		TargetKey      string                 `json:"target_key"`
-		TargetType     string                 `json:"target_type"`
-		Purpose        string                 `json:"purpose"`
-		Enabled        *bool                  `json:"enabled"`
-		AllowedActions []string               `json:"allowed_actions"`
-		Schema         map[string]interface{} `json:"schema"`
-		Config         map[string]interface{} `json:"config"`
+		TargetKey        string                              `json:"target_key"`
+		TargetType       string                              `json:"target_type"`
+		Purpose          string                              `json:"purpose"`
+		Enabled          *bool                               `json:"enabled"`
+		AllowedActions   []string                            `json:"allowed_actions"`
+		Schema           map[string]interface{}              `json:"schema"`
+		Config           map[string]interface{}              `json:"config"`
+		Auth             service.IntegrationTargetAuthConfig `json:"auth"`
+		HeaderSecretRefs map[string]string                   `json:"header_secret_refs"`
+		HeaderEnvRefs    map[string]string                   `json:"header_env_refs"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeErr(w, http.StatusBadRequest, "invalid json")
@@ -628,7 +635,7 @@ func (h *Handler) CreateForwardTarget(w http.ResponseWriter, r *http.Request) {
 	if body.Enabled != nil {
 		enabled = *body.Enabled
 	}
-	configJSON := service.BuildIntegrationTargetConfig(targetKey, body.Purpose, enabled, body.AllowedActions, body.Schema, body.Config)
+	configJSON := service.BuildIntegrationTargetConfig(targetKey, body.Purpose, enabled, body.AllowedActions, body.Schema, body.Config, body.Auth, body.HeaderSecretRefs, body.HeaderEnvRefs)
 	t, err := h.Store.CreateForwardTarget(r.Context(), acct.ID, targetType, configJSON)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
@@ -666,13 +673,16 @@ func (h *Handler) UpdateForwardTarget(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		TargetKey      string                 `json:"target_key"`
-		TargetType     string                 `json:"target_type"`
-		Purpose        string                 `json:"purpose"`
-		Enabled        *bool                  `json:"enabled"`
-		AllowedActions []string               `json:"allowed_actions"`
-		Schema         map[string]interface{} `json:"schema"`
-		Config         map[string]interface{} `json:"config"`
+		TargetKey        string                              `json:"target_key"`
+		TargetType       string                              `json:"target_type"`
+		Purpose          string                              `json:"purpose"`
+		Enabled          *bool                               `json:"enabled"`
+		AllowedActions   []string                            `json:"allowed_actions"`
+		Schema           map[string]interface{}              `json:"schema"`
+		Config           map[string]interface{}              `json:"config"`
+		Auth             service.IntegrationTargetAuthConfig `json:"auth"`
+		HeaderSecretRefs map[string]string                   `json:"header_secret_refs"`
+		HeaderEnvRefs    map[string]string                   `json:"header_env_refs"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeErr(w, http.StatusBadRequest, "invalid json")
@@ -710,7 +720,7 @@ func (h *Handler) UpdateForwardTarget(w http.ResponseWriter, r *http.Request) {
 	if body.Enabled != nil {
 		enabled = *body.Enabled
 	}
-	configJSON := service.BuildIntegrationTargetConfig(targetKey, body.Purpose, enabled, body.AllowedActions, body.Schema, body.Config)
+	configJSON := service.BuildIntegrationTargetConfig(targetKey, body.Purpose, enabled, body.AllowedActions, body.Schema, body.Config, body.Auth, body.HeaderSecretRefs, body.HeaderEnvRefs)
 	updated, err := h.Store.UpdateForwardTarget(r.Context(), domain.ForwardTarget{
 		ID:         targetID,
 		AccountID:  acct.ID,
@@ -740,6 +750,126 @@ func (h *Handler) DeleteForwardTarget(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"deleted": true, "target_id": targetID})
+}
+
+func (h *Handler) CreateIntegrationSecret(w http.ResponseWriter, r *http.Request) {
+	acct, ok := auth.AccountFromContext(r.Context())
+	if !ok {
+		writeErr(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	var body struct {
+		SecretKey   string `json:"secret_key"`
+		Purpose     string `json:"purpose"`
+		SecretValue string `json:"secret_value"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid json")
+		return
+	}
+	secretKey := strings.TrimSpace(body.SecretKey)
+	secretValue := strings.TrimSpace(body.SecretValue)
+	if secretKey == "" || secretValue == "" {
+		writeErr(w, http.StatusBadRequest, "secret_key and secret_value required")
+		return
+	}
+	out, err := h.Store.CreateIntegrationSecret(r.Context(), domain.IntegrationSecret{
+		AccountID:   acct.ID,
+		SecretKey:   secretKey,
+		Purpose:     strings.TrimSpace(body.Purpose),
+		SecretValue: secretValue,
+	})
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusCreated, out)
+}
+
+func (h *Handler) ListIntegrationSecrets(w http.ResponseWriter, r *http.Request) {
+	acct, ok := auth.AccountFromContext(r.Context())
+	if !ok {
+		writeErr(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	items, err := h.Store.ListIntegrationSecrets(r.Context(), acct.ID)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, items)
+}
+
+func (h *Handler) UpdateIntegrationSecret(w http.ResponseWriter, r *http.Request) {
+	acct, ok := auth.AccountFromContext(r.Context())
+	if !ok {
+		writeErr(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	secretID := strings.TrimSpace(chi.URLParam(r, "secretID"))
+	if secretID == "" {
+		writeErr(w, http.StatusBadRequest, "secretID required")
+		return
+	}
+	var body struct {
+		SecretKey   string `json:"secret_key"`
+		Purpose     string `json:"purpose"`
+		SecretValue string `json:"secret_value"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid json")
+		return
+	}
+	existingItems, err := h.Store.ListIntegrationSecrets(r.Context(), acct.ID)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	var existing domain.IntegrationSecret
+	for _, item := range existingItems {
+		if item.ID == secretID {
+			existing = item
+			break
+		}
+	}
+	if existing.ID == "" {
+		writeErr(w, http.StatusNotFound, "integration secret not found")
+		return
+	}
+	secretKey := strings.TrimSpace(body.SecretKey)
+	if secretKey == "" {
+		secretKey = existing.SecretKey
+	}
+	out, err := h.Store.UpdateIntegrationSecret(r.Context(), domain.IntegrationSecret{
+		ID:          secretID,
+		AccountID:   acct.ID,
+		SecretKey:   secretKey,
+		Purpose:     strings.TrimSpace(body.Purpose),
+		SecretValue: strings.TrimSpace(body.SecretValue),
+	})
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (h *Handler) DeleteIntegrationSecret(w http.ResponseWriter, r *http.Request) {
+	acct, ok := auth.AccountFromContext(r.Context())
+	if !ok {
+		writeErr(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	secretID := strings.TrimSpace(chi.URLParam(r, "secretID"))
+	if secretID == "" {
+		writeErr(w, http.StatusBadRequest, "secretID required")
+		return
+	}
+	if err := h.Store.DeleteIntegrationSecret(r.Context(), acct.ID, secretID); err != nil {
+		writeErr(w, http.StatusNotFound, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"deleted": true, "secret_id": secretID})
 }
 
 func (h *Handler) ListEvents(w http.ResponseWriter, r *http.Request) {

@@ -17,12 +17,14 @@ import (
 )
 
 type MySQLStore struct {
-	db                *sql.DB
-	hasRawPayloadJSON bool
-	hasProcessedText  bool
-	schemaCheckOnce   sync.Once
-	eventSchemaMu     sync.Mutex
-	eventSchemaReady  bool
+	db                           *sql.DB
+	hasRawPayloadJSON            bool
+	hasProcessedText             bool
+	schemaCheckOnce              sync.Once
+	eventSchemaMu                sync.Mutex
+	eventSchemaReady             bool
+	integrationSecretSchemaMu    sync.Mutex
+	integrationSecretSchemaReady bool
 }
 
 type eventSelectVariant struct {
@@ -293,6 +295,120 @@ func (s *MySQLStore) UpdateForwardTarget(ctx context.Context, target domain.Forw
 func (s *MySQLStore) DeleteForwardTarget(ctx context.Context, accountID, targetID string) error {
 	_, err := s.db.ExecContext(ctx, `DELETE FROM forward_targets WHERE id=? AND account_id=?`, targetID, accountID)
 	return err
+}
+
+func integrationSecretSchemaStatements() []string {
+	return []string{
+		`CREATE TABLE IF NOT EXISTS integration_secrets (
+			id VARCHAR(36) PRIMARY KEY,
+			account_id VARCHAR(36) NOT NULL,
+			secret_key VARCHAR(128) NOT NULL,
+			purpose TEXT NULL,
+			secret_value TEXT NOT NULL,
+			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+			UNIQUE KEY uq_integration_secret_account_key (account_id, secret_key)
+		)`,
+	}
+}
+
+func (s *MySQLStore) ensureIntegrationSecretSchema(ctx context.Context) error {
+	s.integrationSecretSchemaMu.Lock()
+	defer s.integrationSecretSchemaMu.Unlock()
+	if s.integrationSecretSchemaReady {
+		return nil
+	}
+	for _, stmt := range integrationSecretSchemaStatements() {
+		if _, err := s.db.ExecContext(ctx, stmt); err != nil {
+			return err
+		}
+	}
+	s.integrationSecretSchemaReady = true
+	return nil
+}
+
+func (s *MySQLStore) CreateIntegrationSecret(ctx context.Context, secret domain.IntegrationSecret) (domain.IntegrationSecret, error) {
+	if err := s.ensureIntegrationSecretSchema(ctx); err != nil {
+		return domain.IntegrationSecret{}, err
+	}
+	if secret.ID == "" {
+		secret.ID = uuid.NewString()
+	}
+	_, err := s.db.ExecContext(ctx, `INSERT INTO integration_secrets(id, account_id, secret_key, purpose, secret_value, created_at, updated_at) VALUES(?,?,?,?,?,UTC_TIMESTAMP(),UTC_TIMESTAMP())`,
+		secret.ID, secret.AccountID, secret.SecretKey, secret.Purpose, secret.SecretValue)
+	if err != nil {
+		return domain.IntegrationSecret{}, err
+	}
+	secret.CreatedAt = time.Now().UTC()
+	secret.UpdatedAt = secret.CreatedAt
+	secret.SecretValue = ""
+	return secret, nil
+}
+
+func (s *MySQLStore) ListIntegrationSecrets(ctx context.Context, accountID string) ([]domain.IntegrationSecret, error) {
+	if err := s.ensureIntegrationSecretSchema(ctx); err != nil {
+		return nil, err
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT id, account_id, secret_key, COALESCE(purpose,''), created_at, updated_at FROM integration_secrets WHERE account_id=? ORDER BY created_at ASC`, accountID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []domain.IntegrationSecret
+	for rows.Next() {
+		var secret domain.IntegrationSecret
+		if err := rows.Scan(&secret.ID, &secret.AccountID, &secret.SecretKey, &secret.Purpose, &secret.CreatedAt, &secret.UpdatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, secret)
+	}
+	return out, nil
+}
+
+func (s *MySQLStore) UpdateIntegrationSecret(ctx context.Context, secret domain.IntegrationSecret) (domain.IntegrationSecret, error) {
+	if err := s.ensureIntegrationSecretSchema(ctx); err != nil {
+		return domain.IntegrationSecret{}, err
+	}
+	if strings.TrimSpace(secret.SecretValue) == "" {
+		_, err := s.db.ExecContext(ctx, `UPDATE integration_secrets SET secret_key=?, purpose=?, updated_at=UTC_TIMESTAMP() WHERE id=? AND account_id=?`,
+			secret.SecretKey, secret.Purpose, secret.ID, secret.AccountID)
+		if err != nil {
+			return domain.IntegrationSecret{}, err
+		}
+	} else {
+		_, err := s.db.ExecContext(ctx, `UPDATE integration_secrets SET secret_key=?, purpose=?, secret_value=?, updated_at=UTC_TIMESTAMP() WHERE id=? AND account_id=?`,
+			secret.SecretKey, secret.Purpose, secret.SecretValue, secret.ID, secret.AccountID)
+		if err != nil {
+			return domain.IntegrationSecret{}, err
+		}
+	}
+	var updated domain.IntegrationSecret
+	err := s.db.QueryRowContext(ctx, `SELECT id, account_id, secret_key, COALESCE(purpose,''), created_at, updated_at FROM integration_secrets WHERE id=? AND account_id=? LIMIT 1`, secret.ID, secret.AccountID).
+		Scan(&updated.ID, &updated.AccountID, &updated.SecretKey, &updated.Purpose, &updated.CreatedAt, &updated.UpdatedAt)
+	if err != nil {
+		return domain.IntegrationSecret{}, err
+	}
+	return updated, nil
+}
+
+func (s *MySQLStore) DeleteIntegrationSecret(ctx context.Context, accountID, secretID string) error {
+	if err := s.ensureIntegrationSecretSchema(ctx); err != nil {
+		return err
+	}
+	_, err := s.db.ExecContext(ctx, `DELETE FROM integration_secrets WHERE id=? AND account_id=?`, secretID, accountID)
+	return err
+}
+
+func (s *MySQLStore) ResolveIntegrationSecretValue(ctx context.Context, accountID, secretKey string) (string, error) {
+	if err := s.ensureIntegrationSecretSchema(ctx); err != nil {
+		return "", err
+	}
+	var value string
+	err := s.db.QueryRowContext(ctx, `SELECT secret_value FROM integration_secrets WHERE account_id=? AND secret_key=? LIMIT 1`, accountID, secretKey).Scan(&value)
+	if err != nil {
+		return "", err
+	}
+	return value, nil
 }
 
 func (s *MySQLStore) CreateEvent(ctx context.Context, e domain.WebhookEvent) (domain.WebhookEvent, error) {

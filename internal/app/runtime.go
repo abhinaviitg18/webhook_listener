@@ -54,6 +54,7 @@ func BuildHTTPHandler(ctx context.Context, cfg config.Config) (http.Handler, err
 	transformer := service.NewTransformService(st)
 	tg := integrations.NewTelegramClient(cfg.TelegramBotToken)
 	actions := service.NewActionService(tg)
+	actions.Store = st
 
 	processor := &service.Processor{
 		Store: st, Pinecone: pine, LLM: llm, Executor: actions, Resolver: resolver, Transformer: transformer, DeterministicOnly: deterministicOnly,

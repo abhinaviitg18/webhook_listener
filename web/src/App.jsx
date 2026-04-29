@@ -44,6 +44,7 @@ const MEMORY_WRITE_MODES = ['update_or_insert', 'insert_only', 'disabled'];
 const FORCED_ACTION_OPTIONS = ['store_mysql', 'no_action', 'manual_review', 'forward_http', 'forward_telegram', 'slack_notify', 'crm_upsert', 'ticket_create'];
 const INTEGRATION_TARGET_TYPES = ['http', 'telegram', 'openclaw', 'custom'];
 const INTEGRATION_ACTION_OPTIONS = ['forward_http', 'forward_telegram', 'slack_notify', 'crm_upsert', 'ticket_create'];
+const INTEGRATION_AUTH_TYPES = ['none', 'bearer_header', 'custom_header', 'query_param'];
 
 const INTEGRATION_PRESETS = {
   openclaw: {
@@ -55,9 +56,13 @@ const INTEGRATION_PRESETS = {
     config: {
       url: 'https://api.openclaw.example/v1/intake',
       method: 'POST',
-      headers: {
-        Authorization: 'Bearer ${OPENCLAW_API_KEY}',
-      },
+    },
+    auth: {
+      type: 'bearer_header',
+      secret_ref: 'openclaw_api_key',
+      header_name: 'Authorization',
+      prefix: 'Bearer ',
+      env_var: 'OPENCLAW_API_KEY',
     },
     schema: {
       entity_payload: 'object',
@@ -76,6 +81,14 @@ const INTEGRATION_PRESETS = {
       headers: {
         'x-agenthook-source': 'listener',
       },
+    },
+    auth: {
+      type: 'none',
+      secret_ref: '',
+      header_name: '',
+      prefix: '',
+      query_param: '',
+      env_var: '',
     },
     schema: {},
   },
@@ -266,6 +279,10 @@ function targetConfigFromRecord(target) {
     return parsed.config;
   }
   return parsed;
+}
+
+function targetRecordDetails(target) {
+  return objectFromJSONText(target?.config_json);
 }
 
 function parseObjectOrThrow(text, label) {
@@ -620,7 +637,7 @@ function App() {
               exit={{ opacity: 0, x: 20 }}
               className="space-y-4"
             >
-              <IntegrationsTab />
+              <IntegrationsTab listeners={listeners} />
             </motion.div>
           )}
 
@@ -769,22 +786,44 @@ const BYOKSettings = () => {
   );
 };
 
-const IntegrationsTab = () => {
-  const [targets, setTargets] = useState([]);
-  const [loadingTargets, setLoadingTargets] = useState(false);
-  const [savingTarget, setSavingTarget] = useState(false);
-  const [notice, setNotice] = useState('');
-  const [expandedTargetID, setExpandedTargetID] = useState('');
-  const [editingTargetID, setEditingTargetID] = useState('');
-  const [form, setForm] = useState({
+const IntegrationsTab = ({ listeners }) => {
+  const defaultTargetForm = () => ({
     target_key: '',
     target_type: 'http',
     purpose: '',
     enabled: true,
     allowed_actions: ['forward_http'],
-    config_text: prettyJSON({ url: 'https://example.com/webhook', method: 'POST' }),
+    auth_type: 'none',
+    auth_secret_ref: '',
+    auth_header_name: '',
+    auth_prefix: '',
+    auth_query_param: '',
+    auth_env_var: '',
+    config_text: prettyJSON({ url: 'https://example.com/webhook', method: 'POST', headers: { 'x-agenthook-source': 'listener' } }),
     schema_text: prettyJSON({}),
+    header_secret_refs_text: prettyJSON({}),
+    header_env_refs_text: prettyJSON({}),
   });
+  const defaultSecretForm = () => ({
+    secret_key: '',
+    purpose: '',
+    secret_value: '',
+  });
+
+  const [targets, setTargets] = useState([]);
+  const [secrets, setSecrets] = useState([]);
+  const [loadingTargets, setLoadingTargets] = useState(false);
+  const [loadingSecrets, setLoadingSecrets] = useState(false);
+  const [savingTarget, setSavingTarget] = useState(false);
+  const [savingSecret, setSavingSecret] = useState(false);
+  const [notice, setNotice] = useState('');
+  const [expandedTargetID, setExpandedTargetID] = useState('');
+  const [editingTargetID, setEditingTargetID] = useState('');
+  const [editingSecretID, setEditingSecretID] = useState('');
+  const [targetForm, setTargetForm] = useState(defaultTargetForm);
+  const [secretForm, setSecretForm] = useState(defaultSecretForm);
+
+  const hasSingleTenant = listeners.some((listener) => listener.deployment_mode === 'single_tenant');
 
   const fetchTargets = async () => {
     setLoadingTargets(true);
@@ -798,24 +837,46 @@ const IntegrationsTab = () => {
     }
   };
 
+  const fetchSecrets = async () => {
+    setLoadingSecrets(true);
+    try {
+      const data = await apiRequest('/api/integration-secrets');
+      setSecrets(Array.isArray(data) ? data : []);
+    } catch (err) {
+      setNotice(err.message);
+    } finally {
+      setLoadingSecrets(false);
+    }
+  };
+
   useEffect(() => {
     fetchTargets();
+    fetchSecrets();
   }, []);
 
   const applyIntegrationPreset = (presetKey) => {
     const preset = INTEGRATION_PRESETS[presetKey];
     if (!preset) return;
-    setForm({
+    const auth = preset.auth || {};
+    setTargetForm({
       target_key: preset.target_key,
       target_type: preset.target_type,
       purpose: preset.purpose,
       enabled: preset.enabled,
       allowed_actions: preset.allowed_actions,
+      auth_type: auth.type || 'none',
+      auth_secret_ref: auth.secret_ref || '',
+      auth_header_name: auth.header_name || '',
+      auth_prefix: auth.prefix || '',
+      auth_query_param: auth.query_param || '',
+      auth_env_var: auth.env_var || '',
       config_text: prettyJSON(preset.config),
       schema_text: prettyJSON(preset.schema),
+      header_secret_refs_text: prettyJSON({}),
+      header_env_refs_text: prettyJSON({}),
     });
     setEditingTargetID('');
-    setNotice(`${preset.target_key} template loaded. Review the URL and headers before saving.`);
+    setNotice(`${preset.target_key} template loaded. Attach a named secret ref or rely on single-tenant env fallback.`);
   };
 
   const persistTarget = async () => {
@@ -823,13 +884,23 @@ const IntegrationsTab = () => {
     setNotice('');
     try {
       const payload = {
-        target_key: form.target_key,
-        target_type: form.target_type === 'openclaw' ? 'http' : form.target_type,
-        purpose: form.purpose,
-        enabled: form.enabled,
-        allowed_actions: form.allowed_actions,
-        config: parseObjectOrThrow(form.config_text, 'Config JSON'),
-        schema: parseObjectOrThrow(form.schema_text, 'Schema JSON'),
+        target_key: targetForm.target_key,
+        target_type: targetForm.target_type === 'openclaw' ? 'http' : targetForm.target_type,
+        purpose: targetForm.purpose,
+        enabled: targetForm.enabled,
+        allowed_actions: targetForm.allowed_actions,
+        config: parseObjectOrThrow(targetForm.config_text, 'Config JSON'),
+        schema: parseObjectOrThrow(targetForm.schema_text, 'Schema JSON'),
+        auth: {
+          type: targetForm.auth_type === 'none' ? '' : targetForm.auth_type,
+          secret_ref: targetForm.auth_secret_ref,
+          header_name: targetForm.auth_header_name,
+          prefix: targetForm.auth_prefix,
+          query_param: targetForm.auth_query_param,
+          env_var: targetForm.auth_env_var,
+        },
+        header_secret_refs: parseObjectOrThrow(targetForm.header_secret_refs_text, 'Header secret refs JSON'),
+        header_env_refs: parseObjectOrThrow(targetForm.header_env_refs_text, 'Header env refs JSON'),
       };
       if (!payload.target_key.trim()) {
         throw new Error('target_key is required');
@@ -842,15 +913,7 @@ const IntegrationsTab = () => {
       });
       await fetchTargets();
       setEditingTargetID('');
-      setForm({
-        target_key: '',
-        target_type: 'http',
-        purpose: '',
-        enabled: true,
-        allowed_actions: ['forward_http'],
-        config_text: prettyJSON({ url: 'https://example.com/webhook', method: 'POST' }),
-        schema_text: prettyJSON({}),
-      });
+      setTargetForm(defaultTargetForm());
       setNotice(`Integration ${method === 'POST' ? 'created' : 'updated'} successfully.`);
     } catch (err) {
       setNotice(err.message);
@@ -859,20 +922,66 @@ const IntegrationsTab = () => {
     }
   };
 
+  const persistSecret = async () => {
+    setSavingSecret(true);
+    setNotice('');
+    try {
+      if (!secretForm.secret_key.trim()) {
+        throw new Error('secret_key is required');
+      }
+      if (!editingSecretID && !secretForm.secret_value.trim()) {
+        throw new Error('secret_value is required');
+      }
+      const path = editingSecretID ? `/api/integration-secrets/${editingSecretID}` : '/api/integration-secrets';
+      const method = editingSecretID ? 'PUT' : 'POST';
+      await apiRequest(path, {
+        method,
+        body: JSON.stringify(secretForm),
+      });
+      await fetchSecrets();
+      setEditingSecretID('');
+      setSecretForm(defaultSecretForm());
+      setNotice(`Integration secret ${method === 'POST' ? 'created' : 'updated'} successfully.`);
+    } catch (err) {
+      setNotice(err.message);
+    } finally {
+      setSavingSecret(false);
+    }
+  };
+
   const beginEditTarget = (target) => {
+    const details = targetRecordDetails(target);
     const config = targetConfigFromRecord(target);
     const schema = objectFromJSONText(target.schema_json);
     const allowedActions = arrayFromJSONText(target.allowed_actions_json);
+    const auth = details.auth || {};
     setEditingTargetID(target.id);
     setExpandedTargetID(target.id);
-    setForm({
+    setTargetForm({
       target_key: target.target_key || '',
       target_type: target.target_type || 'http',
       purpose: target.purpose || '',
       enabled: target.enabled !== false,
       allowed_actions: allowedActions.length ? allowedActions : ['forward_http'],
+      auth_type: auth.type || 'none',
+      auth_secret_ref: auth.secret_ref || '',
+      auth_header_name: auth.header_name || '',
+      auth_prefix: auth.prefix || '',
+      auth_query_param: auth.query_param || '',
+      auth_env_var: auth.env_var || '',
       config_text: prettyJSON(config),
       schema_text: prettyJSON(schema),
+      header_secret_refs_text: prettyJSON(details.header_secret_refs || {}),
+      header_env_refs_text: prettyJSON(details.header_env_refs || {}),
+    });
+  };
+
+  const beginEditSecret = (secret) => {
+    setEditingSecretID(secret.id);
+    setSecretForm({
+      secret_key: secret.secret_key || '',
+      purpose: secret.purpose || '',
+      secret_value: '',
     });
   };
 
@@ -882,6 +991,7 @@ const IntegrationsTab = () => {
       await apiRequest(`/api/forward-targets/${target.id}`, { method: 'DELETE' });
       if (editingTargetID === target.id) {
         setEditingTargetID('');
+        setTargetForm(defaultTargetForm());
       }
       await fetchTargets();
       setNotice('Integration deleted.');
@@ -890,8 +1000,23 @@ const IntegrationsTab = () => {
     }
   };
 
+  const deleteSecret = async (secret) => {
+    if (!window.confirm(`Delete integration secret "${secret.secret_key}"?`)) return;
+    try {
+      await apiRequest(`/api/integration-secrets/${secret.id}`, { method: 'DELETE' });
+      if (editingSecretID === secret.id) {
+        setEditingSecretID('');
+        setSecretForm(defaultSecretForm());
+      }
+      await fetchSecrets();
+      setNotice('Integration secret deleted.');
+    } catch (err) {
+      setNotice(err.message);
+    }
+  };
+
   const toggleAction = (action) => {
-    setForm((current) => {
+    setTargetForm((current) => {
       const exists = current.allowed_actions.includes(action);
       return {
         ...current,
@@ -910,6 +1035,89 @@ const IntegrationsTab = () => {
       className="space-y-4"
     >
       <h2 className="px-1 text-white">Integrations</h2>
+
+      <Panel
+        title="Integration Secrets"
+        subtitle="Store named secret refs for multitenant accounts. Single-tenant listeners can also fall back to env vars automatically."
+        action={<KeyRound size={18} className="text-primary" />}
+      >
+        <InlineNotice>
+          {hasSingleTenant
+            ? 'Single-tenant listeners can auto-resolve conventional env vars when no secret ref is attached. Multitenant listeners should use named secret refs.'
+            : 'Multitenant listeners should attach named secret refs. Env fallback is kept as an operator override only.'}
+        </InlineNotice>
+        <div className="grid grid-cols-1 gap-3">
+          <FormField label="Secret Key" hint="Stable reference like openclaw_api_key or crm_bearer_token.">
+            <TextInput
+              value={secretForm.secret_key}
+              onChange={(e) => setSecretForm((current) => ({ ...current, secret_key: e.target.value }))}
+              placeholder="openclaw_api_key"
+            />
+          </FormField>
+          <FormField label="Purpose">
+            <TextInput
+              value={secretForm.purpose}
+              onChange={(e) => setSecretForm((current) => ({ ...current, purpose: e.target.value }))}
+              placeholder="Bearer token for OpenClaw intake API"
+            />
+          </FormField>
+          <FormField label={editingSecretID ? 'Rotate Secret Value (optional)' : 'Secret Value'}>
+            <TextInput
+              type="password"
+              value={secretForm.secret_value}
+              onChange={(e) => setSecretForm((current) => ({ ...current, secret_value: e.target.value }))}
+              placeholder={editingSecretID ? 'Leave blank to keep current value' : 'Paste token'}
+            />
+          </FormField>
+        </div>
+        <div className="flex gap-2">
+          <button
+            onClick={persistSecret}
+            disabled={savingSecret}
+            className="flex-1 bg-primary text-on-primary font-bold py-2 rounded-lg text-sm active:scale-95 transition-transform disabled:opacity-50"
+          >
+            {savingSecret ? 'SAVING...' : editingSecretID ? 'SAVE SECRET' : 'CREATE SECRET'}
+          </button>
+          {editingSecretID && (
+            <button
+              onClick={() => {
+                setEditingSecretID('');
+                setSecretForm(defaultSecretForm());
+              }}
+              className="px-4 border border-slate-800 rounded-lg text-sm text-slate-200 hover:bg-slate-900"
+            >
+              Cancel
+            </button>
+          )}
+        </div>
+        <div className="space-y-2 pt-2">
+          <div className="flex items-center justify-between px-1">
+            <p className="text-[10px] text-slate-500 font-label-caps">Saved Secret Refs</p>
+            {loadingSecrets && <RefreshCw size={12} className="text-slate-500 animate-spin" />}
+          </div>
+          {secrets.map((secret) => (
+            <div key={secret.id} className="rounded-xl border border-slate-800 bg-slate-950/40 p-3 space-y-2">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm text-white font-medium">{secret.secret_key}</p>
+                  <p className="text-[11px] text-slate-500">{secret.purpose || 'No purpose provided'}</p>
+                </div>
+                <div className="flex gap-2">
+                  <button onClick={() => beginEditSecret(secret)} className="px-2 py-1 rounded-lg border border-slate-700 text-[11px] text-slate-200 hover:bg-slate-900">
+                    Rotate
+                  </button>
+                  <button onClick={() => deleteSecret(secret)} className="px-2 py-1 rounded-lg border border-red-900/60 text-[11px] text-red-300 hover:bg-red-950/40">
+                    Delete
+                  </button>
+                </div>
+              </div>
+            </div>
+          ))}
+          {!secrets.length && !loadingSecrets && (
+            <p className="text-slate-500 text-xs text-center py-3">No integration secrets saved yet.</p>
+          )}
+        </div>
+      </Panel>
 
       <Panel
         title="Create Integration"
@@ -933,16 +1141,16 @@ const IntegrationsTab = () => {
         <div className="grid grid-cols-1 gap-3">
           <FormField label="Target Key" hint="Skills and router outputs reference this stable key.">
             <TextInput
-              value={form.target_key}
-              onChange={(e) => setForm((current) => ({ ...current, target_key: e.target.value }))}
+              value={targetForm.target_key}
+              onChange={(e) => setTargetForm((current) => ({ ...current, target_key: e.target.value }))}
               placeholder="openclaw_primary"
             />
           </FormField>
           <div className="grid grid-cols-2 gap-3">
             <FormField label="Target Type">
               <Select
-                value={form.target_type}
-                onChange={(e) => setForm((current) => ({ ...current, target_type: e.target.value }))}
+                value={targetForm.target_type}
+                onChange={(e) => setTargetForm((current) => ({ ...current, target_type: e.target.value }))}
               >
                 {INTEGRATION_TARGET_TYPES.map((item) => (
                   <option key={item} value={item}>
@@ -953,8 +1161,8 @@ const IntegrationsTab = () => {
             </FormField>
             <FormField label="Enabled">
               <Select
-                value={String(form.enabled)}
-                onChange={(e) => setForm((current) => ({ ...current, enabled: e.target.value === 'true' }))}
+                value={String(targetForm.enabled)}
+                onChange={(e) => setTargetForm((current) => ({ ...current, enabled: e.target.value === 'true' }))}
               >
                 <option value="true">Enabled</option>
                 <option value="false">Disabled</option>
@@ -963,8 +1171,8 @@ const IntegrationsTab = () => {
           </div>
           <FormField label="Purpose">
             <TextInput
-              value={form.purpose}
-              onChange={(e) => setForm((current) => ({ ...current, purpose: e.target.value }))}
+              value={targetForm.purpose}
+              onChange={(e) => setTargetForm((current) => ({ ...current, purpose: e.target.value }))}
               placeholder="Forward leads to OpenClaw or a generic intake URL."
             />
           </FormField>
@@ -974,7 +1182,7 @@ const IntegrationsTab = () => {
                 <label key={action} className="inline-flex items-center gap-2 rounded-lg border border-slate-800 bg-slate-950/40 px-3 py-2 text-xs text-slate-200">
                   <input
                     type="checkbox"
-                    checked={form.allowed_actions.includes(action)}
+                    checked={targetForm.allowed_actions.includes(action)}
                     onChange={() => toggleAction(action)}
                   />
                   {action}
@@ -982,17 +1190,90 @@ const IntegrationsTab = () => {
               ))}
             </div>
           </FormField>
-          <FormField label="Config JSON" hint="Store the endpoint, headers, auth placeholders, and any destination-specific options here.">
+          <div className="grid grid-cols-2 gap-3">
+            <FormField label="Auth Type">
+              <Select
+                value={targetForm.auth_type}
+                onChange={(e) => setTargetForm((current) => ({ ...current, auth_type: e.target.value }))}
+              >
+                {INTEGRATION_AUTH_TYPES.map((item) => (
+                  <option key={item} value={item}>
+                    {item}
+                  </option>
+                ))}
+              </Select>
+            </FormField>
+            <FormField label="Secret Ref">
+              <Select
+                value={targetForm.auth_secret_ref}
+                onChange={(e) => setTargetForm((current) => ({ ...current, auth_secret_ref: e.target.value }))}
+              >
+                <option value="">None</option>
+                {secrets.map((secret) => (
+                  <option key={secret.id} value={secret.secret_key}>
+                    {secret.secret_key}
+                  </option>
+                ))}
+              </Select>
+            </FormField>
+          </div>
+          {targetForm.auth_type !== 'none' && (
+            <div className="grid grid-cols-2 gap-3">
+              <FormField label="Header Name">
+                <TextInput
+                  value={targetForm.auth_header_name}
+                  onChange={(e) => setTargetForm((current) => ({ ...current, auth_header_name: e.target.value }))}
+                  placeholder={targetForm.auth_type === 'query_param' ? 'Unused for query param auth' : 'Authorization'}
+                />
+              </FormField>
+              <FormField label={targetForm.auth_type === 'query_param' ? 'Query Param' : 'Prefix'}>
+                <TextInput
+                  value={targetForm.auth_type === 'query_param' ? targetForm.auth_query_param : targetForm.auth_prefix}
+                  onChange={(e) =>
+                    setTargetForm((current) => ({
+                      ...current,
+                      ...(targetForm.auth_type === 'query_param'
+                        ? { auth_query_param: e.target.value }
+                        : { auth_prefix: e.target.value }),
+                    }))
+                  }
+                  placeholder={targetForm.auth_type === 'query_param' ? 'api_key' : 'Bearer '}
+                />
+              </FormField>
+            </div>
+          )}
+          <FormField label="Explicit Env Var Override" hint="Optional env var to use after single-tenant conventional fallback.">
+            <TextInput
+              value={targetForm.auth_env_var}
+              onChange={(e) => setTargetForm((current) => ({ ...current, auth_env_var: e.target.value }))}
+              placeholder="OPENCLAW_API_KEY"
+            />
+          </FormField>
+          <FormField label="Config JSON" hint="Store the endpoint, static headers, and destination-specific options here.">
             <TextArea
-              value={form.config_text}
-              onChange={(e) => setForm((current) => ({ ...current, config_text: e.target.value }))}
+              value={targetForm.config_text}
+              onChange={(e) => setTargetForm((current) => ({ ...current, config_text: e.target.value }))}
               className="min-h-36 font-code-snippet"
+            />
+          </FormField>
+          <FormField label="Header Secret Refs JSON" hint='Optional per-header secret refs, for example `{ "X-API-Key": "crm_bearer_token" }`. '>
+            <TextArea
+              value={targetForm.header_secret_refs_text}
+              onChange={(e) => setTargetForm((current) => ({ ...current, header_secret_refs_text: e.target.value }))}
+              className="min-h-24 font-code-snippet"
+            />
+          </FormField>
+          <FormField label="Header Env Refs JSON" hint='Optional per-header env refs, for example `{ "X-Webhook-Token": "OPENCLAW_TOKEN" }`. '>
+            <TextArea
+              value={targetForm.header_env_refs_text}
+              onChange={(e) => setTargetForm((current) => ({ ...current, header_env_refs_text: e.target.value }))}
+              className="min-h-24 font-code-snippet"
             />
           </FormField>
           <FormField label="Schema JSON" hint="Optional hints for what params the skill or router should produce.">
             <TextArea
-              value={form.schema_text}
-              onChange={(e) => setForm((current) => ({ ...current, schema_text: e.target.value }))}
+              value={targetForm.schema_text}
+              onChange={(e) => setTargetForm((current) => ({ ...current, schema_text: e.target.value }))}
               className="min-h-24 font-code-snippet"
             />
           </FormField>
@@ -1010,15 +1291,7 @@ const IntegrationsTab = () => {
             <button
               onClick={() => {
                 setEditingTargetID('');
-                setForm({
-                  target_key: '',
-                  target_type: 'http',
-                  purpose: '',
-                  enabled: true,
-                  allowed_actions: ['forward_http'],
-                  config_text: prettyJSON({ url: 'https://example.com/webhook', method: 'POST' }),
-                  schema_text: prettyJSON({}),
-                });
+                setTargetForm(defaultTargetForm());
               }}
               className="px-4 border border-slate-800 rounded-lg text-sm text-slate-200 hover:bg-slate-900"
             >
@@ -1030,7 +1303,7 @@ const IntegrationsTab = () => {
 
       <Panel
         title="Configured Integrations"
-        subtitle="Every saved target is reusable across skills and router outputs. Expand a card to inspect the schema and config."
+        subtitle="Every saved target is reusable across skills and router outputs. Expand a card to inspect auth wiring, schema, and destination config."
         action={
           <button onClick={fetchTargets} className="text-slate-400 hover:text-white" title="Refresh integrations">
             <RefreshCw size={16} className={loadingTargets ? 'animate-spin' : ''} />
@@ -1039,9 +1312,13 @@ const IntegrationsTab = () => {
       >
         <div className="space-y-3">
           {targets.map((target) => {
+            const details = targetRecordDetails(target);
             const allowedActions = arrayFromJSONText(target.allowed_actions_json);
             const config = targetConfigFromRecord(target);
             const schema = objectFromJSONText(target.schema_json);
+            const auth = details.auth || {};
+            const headerSecretRefs = details.header_secret_refs || {};
+            const headerEnvRefs = details.header_env_refs || {};
             const isExpanded = expandedTargetID === target.id;
             return (
               <div
@@ -1085,9 +1362,18 @@ const IntegrationsTab = () => {
                     <div className="grid grid-cols-1 gap-2 text-[11px] text-slate-400">
                       <div>Created: <span className="text-slate-300">{target.created_at ? new Date(target.created_at).toLocaleString() : 'Unknown'}</span></div>
                       <div>Target ID: <code className="text-slate-300 break-all">{target.id}</code></div>
+                      <div>Auth: <span className="text-slate-300">{auth.type || 'none'}</span></div>
+                      <div>Secret Ref: <span className="text-slate-300">{auth.secret_ref || 'none'}</span></div>
+                      <div>Env Override: <span className="text-slate-300">{auth.env_var || 'none'}</span></div>
                     </div>
                     <FormField label="Config Snapshot">
                       <pre className="text-xs text-slate-300 bg-slate-950/80 p-3 rounded-xl overflow-auto border border-slate-800">{prettyJSON(config)}</pre>
+                    </FormField>
+                    <FormField label="Header Secret Refs">
+                      <pre className="text-xs text-slate-300 bg-slate-950/80 p-3 rounded-xl overflow-auto border border-slate-800">{prettyJSON(headerSecretRefs)}</pre>
+                    </FormField>
+                    <FormField label="Header Env Refs">
+                      <pre className="text-xs text-slate-300 bg-slate-950/80 p-3 rounded-xl overflow-auto border border-slate-800">{prettyJSON(headerEnvRefs)}</pre>
                     </FormField>
                     <FormField label="Schema Snapshot">
                       <pre className="text-xs text-slate-300 bg-slate-950/80 p-3 rounded-xl overflow-auto border border-slate-800">{prettyJSON(schema)}</pre>
