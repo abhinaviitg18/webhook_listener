@@ -36,11 +36,16 @@ type WebhookSecret struct {
 }
 
 type ForwardTarget struct {
-	ID         string    `json:"id"`
-	AccountID  string    `json:"account_id"`
-	TargetType string    `json:"target_type"`
-	ConfigJSON string    `json:"config_json"`
-	CreatedAt  time.Time `json:"created_at"`
+	ID                 string    `json:"id"`
+	AccountID          string    `json:"account_id"`
+	TargetKey          string    `json:"target_key,omitempty"`
+	TargetType         string    `json:"target_type"`
+	Purpose            string    `json:"purpose,omitempty"`
+	Enabled            bool      `json:"enabled"`
+	AllowedActionsJSON string    `json:"allowed_actions_json,omitempty"`
+	SchemaJSON         string    `json:"schema_json,omitempty"`
+	ConfigJSON         string    `json:"config_json"`
+	CreatedAt          time.Time `json:"created_at"`
 }
 
 type WebhookEvent struct {

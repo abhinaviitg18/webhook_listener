@@ -75,6 +75,64 @@ func (f *fakeExec) Execute(_ context.Context, a domain.ProcessDecision, _ domain
 }
 func (f *fakeExec) AvailableActions() []string { return []string{"forward_http", "store_mysql"} }
 
+type stagedLLM struct {
+	calls []string
+}
+
+func (s *stagedLLM) SuggestAction(_ context.Context, typeKey, _ string, _ []domain.PineconeMemory, _ []string) (domain.ProcessDecision, error) {
+	s.calls = append(s.calls, typeKey)
+	if strings.HasPrefix(typeKey, "route:") {
+		return domain.ProcessDecision{
+			ActionName: "sales_lead_router",
+			Reason:     "router",
+			Params: map[string]interface{}{
+				"spam_label":             "not_spam",
+				"skill_candidates":       []string{"sales_lead_router"},
+				"candidate_action":       "crm_upsert",
+				"integration_target_key": "hubspot_primary",
+			},
+		}, nil
+	}
+	return domain.ProcessDecision{
+		ActionName:    "crm_upsert",
+		Reason:        "lead detected",
+		ProcessedText: "New enterprise lead from Sarah Chen at Acme",
+		Tags:          []string{"lead", "sales"},
+		Params: map[string]interface{}{
+			"integration_target_key": "hubspot_primary",
+			"entity_payload": map[string]interface{}{
+				"name":    "Sarah Chen",
+				"company": "Acme",
+			},
+		},
+	}, nil
+}
+
+type invalidIntegrationLLM struct{}
+
+func (i invalidIntegrationLLM) SuggestAction(_ context.Context, typeKey, _ string, _ []domain.PineconeMemory, _ []string) (domain.ProcessDecision, error) {
+	if strings.HasPrefix(typeKey, "route:") {
+		return domain.ProcessDecision{
+			ActionName: "sales_lead_router",
+			Reason:     "router",
+			Params: map[string]interface{}{
+				"spam_label":             "not_spam",
+				"skill_candidates":       []string{"sales_lead_router"},
+				"candidate_action":       "crm_upsert",
+				"integration_target_key": "hubspot_primary",
+			},
+		}, nil
+	}
+	return domain.ProcessDecision{
+		ActionName:    "crm_upsert",
+		Reason:        "lead detected",
+		ProcessedText: "Lead needs review",
+		Params: map[string]interface{}{
+			"integration_target_key": "hubspot_primary",
+		},
+	}, nil
+}
+
 func TestProcessor_PlainTextActionWins(t *testing.T) {
 	st := store.NewMemoryStore()
 	acct, _, _ := st.CreateAccount(context.Background(), "7204909316@agentmail.to")
@@ -471,6 +529,86 @@ func TestProcessor_StripsHTMLBeforeMatchingAndFallbackText(t *testing.T) {
 	}
 	if strings.Contains(pine.lastQuery, "<strong>") || !strings.Contains(pine.lastQuery, "verification code") {
 		t.Fatalf("expected pinecone query payload to be sanitized, got %q", pine.lastQuery)
+	}
+}
+
+func TestProcessor_RouterSelectsSkillAndStructuredIntegrationAction(t *testing.T) {
+	st := store.NewMemoryStore()
+	acct, _, _ := st.CreateAccount(context.Background(), "7204909316@agentmail.to")
+	wt, _ := st.CreateWebhookType(context.Background(), acct.ID, "generic-json", "", true)
+	sec, _, _ := st.CreateSecret(context.Background(), acct.ID, wt.ID)
+	_, _ = st.CreateWebhookSkill(context.Background(), domain.WebhookSkill{
+		AccountID:       acct.ID,
+		TypeKey:         wt.TypeKey,
+		SkillKey:        "marketing_noise_filter",
+		SkillPrompt:     "Ignore promotional mail",
+		MatchContains:   "unsubscribe,offer",
+		ForcedAction:    "no_action",
+		MemoryWriteMode: "none",
+		Priority:        50,
+		Enabled:         true,
+	})
+	_, _ = st.CreateWebhookSkill(context.Background(), domain.WebhookSkill{
+		AccountID:       acct.ID,
+		TypeKey:         wt.TypeKey,
+		SkillKey:        "sales_lead_router",
+		SkillPrompt:     "Route enterprise sales leads to CRM",
+		MatchContains:   "enterprise,demo",
+		MemoryWriteMode: "update_or_insert",
+		Priority:        10,
+		Enabled:         true,
+	})
+	_, _ = st.CreateForwardTarget(context.Background(), acct.ID, "http", BuildIntegrationTargetConfig("hubspot_primary", "Primary CRM", true, []string{"crm_upsert"}, nil, map[string]interface{}{"url": "https://example.com/hubspot"}))
+	llm := &stagedLLM{}
+	exec := &fakeExec{}
+	p := &Processor{Store: st, Pinecone: fakePinecone{}, LLM: llm, Executor: exec}
+	payload := `{"subject":"New enterprise lead from Acme Corp","message":{"text":"Name: Sarah Chen. Looking for a hiring automation demo. unsubscribe footer included."}}`
+	ev, d, err := p.ProcessWebhook(context.Background(), acct, wt, sec, "r13", payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d.ActionName != "crm_upsert" {
+		t.Fatalf("expected crm_upsert action, got %s", d.ActionName)
+	}
+	if exec.seen != "crm_upsert" {
+		t.Fatalf("expected executor to receive crm_upsert, got %s", exec.seen)
+	}
+	if len(llm.calls) != 2 || !strings.HasPrefix(llm.calls[0], "route:") {
+		t.Fatalf("expected route and final llm calls, got %v", llm.calls)
+	}
+	if !strings.Contains(ev.ProcessedText, "Sarah Chen") {
+		t.Fatalf("expected processed text to be stored, got %q", ev.ProcessedText)
+	}
+}
+
+func TestProcessor_InvalidStructuredIntegrationFallsBackToManualReview(t *testing.T) {
+	st := store.NewMemoryStore()
+	acct, _, _ := st.CreateAccount(context.Background(), "7204909316@agentmail.to")
+	wt, _ := st.CreateWebhookType(context.Background(), acct.ID, "generic-json", "", true)
+	sec, _, _ := st.CreateSecret(context.Background(), acct.ID, wt.ID)
+	_, _ = st.CreateWebhookSkill(context.Background(), domain.WebhookSkill{
+		AccountID:       acct.ID,
+		TypeKey:         wt.TypeKey,
+		SkillKey:        "sales_lead_router",
+		SkillPrompt:     "Route enterprise sales leads to CRM",
+		MatchContains:   "enterprise,demo",
+		MemoryWriteMode: "update_or_insert",
+		Priority:        10,
+		Enabled:         true,
+	})
+	_, _ = st.CreateForwardTarget(context.Background(), acct.ID, "http", BuildIntegrationTargetConfig("hubspot_primary", "Primary CRM", true, []string{"crm_upsert"}, nil, map[string]interface{}{"url": "https://example.com/hubspot"}))
+	exec := &fakeExec{}
+	p := &Processor{Store: st, Pinecone: fakePinecone{}, LLM: invalidIntegrationLLM{}, Executor: exec}
+	payload := `{"subject":"New enterprise lead from Acme Corp","message":{"text":"Need a hiring automation demo"}}`
+	_, d, err := p.ProcessWebhook(context.Background(), acct, wt, sec, "r14", payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d.ActionName != "manual_review" {
+		t.Fatalf("expected invalid integration action to fall back to manual_review, got %s", d.ActionName)
+	}
+	if exec.seen != "manual_review" {
+		t.Fatalf("expected executor to see manual_review, got %s", exec.seen)
 	}
 }
 

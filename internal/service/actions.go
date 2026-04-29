@@ -40,7 +40,7 @@ func NewActionService(telegram *integrations.TelegramClient) *ActionService {
 }
 
 func (a *ActionService) AvailableActions() []string {
-	return []string{"store_mysql", "forward_http", "forward_telegram", "no_action"}
+	return []string{"store_mysql", "forward_http", "forward_telegram", "slack_notify", "crm_upsert", "ticket_create", "no_action", "manual_review"}
 }
 
 func (a *ActionService) Execute(ctx context.Context, action domain.ProcessDecision, _ domain.Account, event domain.WebhookEvent, targets []domain.ForwardTarget) error {
@@ -48,62 +48,179 @@ func (a *ActionService) Execute(ctx context.Context, action domain.ProcessDecisi
 	case "store_mysql", "no_action", "manual_review":
 		return nil
 	case "forward_http":
-		return a.forwardHTTP(ctx, event.PayloadJSON, targets)
+		return a.forwardHTTP(ctx, action, event, targets)
 	case "forward_telegram":
-		return a.forwardTelegram(ctx, event.PayloadJSON, targets)
+		return a.forwardTelegram(ctx, action, event, targets)
+	case "slack_notify":
+		return a.notifyIntegration(ctx, action, event, targets)
+	case "crm_upsert", "ticket_create":
+		return a.postStructuredIntegration(ctx, action, event, targets)
 	default:
 		return fmt.Errorf("unknown action: %s", action.ActionName)
 	}
 }
 
-func (a *ActionService) forwardHTTP(ctx context.Context, payload string, targets []domain.ForwardTarget) error {
+func (a *ActionService) forwardHTTP(ctx context.Context, action domain.ProcessDecision, event domain.WebhookEvent, targets []domain.ForwardTarget) error {
+	payload := event.PayloadJSON
+	targetKey, _ := action.Params["integration_target_key"].(string)
+	targetKey = strings.TrimSpace(targetKey)
+	if targetKey != "" {
+		target, ok := resolveIntegrationTarget(targets, targetKey, action.ActionName)
+		if !ok {
+			return fmt.Errorf("integration target not found: %s", targetKey)
+		}
+		return a.postJSONToHTTP(ctx, HydrateForwardTarget(target), payload)
+	}
 	for _, t := range targets {
-		if t.TargetType != "http" {
+		target := HydrateForwardTarget(t)
+		if target.TargetType != "http" || !target.Enabled {
 			continue
 		}
-		var cfg map[string]string
-		_ = json.Unmarshal([]byte(t.ConfigJSON), &cfg)
-		url := strings.TrimSpace(cfg["url"])
-		if url == "" {
-			continue
-		}
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, strings.NewReader(payload))
-		if err != nil {
+		if err := a.postJSONToHTTP(ctx, target, payload); err != nil {
 			return err
 		}
-		req.Header.Set("Content-Type", "application/json")
-		resp, err := a.Client.Do(req)
-		if err != nil {
-			return err
-		}
-		_ = resp.Body.Close()
 	}
 	return nil
 }
 
-func (a *ActionService) forwardTelegram(ctx context.Context, payload string, targets []domain.ForwardTarget) error {
+func (a *ActionService) forwardTelegram(ctx context.Context, action domain.ProcessDecision, event domain.WebhookEvent, targets []domain.ForwardTarget) error {
 	if a.Telegram == nil {
 		return fmt.Errorf("telegram client unavailable")
 	}
-	for _, t := range targets {
-		if t.TargetType != "telegram" {
-			continue
+	targetKey, _ := action.Params["integration_target_key"].(string)
+	targetKey = strings.TrimSpace(targetKey)
+	if targetKey == "" {
+		for _, raw := range targets {
+			target := HydrateForwardTarget(raw)
+			if target.TargetType != "telegram" || !target.Enabled {
+				continue
+			}
+			if err := a.sendTelegramMessage(ctx, target, buildIntegrationEnvelope(action, event)); err != nil {
+				return err
+			}
 		}
-		var cfg map[string]string
-		_ = json.Unmarshal([]byte(t.ConfigJSON), &cfg)
-		chatID := strings.TrimSpace(cfg["chat_id"])
-		if chatID == "" {
-			continue
-		}
-		text := payload
-		if len(text) > 3000 {
-			text = text[:3000]
-		}
-		if err := a.Telegram.SendMessage(ctx, chatID, text); err != nil {
-			return err
-		}
+		return nil
 	}
+	target, ok := resolveIntegrationTarget(targets, targetKey, action.ActionName)
+	if !ok {
+		return fmt.Errorf("integration target not found: %s", targetKey)
+	}
+	return a.sendTelegramMessage(ctx, HydrateForwardTarget(target), buildIntegrationEnvelope(action, event))
+}
+
+func (a *ActionService) notifyIntegration(ctx context.Context, action domain.ProcessDecision, event domain.WebhookEvent, targets []domain.ForwardTarget) error {
+	targetKey, _ := action.Params["integration_target_key"].(string)
+	target, ok := resolveIntegrationTarget(targets, strings.TrimSpace(targetKey), action.ActionName)
+	if !ok {
+		return fmt.Errorf("integration target not found: %s", targetKey)
+	}
+	target = HydrateForwardTarget(target)
+	message := buildNotificationMessage(action, event)
+	switch target.TargetType {
+	case "telegram":
+		return a.sendTelegramMessage(ctx, target, message)
+	case "http":
+		return a.postJSONToHTTP(ctx, target, buildIntegrationEnvelope(action, event))
+	default:
+		return fmt.Errorf("unsupported target type for slack_notify: %s", target.TargetType)
+	}
+}
+
+func (a *ActionService) postStructuredIntegration(ctx context.Context, action domain.ProcessDecision, event domain.WebhookEvent, targets []domain.ForwardTarget) error {
+	targetKey, _ := action.Params["integration_target_key"].(string)
+	target, ok := resolveIntegrationTarget(targets, strings.TrimSpace(targetKey), action.ActionName)
+	if !ok {
+		return fmt.Errorf("integration target not found: %s", targetKey)
+	}
+	target = HydrateForwardTarget(target)
+	if target.TargetType != "http" {
+		return fmt.Errorf("structured integration target must be http, got %s", target.TargetType)
+	}
+	return a.postJSONToHTTP(ctx, target, buildIntegrationEnvelope(action, event))
+}
+
+func (a *ActionService) sendTelegramMessage(ctx context.Context, target domain.ForwardTarget, text string) error {
+	if a.Telegram == nil {
+		return fmt.Errorf("telegram client unavailable")
+	}
+	cfg := parseIntegrationTargetConfig(target.TargetType, target.ConfigJSON)
+	chatID, _ := cfg.Config["chat_id"].(string)
+	chatID = strings.TrimSpace(chatID)
+	if chatID == "" {
+		return fmt.Errorf("telegram target %s missing chat_id", target.TargetKey)
+	}
+	if len(text) > 3000 {
+		text = text[:3000]
+	}
+	return a.Telegram.SendMessage(ctx, chatID, text)
+}
+
+func (a *ActionService) postJSONToHTTP(ctx context.Context, target domain.ForwardTarget, payload string) error {
+	cfg := parseIntegrationTargetConfig(target.TargetType, target.ConfigJSON)
+	url, _ := cfg.Config["url"].(string)
+	url = strings.TrimSpace(url)
+	if url == "" {
+		return fmt.Errorf("http target %s missing url", target.TargetKey)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, strings.NewReader(payload))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := a.Client.Do(req)
+	if err != nil {
+		return err
+	}
+	_ = resp.Body.Close()
 	return nil
+}
+
+func buildIntegrationEnvelope(action domain.ProcessDecision, event domain.WebhookEvent) string {
+	payloadValue := asJSONValue(event.PayloadJSON)
+	rawPayloadValue := asJSONValue(event.RawPayloadJSON)
+	payload := map[string]interface{}{
+		"action_name":    action.ActionName,
+		"reason":         action.Reason,
+		"params":         action.Params,
+		"processed_text": action.ProcessedText,
+		"tags":           action.Tags,
+		"event": map[string]interface{}{
+			"id":               event.ID,
+			"type_key":         event.TypeKey,
+			"request_id":       event.RequestID,
+			"source_event_id":  event.SourceEventID,
+			"payload_json":     payloadValue,
+			"raw_payload_json": rawPayloadValue,
+		},
+	}
+	b, _ := json.Marshal(payload)
+	return string(b)
+}
+
+func buildNotificationMessage(action domain.ProcessDecision, event domain.WebhookEvent) string {
+	if raw, ok := action.Params["message_fields"].(map[string]interface{}); ok && len(raw) > 0 {
+		b, _ := json.Marshal(raw)
+		return string(b)
+	}
+	if strings.TrimSpace(action.ProcessedText) != "" {
+		return action.ProcessedText
+	}
+	if strings.TrimSpace(event.ProcessedText) != "" {
+		return event.ProcessedText
+	}
+	return payloadToText(event.PayloadJSON)
+}
+
+func asJSONValue(raw string) interface{} {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return nil
+	}
+	var out interface{}
+	if err := json.Unmarshal([]byte(trimmed), &out); err == nil {
+		return out
+	}
+	return trimmed
 }
 
 type Processor struct {
@@ -203,10 +320,20 @@ func (p *Processor) processWithPolicy(ctx context.Context, account domain.Accoun
 	if p.Pinecone != nil {
 		memories, _ = p.Pinecone.Query(ctx, account.ID, workingPayload, 5)
 	}
+	targets, _ := p.Store.ListForwardTargets(ctx, account.ID)
 
 	decision := domain.ProcessDecision{ActionName: "store_mysql", Reason: "default", Params: map[string]interface{}{}}
-	skill, matched := chooseSkill(policyCtx.Skills, workingPayload)
-	log.Printf("reprocess.policy event_id=%s type_key=%s matched_skill=%t skill_key=%s payload_bytes=%d payload_sha256=%x skill_count=%d memories=%d", event.ID, whType.TypeKey, matched, skill.SkillKey, len(payload), payloadFingerprint(payload), len(policyCtx.Skills), len(memories))
+	route := routeEvent(ctx, p.LLM, whType.TypeKey, workingPayload, policyCtx.Skills)
+	selectedSkills := selectSkillsForExecution(policyCtx.Skills, route.SelectedSkillKeys)
+	if len(selectedSkills) == 0 && len(route.Candidates) > 0 {
+		selectedSkills = []domain.WebhookSkill{route.Candidates[0].Skill}
+	}
+	skill, matched := chooseSkill(selectedSkills, workingPayload)
+	log.Printf("reprocess.policy event_id=%s type_key=%s matched_skill=%t skill_key=%s payload_bytes=%d payload_sha256=%x skill_count=%d memories=%d route=%s", event.ID, whType.TypeKey, matched, skill.SkillKey, len(payload), payloadFingerprint(payload), len(policyCtx.Skills), len(memories), routeLogSummary(route))
+	if route.SpamLabel == spamLabelSpam && len(selectedSkills) == 0 {
+		decision.ActionName = "no_action"
+		decision.Reason = "deterministic spam gate"
+	}
 	if matched && strings.TrimSpace(skill.ForcedAction) != "" {
 		decision.ActionName = strings.TrimSpace(skill.ForcedAction)
 		decision.Reason = "skill:" + skill.SkillKey
@@ -219,8 +346,15 @@ func (p *Processor) processWithPolicy(ctx context.Context, account domain.Accoun
 		decision.ActionName = strings.TrimSpace(whType.PlainTextAction)
 		decision.Reason = "type plain text action"
 	}
+	if route.CandidateAction != "" && decision.ActionName == "store_mysql" {
+		decision.ActionName = route.CandidateAction
+		decision.Reason = "router:" + route.CandidateAction
+		decision.Params["integration_target_key"] = route.IntegrationTargetKey
+	}
 
-	needsLLM := (whType.UseLLMFallback && decision.ActionName == "store_mysql") || policyCtx.MasterPrompt != "" || (matched && skill.SkillPrompt != "")
+	activePolicy := policyCtx
+	activePolicy.Skills = selectedSkills
+	needsLLM := (whType.UseLLMFallback && decision.ActionName == "store_mysql") || activePolicy.MasterPrompt != "" || (matched && skill.SkillPrompt != "") || route.CandidateAction != ""
 	log.Printf("reprocess.llm_decision event_id=%s type_key=%s needs_llm=%t deterministic_only=%t use_llm_fallback=%t matched_skill_prompt=%t master_prompt=%t initial_action=%s", event.ID, whType.TypeKey, needsLLM, p.IsDeterministicOnlyType(whType.TypeKey), whType.UseLLMFallback, matched && strings.TrimSpace(skill.SkillPrompt) != "", policyCtx.MasterPrompt != "", decision.ActionName)
 	var llmTrace observability.LLMDecisionTrace
 	if needsLLM && !p.IsDeterministicOnlyType(whType.TypeKey) {
@@ -250,8 +384,8 @@ func (p *Processor) processWithPolicy(ctx context.Context, account domain.Accoun
 				ctx = observability.WithLLMTrace(ctx, llmTrace)
 			}
 			llmPayloadSource := compaction.CompactedPayload
-			if policyCtx.MasterPrompt != "" || len(policyCtx.Skills) > 0 {
-				llmPayloadSource = buildPolicyAwarePayload(compaction.CompactedPayload, policyCtx)
+			if activePolicy.MasterPrompt != "" || len(activePolicy.Skills) > 0 {
+				llmPayloadSource = buildPolicyAwarePayload(compaction.CompactedPayload, activePolicy)
 			}
 			ratio := 1.0
 			if compaction.OriginalBytes > 0 {
@@ -275,8 +409,19 @@ func (p *Processor) processWithPolicy(ctx context.Context, account domain.Accoun
 					// Deterministic action wins, but use LLM's processed text
 					decision.ProcessedText = d.ProcessedText
 					decision.Tags = d.Tags
+					if route.IntegrationTargetKey != "" {
+						decision.Params["integration_target_key"] = route.IntegrationTargetKey
+					}
 				} else {
 					decision = d
+					if route.IntegrationTargetKey != "" {
+						if decision.Params == nil {
+							decision.Params = map[string]interface{}{}
+						}
+						if _, ok := decision.Params["integration_target_key"]; !ok {
+							decision.Params["integration_target_key"] = route.IntegrationTargetKey
+						}
+					}
 				}
 			} else {
 				decision.Reason = "llm processing failed: " + derr.Error()
@@ -285,7 +430,15 @@ func (p *Processor) processWithPolicy(ctx context.Context, account domain.Accoun
 		}
 	}
 
-	targets, _ := p.Store.ListForwardTargets(ctx, account.ID)
+	normalizedDecision, validationErr := validateAndNormalizeDecision(decision, targets)
+	if validationErr != nil {
+		log.Printf("reprocess.action_validation_failed event_id=%s type_key=%s action=%s err=%v", event.ID, whType.TypeKey, decision.ActionName, validationErr)
+		if normalizedDecision.ActionName != "store_mysql" && normalizedDecision.ActionName != "no_action" {
+			decision = newManualReviewDecision(validationErr.Error())
+		}
+	} else {
+		decision = normalizedDecision
+	}
 	err := p.Executor.Execute(ctx, decision, account, event, targets)
 	if err != nil {
 		_ = p.Store.UpdateEventStatus(ctx, event.ID, "failed", decision.ActionName)

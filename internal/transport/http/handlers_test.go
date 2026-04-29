@@ -370,3 +370,59 @@ func TestEndToEndLocalFlow(t *testing.T) {
 		t.Fatalf("events status %d", resp5.StatusCode)
 	}
 }
+
+func TestCreateAndListForwardTargetsWithMetadata(t *testing.T) {
+	st := store.NewMemoryStore()
+	proc := &service.Processor{Store: st, Pinecone: integrations.NewPineconeClient("", "", "default"), LLM: integrations.NewLLMClient("", "", "", ""), Executor: service.NewActionService(nil)}
+	h := &Handler{Store: st, Processor: proc}
+	r := NewRouter(h, auth.TokenVerifier{Store: st})
+	ts := httptest.NewServer(r)
+	defer ts.Close()
+
+	regBody := []byte(`{"email":"7204909316@agentmail.to"}`)
+	resp, err := http.Post(ts.URL+"/api/register/email", "application/json", bytes.NewReader(regBody))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var reg map[string]interface{}
+	_ = json.NewDecoder(resp.Body).Decode(&reg)
+	token := reg["token"].(string)
+
+	targetReq := []byte(`{"target_key":"hubspot_primary","target_type":"http","purpose":"Primary CRM","enabled":true,"allowed_actions":["crm_upsert"],"config":{"url":"https://example.com/hubspot"}}`)
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/forward-targets", bytes.NewReader(targetReq))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	resp2, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp2.Body.Close()
+	if resp2.StatusCode != http.StatusCreated {
+		t.Fatalf("create forward target status %d", resp2.StatusCode)
+	}
+	var created map[string]interface{}
+	_ = json.NewDecoder(resp2.Body).Decode(&created)
+	if created["target_key"] != "hubspot_primary" {
+		t.Fatalf("expected target_key hubspot_primary, got %v", created["target_key"])
+	}
+
+	req2, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/forward-targets", nil)
+	req2.Header.Set("Authorization", "Bearer "+token)
+	resp3, err := http.DefaultClient.Do(req2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp3.Body.Close()
+	if resp3.StatusCode != http.StatusOK {
+		t.Fatalf("list forward targets status %d", resp3.StatusCode)
+	}
+	var targets []map[string]interface{}
+	_ = json.NewDecoder(resp3.Body).Decode(&targets)
+	if len(targets) != 1 {
+		t.Fatalf("expected 1 forward target, got %d", len(targets))
+	}
+	if targets[0]["purpose"] != "Primary CRM" {
+		t.Fatalf("expected purpose to round-trip, got %v", targets[0]["purpose"])
+	}
+}

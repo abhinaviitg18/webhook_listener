@@ -60,6 +60,7 @@ func NewRouter(h *Handler, verifier auth.RequestVerifier) http.Handler {
 		ar.Post("/api/webhooks/secrets", h.CreateSecret)
 		ar.Delete("/api/webhooks/secrets/{secretID}", h.DeleteSecret)
 		ar.Post("/api/forward-targets", h.CreateForwardTarget)
+		ar.Get("/api/forward-targets", h.ListForwardTargets)
 		ar.Get("/api/events", h.ListEvents)
 		ar.Get("/api/events/by-tag", h.ListEventsByTag)
 		ar.Post("/api/events/{eventID}/re-run", h.ReprocessEvent)
@@ -600,19 +601,55 @@ func (h *Handler) CreateForwardTarget(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		TargetType string          `json:"target_type"`
-		Config     json.RawMessage `json:"config"`
+		TargetKey      string                 `json:"target_key"`
+		TargetType     string                 `json:"target_type"`
+		Purpose        string                 `json:"purpose"`
+		Enabled        *bool                  `json:"enabled"`
+		AllowedActions []string               `json:"allowed_actions"`
+		Schema         map[string]interface{} `json:"schema"`
+		Config         map[string]interface{} `json:"config"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeErr(w, http.StatusBadRequest, "invalid json")
 		return
 	}
-	t, err := h.Store.CreateForwardTarget(r.Context(), acct.ID, strings.TrimSpace(body.TargetType), string(body.Config))
+	targetType := strings.TrimSpace(body.TargetType)
+	if targetType == "" {
+		writeErr(w, http.StatusBadRequest, "target_type required")
+		return
+	}
+	targetKey := strings.TrimSpace(body.TargetKey)
+	if targetKey == "" {
+		targetKey = strings.ToLower(targetType) + "-" + shortID()
+	}
+	enabled := true
+	if body.Enabled != nil {
+		enabled = *body.Enabled
+	}
+	configJSON := service.BuildIntegrationTargetConfig(targetKey, body.Purpose, enabled, body.AllowedActions, body.Schema, body.Config)
+	t, err := h.Store.CreateForwardTarget(r.Context(), acct.ID, targetType, configJSON)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusCreated, t)
+	writeJSON(w, http.StatusCreated, service.HydrateForwardTarget(t))
+}
+
+func (h *Handler) ListForwardTargets(w http.ResponseWriter, r *http.Request) {
+	acct, ok := auth.AccountFromContext(r.Context())
+	if !ok {
+		writeErr(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	targets, err := h.Store.ListForwardTargets(r.Context(), acct.ID)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	for i := range targets {
+		targets[i] = service.HydrateForwardTarget(targets[i])
+	}
+	writeJSON(w, http.StatusOK, targets)
 }
 
 func (h *Handler) ListEvents(w http.ResponseWriter, r *http.Request) {
