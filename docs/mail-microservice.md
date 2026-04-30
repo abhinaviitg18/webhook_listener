@@ -64,3 +64,8 @@ Cloudflare guidance:
 - Publish SES DKIM CNAME records as DNS-only
 - MX/TXT records remain DNS-only
 - If Cloudflare Email Routing is enabled on `app.agenthook.store`, remove those routing MX/TXT records before enabling SES inbound receiving
+
+Reusable provisioning guidance:
+
+- `scripts/aws/setup_ses_mail_domain.sh`
+- `docs/setup-ses-mail-domain.md`
