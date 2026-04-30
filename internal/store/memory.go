@@ -17,9 +17,10 @@ import (
 type MemoryStore struct {
 	mu sync.RWMutex
 
-	accountsByID   map[string]domain.Account
-	accountsBySlug map[string]string
-	tokens         map[string]string
+	accountsByID    map[string]domain.Account
+	accountsBySlug  map[string]string
+	accountsByAlias map[string]string
+	tokens          map[string]string
 
 	typesByID         map[string]domain.WebhookType
 	typesByAccountKey map[string]string
@@ -46,6 +47,7 @@ func NewMemoryStore() *MemoryStore {
 	return &MemoryStore{
 		accountsByID:       map[string]domain.Account{},
 		accountsBySlug:     map[string]string{},
+		accountsByAlias:    map[string]string{},
 		tokens:             map[string]string{},
 		typesByID:          map[string]domain.WebhookType{},
 		typesByAccountKey:  map[string]string{},
@@ -83,14 +85,16 @@ func (s *MemoryStore) CreateAccount(_ context.Context, email string) (domain.Acc
 		return domain.Account{}, "", err
 	}
 	acct := domain.Account{
-		ID:         id,
-		Slug:       slug,
-		OwnerEmail: email,
-		TokenHash:  security.HashValue(token),
-		CreatedAt:  time.Now().UTC(),
+		ID:          id,
+		Slug:        slug,
+		PublicAlias: slug,
+		OwnerEmail:  email,
+		TokenHash:   security.HashValue(token),
+		CreatedAt:   time.Now().UTC(),
 	}
 	s.accountsByID[id] = acct
 	s.accountsBySlug[slug] = id
+	s.accountsByAlias[acct.PublicAlias] = id
 	s.tokens[acct.TokenHash] = id
 	return acct, token, nil
 }
@@ -99,6 +103,16 @@ func (s *MemoryStore) GetAccountBySlug(_ context.Context, slug string) (domain.A
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	id, ok := s.accountsBySlug[slug]
+	if !ok {
+		return domain.Account{}, errors.New("account not found")
+	}
+	return s.accountsByID[id], nil
+}
+
+func (s *MemoryStore) GetAccountByPublicAlias(_ context.Context, alias string) (domain.Account, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	id, ok := s.accountsByAlias[alias]
 	if !ok {
 		return domain.Account{}, errors.New("account not found")
 	}
@@ -148,6 +162,23 @@ func (s *MemoryStore) GetAccount(_ context.Context, id string) (domain.Account, 
 	if !ok {
 		return domain.Account{}, errors.New("account not found")
 	}
+	return acct, nil
+}
+
+func (s *MemoryStore) UpdateAccountPublicAlias(_ context.Context, accountID, publicAlias string) (domain.Account, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	acct, ok := s.accountsByID[accountID]
+	if !ok {
+		return domain.Account{}, errors.New("account not found")
+	}
+	if existingID, ok := s.accountsByAlias[publicAlias]; ok && existingID != accountID {
+		return domain.Account{}, errors.New("public alias already in use")
+	}
+	delete(s.accountsByAlias, acct.PublicAlias)
+	acct.PublicAlias = publicAlias
+	s.accountsByID[accountID] = acct
+	s.accountsByAlias[publicAlias] = accountID
 	return acct, nil
 }
 
@@ -232,6 +263,29 @@ func (s *MemoryStore) CreateSecret(_ context.Context, accountID, typeID string) 
 	s.secretsByID[id] = obj
 	s.secretByHash[raw] = id
 	return obj, raw, nil
+}
+
+func (s *MemoryStore) CreateSecretWithValue(_ context.Context, accountID, typeID, secretValue string) (domain.WebhookSecret, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if existingID, ok := s.secretByHash[secretValue]; ok {
+		existing := s.secretsByID[existingID]
+		if existing.AccountID == accountID && existing.Status == "active" {
+			return domain.WebhookSecret{}, errors.New("secret already in use")
+		}
+	}
+	id := uuid.NewString()
+	obj := domain.WebhookSecret{
+		ID:          id,
+		AccountID:   accountID,
+		TypeID:      typeID,
+		SecretValue: secretValue,
+		Status:      "active",
+		CreatedAt:   time.Now().UTC(),
+	}
+	s.secretsByID[id] = obj
+	s.secretByHash[secretValue] = id
+	return obj, nil
 }
 
 func (s *MemoryStore) ListSecrets(_ context.Context, accountID, typeID string) ([]domain.WebhookSecret, error) {

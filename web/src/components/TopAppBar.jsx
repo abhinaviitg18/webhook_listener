@@ -13,7 +13,7 @@ export const TopAppBar = ({ user, onLogout }) => {
       <div className="flex items-center gap-4">
         <div className="hidden sm:flex flex-col items-end leading-tight">
           <span className="text-xs font-medium text-slate-200">{user?.owner_email || 'Signed in'}</span>
-          <span className="text-[10px] uppercase tracking-[0.18em] text-slate-500">{user?.slug || 'dashboard'}</span>
+          <span className="text-[10px] uppercase tracking-[0.18em] text-slate-500">{user?.public_alias || user?.slug || 'dashboard'}</span>
         </div>
         <Zap className="text-primary fill-primary" size={20} />
         <button

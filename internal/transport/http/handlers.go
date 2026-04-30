@@ -84,6 +84,7 @@ func NewRouter(h *Handler, verifier auth.RequestVerifier) http.Handler {
 		ar.Put("/api/policy/skills/{skillID}", h.UpdateWebhookSkill)
 		ar.Post("/api/policy/skills/dry-run", h.DryRunSkills)
 		ar.Get("/api/me", h.UserInfo)
+		ar.Put("/api/me", h.UpdateAccountProfile)
 
 		ar.Post("/v1/listeners", h.CreateListener)
 		ar.Get("/v1/listeners", h.ListListeners)
@@ -103,6 +104,7 @@ func NewRouter(h *Handler, verifier auth.RequestVerifier) http.Handler {
 	r.Post("/url/{account}/{type}/{secret}", h.ReceiveWebhook)
 	r.Post("/url/{account}/{secret}", h.ReceiveWebhookAuto)
 	r.Post("/ingest/{account}/{provider}/{webhookID}/{secret}", h.ReceiveWebhookByProvider)
+	r.Post("/{aliasAndSecret}", h.ReceiveWebhookShort)
 
 	// Serve the embedded static frontend for all other routes (for SPA support)
 	r.Handle("/*", ui.StaticHandler())
@@ -238,6 +240,40 @@ func (h *Handler) UserInfo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, acct)
+}
+
+func (h *Handler) UpdateAccountProfile(w http.ResponseWriter, r *http.Request) {
+	acct, ok := auth.AccountFromContext(r.Context())
+	if !ok {
+		writeErr(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	var body struct {
+		PublicAlias string `json:"public_alias"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid json")
+		return
+	}
+	alias := normalizePublicAlias(body.PublicAlias)
+	if alias == "" {
+		writeErr(w, http.StatusBadRequest, "public_alias is required")
+		return
+	}
+	if len(alias) < 3 {
+		writeErr(w, http.StatusBadRequest, "public_alias must be at least 3 characters")
+		return
+	}
+	updated, err := h.Store.UpdateAccountPublicAlias(r.Context(), acct.ID, alias)
+	if err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "already in use") {
+			writeErr(w, http.StatusConflict, "public alias already in use")
+			return
+		}
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, updated)
 }
 
 func (h *Handler) scalekitBase() string {
@@ -419,6 +455,43 @@ func (h *Handler) publicBaseURL() string {
 		return v
 	}
 	return "https://app.agenthook.store"
+}
+
+func canonicalWebhookURL(baseURL, publicAlias, secret string) string {
+	return strings.TrimRight(baseURL, "/") + "/" + publicAlias + "." + secret
+}
+
+func canonicalWebhookID(publicAlias, secret string) string {
+	return publicAlias + "." + secret + "@app.agenthook.store"
+}
+
+func ingestWebhookURL(baseURL, accountSlug, provider, listenerID, secret string) string {
+	return strings.TrimRight(baseURL, "/") + "/ingest/" + accountSlug + "/" + provider + "/" + listenerID + "/" + secret
+}
+
+func legacyWebhookURL(baseURL, accountSlug, typeKey, secret string) string {
+	return strings.TrimRight(baseURL, "/") + "/url/" + accountSlug + "/" + typeKey + "/" + secret
+}
+
+func canonicalWebhookTemplate(baseURL, publicAlias string) string {
+	return strings.TrimRight(baseURL, "/") + "/" + publicAlias + ".[secret]"
+}
+
+func canonicalWebhookIDTemplate(publicAlias string) string {
+	return publicAlias + ".[secret]@app.agenthook.store"
+}
+
+func ingestWebhookTemplate(baseURL, accountSlug, provider, listenerID string) string {
+	return strings.TrimRight(baseURL, "/") + "/ingest/" + accountSlug + "/" + provider + "/" + listenerID + "/[secret]"
+}
+
+func parseAliasAndSecret(raw string) (string, string, bool) {
+	trimmed := strings.TrimSpace(raw)
+	idx := strings.Index(trimmed, ".")
+	if idx <= 0 || idx >= len(trimmed)-1 {
+		return "", "", false
+	}
+	return normalizePublicAlias(trimmed[:idx]), normalizeWebhookSecret(trimmed[idx+1:]), true
 }
 
 func (h *Handler) exchangeScaleKitCodeToLocalToken(ctx context.Context, code string) (string, error) {
@@ -1180,6 +1253,7 @@ func (h *Handler) CreateListener(w http.ResponseWriter, r *http.Request) {
 		DeploymentMode  string `json:"deployment_mode"`
 		PlainTextAction string `json:"plain_text_action"`
 		UseLLMFallback  bool   `json:"use_llm_fallback"`
+		SecretValue     string `json:"secret_value"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeErr(w, http.StatusBadRequest, "invalid json")
@@ -1201,22 +1275,43 @@ func (h *Handler) CreateListener(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	secret, raw, err := h.Store.CreateSecret(r.Context(), acct.ID, whType.ID)
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err.Error())
-		return
+	raw := normalizeWebhookSecret(body.SecretValue)
+	var secret domain.WebhookSecret
+	if raw == "" {
+		secret, raw, err = h.Store.CreateSecret(r.Context(), acct.ID, whType.ID)
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+	} else {
+		if !isValidWebhookSecret(raw) {
+			writeErr(w, http.StatusBadRequest, "secret_value must be 8-128 chars using lowercase letters, numbers, _ or -")
+			return
+		}
+		secret, err = h.Store.CreateSecretWithValue(r.Context(), acct.ID, whType.ID, raw)
+		if err != nil {
+			if strings.Contains(strings.ToLower(err.Error()), "already in use") {
+				writeErr(w, http.StatusConflict, "secret_value already in use")
+				return
+			}
+			writeErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
 	}
 	baseUrl := h.publicBaseURL()
 	writeJSON(w, http.StatusCreated, map[string]any{
-		"listener_id":      listenerID,
-		"provider":         provider,
-		"deployment_mode":  deploymentMode,
-		"type_key":         whType.TypeKey,
-		"secret_id":        secret.ID,
-		"secret_value":     raw,
-		"webhook_url":      baseUrl + "/ingest/" + acct.Slug + "/" + provider + "/" + listenerID + "/" + raw,
-		"legacy_webhook":   baseUrl + "/url/" + acct.Slug + "/" + whType.TypeKey + "/" + raw,
-		"required_headers": []string{"Content-Type: application/json"},
+		"listener_id":        listenerID,
+		"provider":           provider,
+		"deployment_mode":    deploymentMode,
+		"type_key":           whType.TypeKey,
+		"secret_id":          secret.ID,
+		"secret_value":       raw,
+		"webhook_url":        canonicalWebhookURL(baseUrl, acct.PublicAlias, raw),
+		"webhook_id":         canonicalWebhookID(acct.PublicAlias, raw),
+		"ingest_webhook_url": ingestWebhookURL(baseUrl, acct.Slug, provider, listenerID, raw),
+		"legacy_webhook_url": legacyWebhookURL(baseUrl, acct.Slug, whType.TypeKey, raw),
+		"legacy_webhook":     legacyWebhookURL(baseUrl, acct.Slug, whType.TypeKey, raw),
+		"required_headers":   []string{"Content-Type: application/json"},
 	})
 }
 
@@ -1239,16 +1334,19 @@ func (h *Handler) ListListeners(w http.ResponseWriter, r *http.Request) {
 		}
 		baseUrl := h.publicBaseURL()
 		resp = append(resp, map[string]any{
-			"listener_id":           ref.ListenerID,
-			"provider":              ref.Provider,
-			"deployment_mode":       ref.DeploymentMode,
-			"type_key":              item.TypeKey,
-			"plain_text_action":     item.PlainTextAction,
-			"use_llm_fallback":      item.UseLLMFallback,
-			"created_at":            item.CreatedAt,
-			"webhook_url_template":  baseUrl + "/ingest/" + acct.Slug + "/" + ref.Provider + "/" + ref.ListenerID + "/[secret]",
-			"legacy_webhook_url":    baseUrl + "/url/" + acct.Slug + "/" + item.TypeKey + "/[secret]",
-			"listener_display_name": ref.Provider + " · " + ref.ListenerID,
+			"listener_id":                 ref.ListenerID,
+			"provider":                    ref.Provider,
+			"deployment_mode":             ref.DeploymentMode,
+			"type_key":                    item.TypeKey,
+			"plain_text_action":           item.PlainTextAction,
+			"use_llm_fallback":            item.UseLLMFallback,
+			"created_at":                  item.CreatedAt,
+			"public_alias":                acct.PublicAlias,
+			"webhook_url_template":        canonicalWebhookTemplate(baseUrl, acct.PublicAlias),
+			"webhook_id_template":         canonicalWebhookIDTemplate(acct.PublicAlias),
+			"ingest_webhook_url_template": ingestWebhookTemplate(baseUrl, acct.Slug, ref.Provider, ref.ListenerID),
+			"legacy_webhook_url":          legacyWebhookURL(baseUrl, acct.Slug, item.TypeKey, "[secret]"),
+			"listener_display_name":       ref.Provider + " · " + ref.ListenerID,
 		})
 	}
 	writeJSON(w, http.StatusOK, resp)
@@ -1262,7 +1360,8 @@ func (h *Handler) CreateListenerSecret(w http.ResponseWriter, r *http.Request) {
 	}
 	listenerID := normalizeListenerID(chi.URLParam(r, "listenerID"))
 	var body struct {
-		Provider string `json:"provider"`
+		Provider    string `json:"provider"`
+		SecretValue string `json:"secret_value"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeErr(w, http.StatusBadRequest, "invalid json")
@@ -1278,19 +1377,40 @@ func (h *Handler) CreateListenerSecret(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusNotFound, "listener not found")
 		return
 	}
-	secret, raw, err := h.Store.CreateSecret(r.Context(), acct.ID, whType.ID)
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err.Error())
-		return
+	raw := normalizeWebhookSecret(body.SecretValue)
+	var secret domain.WebhookSecret
+	if raw == "" {
+		secret, raw, err = h.Store.CreateSecret(r.Context(), acct.ID, whType.ID)
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+	} else {
+		if !isValidWebhookSecret(raw) {
+			writeErr(w, http.StatusBadRequest, "secret_value must be 8-128 chars using lowercase letters, numbers, _ or -")
+			return
+		}
+		secret, err = h.Store.CreateSecretWithValue(r.Context(), acct.ID, whType.ID, raw)
+		if err != nil {
+			if strings.Contains(strings.ToLower(err.Error()), "already in use") {
+				writeErr(w, http.StatusConflict, "secret_value already in use")
+				return
+			}
+			writeErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
 	}
 	baseUrl := h.publicBaseURL()
 	writeJSON(w, http.StatusCreated, map[string]any{
-		"secret_id":       secret.ID,
-		"secret_value":    raw,
-		"webhook_url":     baseUrl + "/ingest/" + acct.Slug + "/" + provider + "/" + listenerID + "/" + raw,
-		"listener_id":     listenerID,
-		"provider":        provider,
-		"deployment_mode": parseModeFromTypeKey(whType.TypeKey),
+		"secret_id":          secret.ID,
+		"secret_value":       raw,
+		"webhook_url":        canonicalWebhookURL(baseUrl, acct.PublicAlias, raw),
+		"webhook_id":         canonicalWebhookID(acct.PublicAlias, raw),
+		"ingest_webhook_url": ingestWebhookURL(baseUrl, acct.Slug, provider, listenerID, raw),
+		"legacy_webhook_url": legacyWebhookURL(baseUrl, acct.Slug, whType.TypeKey, raw),
+		"listener_id":        listenerID,
+		"provider":           provider,
+		"deployment_mode":    parseModeFromTypeKey(whType.TypeKey),
 	})
 }
 
@@ -1320,11 +1440,14 @@ func (h *Handler) ListListenerSecrets(w http.ResponseWriter, r *http.Request) {
 	resp := make([]map[string]any, 0, len(secrets))
 	for _, sec := range secrets {
 		resp = append(resp, map[string]any{
-			"id":           sec.ID,
-			"status":       sec.Status,
-			"created_at":   sec.CreatedAt,
-			"secret_value": sec.SecretValue,
-			"webhook_url":  baseUrl + "/ingest/" + acct.Slug + "/" + provider + "/" + listenerID + "/" + sec.SecretValue,
+			"id":                 sec.ID,
+			"status":             sec.Status,
+			"created_at":         sec.CreatedAt,
+			"secret_value":       sec.SecretValue,
+			"webhook_url":        canonicalWebhookURL(baseUrl, acct.PublicAlias, sec.SecretValue),
+			"webhook_id":         canonicalWebhookID(acct.PublicAlias, sec.SecretValue),
+			"ingest_webhook_url": ingestWebhookURL(baseUrl, acct.Slug, provider, listenerID, sec.SecretValue),
+			"legacy_webhook_url": legacyWebhookURL(baseUrl, acct.Slug, whType.TypeKey, sec.SecretValue),
 		})
 	}
 	writeJSON(w, http.StatusOK, resp)
@@ -1501,6 +1624,90 @@ func (h *Handler) ReceiveWebhookByProvider(w http.ResponseWriter, r *http.Reques
 		"event":       event,
 		"decision":    decision,
 	})
+}
+
+func (h *Handler) ReceiveWebhookShort(w http.ResponseWriter, r *http.Request) {
+	publicAlias, secretRaw, ok := parseAliasAndSecret(chi.URLParam(r, "aliasAndSecret"))
+	if !ok {
+		writeErr(w, http.StatusNotFound, "not found")
+		return
+	}
+	acct, err := h.Store.GetAccountByPublicAlias(r.Context(), publicAlias)
+	if err != nil {
+		writeErr(w, http.StatusNotFound, "account not found")
+		return
+	}
+	sec, err := h.Store.ResolveSecretAnyType(r.Context(), acct.ID, secretRaw)
+	if err != nil {
+		writeErr(w, http.StatusUnauthorized, "invalid secret")
+		return
+	}
+	buf, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "failed to read payload")
+		return
+	}
+	if h.VerifyHTCSignature {
+		if err := verifyHTCSignature(secretRaw, r.Header.Get("X-HTC-Webhook-Timestamp"), r.Header.Get("X-HTC-Webhook-Signature"), buf); err != nil {
+			writeErr(w, http.StatusUnauthorized, "invalid webhook signature")
+			return
+		}
+	}
+	headers := requestHeaders(r)
+	whType, err := h.Store.GetWebhookTypeByID(r.Context(), sec.TypeID)
+	if err != nil {
+		writeErr(w, http.StatusNotFound, "type not found")
+		return
+	}
+	if h.Processor != nil && h.Processor.IsDeterministicOnlyType(whType.TypeKey) {
+		requestID := r.Header.Get("X-Request-Id")
+		if requestID == "" {
+			requestID = uuid.NewString()
+		}
+		event, decision, pErr := h.Processor.ProcessWebhook(r.Context(), acct, whType, sec, requestID, string(buf))
+		if pErr != nil {
+			writeErr(w, http.StatusInternalServerError, "processing failed: "+pErr.Error())
+			return
+		}
+		writeJSON(w, http.StatusAccepted, map[string]any{
+			"event":    event,
+			"decision": decision,
+			"resolution": domain.TypeResolution{
+				TypeKey:      whType.TypeKey,
+				Confidence:   1,
+				Source:       "deterministic_locked",
+				Reason:       "type is configured as deterministic-only",
+				ManualReview: false,
+			},
+		})
+		return
+	}
+	resolution, err := h.Processor.ResolveType(r.Context(), acct.ID, string(buf), headers)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "type resolution failed: "+err.Error())
+		return
+	}
+	if resolution.TypeKey != "" && resolution.TypeKey != "unknown" {
+		if matched, mErr := h.Store.GetWebhookTypeByAccountAndKey(r.Context(), acct.ID, resolution.TypeKey); mErr == nil {
+			whType = matched
+		}
+	}
+	processCtx := r.Context()
+	if strings.TrimSpace(resolution.TypeKey) == "" || resolution.TypeKey == "unknown" {
+		whType.PlainTextAction = ""
+		whType.UseLLMFallback = true
+		processCtx = service.WithSkipTransform(processCtx)
+	}
+	requestID := r.Header.Get("X-Request-Id")
+	if requestID == "" {
+		requestID = uuid.NewString()
+	}
+	event, decision, err := h.Processor.ProcessWebhook(processCtx, acct, whType, sec, requestID, string(buf))
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "processing failed: "+err.Error())
+		return
+	}
+	writeJSON(w, http.StatusAccepted, map[string]any{"event": event, "decision": decision, "resolution": resolution})
 }
 
 func (h *Handler) ReceiveWebhookAuto(w http.ResponseWriter, r *http.Request) {

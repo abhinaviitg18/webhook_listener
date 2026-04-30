@@ -1,10 +1,13 @@
 package httpapi
 
 import (
+	"regexp"
 	"strings"
 )
 
 const listenerTypePrefix = "lis::"
+
+var manualSecretPattern = regexp.MustCompile(`^[a-z0-9_-]{8,128}$`)
 
 type listenerRef struct {
 	Provider       string `json:"provider"`
@@ -58,4 +61,39 @@ func normalizeDeploymentMode(in string) string {
 	default:
 		return "multitenant"
 	}
+}
+
+func normalizePublicAlias(in string) string {
+	alias := strings.ToLower(strings.TrimSpace(in))
+	alias = strings.ReplaceAll(alias, " ", "-")
+	var b strings.Builder
+	lastDash := false
+	for _, r := range alias {
+		valid := (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-' || r == '_'
+		if !valid {
+			if !lastDash {
+				b.WriteByte('-')
+				lastDash = true
+			}
+			continue
+		}
+		if r == '-' {
+			if lastDash {
+				continue
+			}
+			lastDash = true
+		} else {
+			lastDash = false
+		}
+		b.WriteRune(r)
+	}
+	return strings.Trim(b.String(), "-_")
+}
+
+func normalizeWebhookSecret(in string) string {
+	return strings.TrimSpace(in)
+}
+
+func isValidWebhookSecret(secret string) bool {
+	return manualSecretPattern.MatchString(secret)
 }

@@ -28,6 +28,7 @@ func TestListenerV1CreateIngestAndListEvents(t *testing.T) {
 	r := NewRouter(h, auth.TokenVerifier{Store: st})
 	ts := httptest.NewServer(r)
 	defer ts.Close()
+	h.PublicBaseURL = ts.URL
 
 	acct, token, err := registerAccount(ts.URL, "techhiring@agentmail.to")
 	if err != nil {
@@ -54,6 +55,12 @@ func TestListenerV1CreateIngestAndListEvents(t *testing.T) {
 	if webhookURL == "" {
 		t.Fatal("missing webhook_url")
 	}
+	if !strings.Contains(webhookURL, acct["slug"].(string)+".") {
+		t.Fatalf("expected short webhook url, got %q", webhookURL)
+	}
+	if created["webhook_id"] == "" {
+		t.Fatal("missing webhook_id")
+	}
 	if created["deployment_mode"] != "single_tenant" {
 		t.Fatalf("expected single_tenant, got %v", created["deployment_mode"])
 	}
@@ -73,6 +80,31 @@ func TestListenerV1CreateIngestAndListEvents(t *testing.T) {
 	defer resp2.Body.Close()
 	if resp2.StatusCode != http.StatusAccepted {
 		t.Fatalf("unexpected ingest status %d", resp2.StatusCode)
+	}
+
+	ingestWebhookURL, _ := created["ingest_webhook_url"].(string)
+	if ingestWebhookURL == "" {
+		t.Fatal("missing ingest_webhook_url")
+	}
+	legacyURL, _ := created["legacy_webhook_url"].(string)
+	if legacyURL == "" {
+		t.Fatal("missing legacy_webhook_url")
+	}
+
+	uLegacy, _ := url.Parse(ingestWebhookURL)
+	if uLegacy != nil && uLegacy.Path != "" {
+		uLegacy.Scheme = "http"
+		uLegacy.Host = strings.TrimPrefix(ts.URL, "http://")
+		ingestWebhookURL = uLegacy.String()
+	}
+	legacyPayload := []byte(`{"event_id":"evt_v1_2","event_type":"message.received","message":{"text":"hello listener v1 again"}}`)
+	respLegacy, err := http.Post(ingestWebhookURL, "application/json", bytes.NewReader(legacyPayload))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer respLegacy.Body.Close()
+	if respLegacy.StatusCode != http.StatusAccepted {
+		t.Fatalf("unexpected legacy ingest status %d", respLegacy.StatusCode)
 	}
 
 	listenerID, _ := created["listener_id"].(string)
@@ -111,8 +143,8 @@ func TestListenerV1CreateIngestAndListEvents(t *testing.T) {
 	if err := json.NewDecoder(resp3.Body).Decode(&events); err != nil {
 		t.Fatal(err)
 	}
-	if len(events) != 1 {
-		t.Fatalf("expected 1 listener event, got %d", len(events))
+	if len(events) != 2 {
+		t.Fatalf("expected 2 listener events, got %d", len(events))
 	}
 	if events[0]["provider"] != "agentmail" {
 		t.Fatalf("unexpected provider %v", events[0]["provider"])
@@ -129,6 +161,93 @@ func TestListenerV1CreateIngestAndListEvents(t *testing.T) {
 	}
 	if len(types) == 0 {
 		t.Fatal("expected created type")
+	}
+}
+
+func TestListenerV1ManualSecretAndAliasUpdate(t *testing.T) {
+	st := store.NewMemoryStore()
+	proc := &service.Processor{
+		Store:    st,
+		Pinecone: integrations.NewPineconeClient("", "", ""),
+		LLM:      integrations.NewLLMClient("", "", "", ""),
+		Executor: service.NewActionService(nil),
+	}
+	h := &Handler{Store: st, Processor: proc}
+	r := NewRouter(h, auth.TokenVerifier{Store: st})
+	ts := httptest.NewServer(r)
+	defer ts.Close()
+	h.PublicBaseURL = ts.URL
+
+	_, token, err := registerAccount(ts.URL, "techhiring@agentmail.to")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	updateReqBody := []byte(`{"public_alias":"ops-router"}`)
+	updateReq, _ := http.NewRequest(http.MethodPut, ts.URL+"/api/me", bytes.NewReader(updateReqBody))
+	updateReq.Header.Set("Authorization", "Bearer "+token)
+	updateReq.Header.Set("Content-Type", "application/json")
+	updateResp, err := http.DefaultClient.Do(updateReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer updateResp.Body.Close()
+	if updateResp.StatusCode != http.StatusOK {
+		t.Fatalf("unexpected update status %d", updateResp.StatusCode)
+	}
+	var updated map[string]interface{}
+	if err := json.NewDecoder(updateResp.Body).Decode(&updated); err != nil {
+		t.Fatal(err)
+	}
+	if updated["public_alias"] != "ops-router" {
+		t.Fatalf("expected updated alias, got %v", updated["public_alias"])
+	}
+
+	createBody := []byte(`{"provider":"generic-json","listener_id":"moble","deployment_mode":"multitenant","plain_text_action":"store_mysql","use_llm_fallback":false,"secret_value":"leadrouter_2026"}`)
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/v1/listeners", bytes.NewReader(createBody))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("unexpected create status %d", resp.StatusCode)
+	}
+	var created map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&created); err != nil {
+		t.Fatal(err)
+	}
+	webhookURL, _ := created["webhook_url"].(string)
+	if webhookURL != ts.URL+"/ops-router.leadrouter_2026" {
+		t.Fatalf("expected short manual secret url, got %q", webhookURL)
+	}
+	if created["webhook_id"] != "ops-router.leadrouter_2026@app.agenthook.store" {
+		t.Fatalf("unexpected webhook id %v", created["webhook_id"])
+	}
+
+	payload := []byte(`{"event_id":"evt_manual_secret","message":"hello short route"}`)
+	resp2, err := http.Post(webhookURL, "application/json", bytes.NewReader(payload))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp2.Body.Close()
+	if resp2.StatusCode != http.StatusAccepted {
+		t.Fatalf("unexpected short ingest status %d", resp2.StatusCode)
+	}
+
+	dupSecretReqBody := []byte(`{"provider":"generic-json","secret_value":"leadrouter_2026"}`)
+	dupSecretReq, _ := http.NewRequest(http.MethodPost, ts.URL+"/v1/listeners/moble/secrets", bytes.NewReader(dupSecretReqBody))
+	dupSecretReq.Header.Set("Authorization", "Bearer "+token)
+	dupSecretReq.Header.Set("Content-Type", "application/json")
+	dupResp, err := http.DefaultClient.Do(dupSecretReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer dupResp.Body.Close()
+	if dupResp.StatusCode != http.StatusConflict {
+		t.Fatalf("expected duplicate secret conflict, got %d", dupResp.StatusCode)
 	}
 }
 

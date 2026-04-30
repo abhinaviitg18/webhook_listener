@@ -8,30 +8,32 @@ export function AuthProvider({ children }) {
     const [error, setError] = useState(null);
     const [isAuthenticated, setIsAuthenticated] = useState(false);
 
-    useEffect(() => {
-        const fetchUser = async () => {
-            try {
-                const response = await fetch('/api/me', {
-                    headers: { 'Accept': 'application/json' },
-                    credentials: 'include'
-                });
-                if (response.ok) {
-                    const data = await response.json();
-                    setUser(data);
-                    setIsAuthenticated(true);
-                } else {
-                    setUser(null);
-                    setIsAuthenticated(false);
-                }
-            } catch (err) {
-                console.error("Auth check failed", err);
-                setUser(null);
-                setIsAuthenticated(false);
-            } finally {
-                setLoading(false);
+    const fetchUser = async () => {
+        try {
+            const response = await fetch('/api/me', {
+                headers: { 'Accept': 'application/json' },
+                credentials: 'include'
+            });
+            if (response.ok) {
+                const data = await response.json();
+                setUser(data);
+                setIsAuthenticated(true);
+                return data;
             }
-        };
+            setUser(null);
+            setIsAuthenticated(false);
+            return null;
+        } catch (err) {
+            console.error("Auth check failed", err);
+            setUser(null);
+            setIsAuthenticated(false);
+            return null;
+        } finally {
+            setLoading(false);
+        }
+    };
 
+    useEffect(() => {
         const params = new URLSearchParams(window.location.search);
         const authError = params.get('auth_error');
         if (authError) {
@@ -51,7 +53,7 @@ export function AuthProvider({ children }) {
     };
 
     return (
-        <AuthContext.Provider value={{ user, isAuthenticated, loading, error, login, logout }}>
+        <AuthContext.Provider value={{ user, setUser, refreshUser: fetchUser, isAuthenticated, loading, error, login, logout }}>
             {children}
         </AuthContext.Provider>
     );

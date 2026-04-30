@@ -25,6 +25,8 @@ type MySQLStore struct {
 	eventSchemaReady             bool
 	integrationSecretSchemaMu    sync.Mutex
 	integrationSecretSchemaReady bool
+	accountAliasSchemaMu         sync.Mutex
+	accountAliasSchemaReady      bool
 }
 
 type eventSelectVariant struct {
@@ -57,6 +59,17 @@ WHERE table_schema = DATABASE() AND table_name = ? AND column_name = ?`,
 	return err == nil && exists > 0
 }
 
+func (s *MySQLStore) indexExists(tableName, indexName string) bool {
+	var exists int
+	err := s.db.QueryRow(`
+SELECT COUNT(*)
+FROM information_schema.statistics
+WHERE table_schema = DATABASE() AND table_name = ? AND index_name = ?`,
+		tableName, indexName,
+	).Scan(&exists)
+	return err == nil && exists > 0
+}
+
 func (s *MySQLStore) ensureEventSchemaCapabilities() {
 	s.schemaCheckOnce.Do(func() {
 		s.hasRawPayloadJSON = s.columnExists("webhook_events", "raw_payload_json")
@@ -65,7 +78,33 @@ func (s *MySQLStore) ensureEventSchemaCapabilities() {
 	})
 }
 
+func (s *MySQLStore) ensureAccountAliasSchema(ctx context.Context) error {
+	s.accountAliasSchemaMu.Lock()
+	defer s.accountAliasSchemaMu.Unlock()
+	if s.accountAliasSchemaReady {
+		return nil
+	}
+	if !s.columnExists("accounts", "public_alias") {
+		if _, err := s.db.ExecContext(ctx, `ALTER TABLE accounts ADD COLUMN public_alias VARCHAR(128) NULL AFTER slug`); err != nil {
+			return err
+		}
+	}
+	if _, err := s.db.ExecContext(ctx, `UPDATE accounts SET public_alias=slug WHERE public_alias IS NULL OR public_alias=''`); err != nil {
+		return err
+	}
+	if !s.indexExists("accounts", "uq_accounts_public_alias") {
+		if _, err := s.db.ExecContext(ctx, `CREATE UNIQUE INDEX uq_accounts_public_alias ON accounts(public_alias)`); err != nil && !isDuplicateEntryErr(err) {
+			return err
+		}
+	}
+	s.accountAliasSchemaReady = true
+	return nil
+}
+
 func (s *MySQLStore) CreateAccount(ctx context.Context, email string) (domain.Account, string, error) {
+	if err := s.ensureAccountAliasSchema(ctx); err != nil {
+		return domain.Account{}, "", err
+	}
 	slug := slugFromEmail(email)
 	acct, err := s.GetAccountBySlug(ctx, slug)
 	if err == nil {
@@ -85,7 +124,7 @@ func (s *MySQLStore) CreateAccount(ctx context.Context, email string) (domain.Ac
 		return domain.Account{}, "", terr
 	}
 	hash := security.HashValue(token)
-	_, ierr := s.db.ExecContext(ctx, `INSERT INTO accounts(id, slug, owner_email, created_at) VALUES(?,?,?,UTC_TIMESTAMP())`, id, slug, email)
+	_, ierr := s.db.ExecContext(ctx, `INSERT INTO accounts(id, slug, public_alias, owner_email, created_at) VALUES(?,?,?,?,UTC_TIMESTAMP())`, id, slug, slug, email)
 	if ierr != nil {
 		return domain.Account{}, "", ierr
 	}
@@ -93,12 +132,27 @@ func (s *MySQLStore) CreateAccount(ctx context.Context, email string) (domain.Ac
 	if ierr != nil {
 		return domain.Account{}, "", ierr
 	}
-	return domain.Account{ID: id, Slug: slug, OwnerEmail: email, TokenHash: hash, CreatedAt: time.Now().UTC()}, token, nil
+	return domain.Account{ID: id, Slug: slug, PublicAlias: slug, OwnerEmail: email, TokenHash: hash, CreatedAt: time.Now().UTC()}, token, nil
 }
 
 func (s *MySQLStore) GetAccountBySlug(ctx context.Context, slug string) (domain.Account, error) {
+	if err := s.ensureAccountAliasSchema(ctx); err != nil {
+		return domain.Account{}, err
+	}
 	var a domain.Account
-	err := s.db.QueryRowContext(ctx, `SELECT id, slug, owner_email, created_at FROM accounts WHERE slug=? LIMIT 1`, slug).Scan(&a.ID, &a.Slug, &a.OwnerEmail, &a.CreatedAt)
+	err := s.db.QueryRowContext(ctx, `SELECT id, slug, COALESCE(NULLIF(public_alias,''), slug), owner_email, created_at FROM accounts WHERE slug=? LIMIT 1`, slug).Scan(&a.ID, &a.Slug, &a.PublicAlias, &a.OwnerEmail, &a.CreatedAt)
+	if err != nil {
+		return domain.Account{}, err
+	}
+	return a, nil
+}
+
+func (s *MySQLStore) GetAccountByPublicAlias(ctx context.Context, alias string) (domain.Account, error) {
+	if err := s.ensureAccountAliasSchema(ctx); err != nil {
+		return domain.Account{}, err
+	}
+	var a domain.Account
+	err := s.db.QueryRowContext(ctx, `SELECT id, slug, COALESCE(NULLIF(public_alias,''), slug), owner_email, created_at FROM accounts WHERE public_alias=? OR (COALESCE(public_alias,'')='' AND slug=?) LIMIT 1`, alias, alias).Scan(&a.ID, &a.Slug, &a.PublicAlias, &a.OwnerEmail, &a.CreatedAt)
 	if err != nil {
 		return domain.Account{}, err
 	}
@@ -106,15 +160,18 @@ func (s *MySQLStore) GetAccountBySlug(ctx context.Context, slug string) (domain.
 }
 
 func (s *MySQLStore) GetAccountByToken(ctx context.Context, token string) (domain.Account, error) {
+	if err := s.ensureAccountAliasSchema(ctx); err != nil {
+		return domain.Account{}, err
+	}
 	h := security.HashValue(token)
 	var a domain.Account
 	err := s.db.QueryRowContext(ctx, `
-SELECT a.id, a.slug, a.owner_email, a.created_at
+SELECT a.id, a.slug, COALESCE(NULLIF(a.public_alias,''), a.slug), a.owner_email, a.created_at
 FROM accounts a
 JOIN account_tokens t ON t.account_id=a.id
 WHERE t.token_hash=? AND t.revoked_at IS NULL
 ORDER BY t.created_at DESC
-LIMIT 1`, h).Scan(&a.ID, &a.Slug, &a.OwnerEmail, &a.CreatedAt)
+LIMIT 1`, h).Scan(&a.ID, &a.Slug, &a.PublicAlias, &a.OwnerEmail, &a.CreatedAt)
 	if err != nil {
 		return domain.Account{}, errors.New("unauthorized")
 	}
@@ -153,10 +210,27 @@ func (s *MySQLStore) CreateWebhookType(ctx context.Context, accountID, typeKey, 
 }
 
 func (s *MySQLStore) GetAccount(ctx context.Context, id string) (domain.Account, error) {
+	if err := s.ensureAccountAliasSchema(ctx); err != nil {
+		return domain.Account{}, err
+	}
 	var a domain.Account
-	err := s.db.QueryRowContext(ctx, "SELECT id, slug, owner_email, created_at FROM accounts WHERE id=?", id).
-		Scan(&a.ID, &a.Slug, &a.OwnerEmail, &a.CreatedAt)
+	err := s.db.QueryRowContext(ctx, "SELECT id, slug, COALESCE(NULLIF(public_alias,''), slug), owner_email, created_at FROM accounts WHERE id=?", id).
+		Scan(&a.ID, &a.Slug, &a.PublicAlias, &a.OwnerEmail, &a.CreatedAt)
 	return a, err
+}
+
+func (s *MySQLStore) UpdateAccountPublicAlias(ctx context.Context, accountID, publicAlias string) (domain.Account, error) {
+	if err := s.ensureAccountAliasSchema(ctx); err != nil {
+		return domain.Account{}, err
+	}
+	_, err := s.db.ExecContext(ctx, `UPDATE accounts SET public_alias=? WHERE id=?`, publicAlias, accountID)
+	if err != nil {
+		if isDuplicateEntryErr(err) {
+			return domain.Account{}, errors.New("public alias already in use")
+		}
+		return domain.Account{}, err
+	}
+	return s.GetAccount(ctx, accountID)
 }
 
 func (s *MySQLStore) ListWebhookTypes(ctx context.Context, accountID string) ([]domain.WebhookType, error) {
@@ -200,16 +274,37 @@ func (s *MySQLStore) DeleteWebhookType(ctx context.Context, accountID, typeID st
 }
 
 func (s *MySQLStore) CreateSecret(ctx context.Context, accountID, typeID string) (domain.WebhookSecret, string, error) {
-	raw, err := security.NewToken(18)
-	if err != nil {
-		return domain.WebhookSecret{}, "", err
+	for attempt := 0; attempt < 5; attempt++ {
+		raw, err := security.NewToken(18)
+		if err != nil {
+			return domain.WebhookSecret{}, "", err
+		}
+		secret, err := s.CreateSecretWithValue(ctx, accountID, typeID, raw)
+		if err == nil {
+			return secret, raw, nil
+		}
+		if !strings.Contains(strings.ToLower(err.Error()), "already in use") {
+			return domain.WebhookSecret{}, "", err
+		}
+	}
+	return domain.WebhookSecret{}, "", errors.New("failed to generate unique secret")
+}
+
+func (s *MySQLStore) CreateSecretWithValue(ctx context.Context, accountID, typeID, secretValue string) (domain.WebhookSecret, error) {
+	var existingID string
+	err := s.db.QueryRowContext(ctx, `SELECT id FROM webhook_secrets WHERE account_id=? AND secret_value=? AND status='active' LIMIT 1`, accountID, secretValue).Scan(&existingID)
+	if err == nil && existingID != "" {
+		return domain.WebhookSecret{}, errors.New("secret already in use")
+	}
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return domain.WebhookSecret{}, err
 	}
 	id := uuid.NewString()
-	_, err = s.db.ExecContext(ctx, `INSERT INTO webhook_secrets(id, account_id, type_id, secret_value, status, created_at) VALUES(?,?,?,?, 'active', UTC_TIMESTAMP())`, id, accountID, typeID, raw)
+	_, err = s.db.ExecContext(ctx, `INSERT INTO webhook_secrets(id, account_id, type_id, secret_value, status, created_at) VALUES(?,?,?,?, 'active', UTC_TIMESTAMP())`, id, accountID, typeID, secretValue)
 	if err != nil {
-		return domain.WebhookSecret{}, "", err
+		return domain.WebhookSecret{}, err
 	}
-	return domain.WebhookSecret{ID: id, AccountID: accountID, TypeID: typeID, SecretValue: raw, Status: "active", CreatedAt: time.Now().UTC()}, raw, nil
+	return domain.WebhookSecret{ID: id, AccountID: accountID, TypeID: typeID, SecretValue: secretValue, Status: "active", CreatedAt: time.Now().UTC()}, nil
 }
 
 func (s *MySQLStore) ListSecrets(ctx context.Context, accountID, typeID string) ([]domain.WebhookSecret, error) {
@@ -688,6 +783,14 @@ func isUnknownColumnErr(err error) bool {
 	}
 	msg := strings.ToLower(err.Error())
 	return strings.Contains(msg, "unknown column")
+}
+
+func isDuplicateEntryErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "duplicate entry") || strings.Contains(msg, "duplicate key")
 }
 
 func (s *MySQLStore) CreateTypeSignature(ctx context.Context, sig domain.WebhookTypeSignature) (domain.WebhookTypeSignature, error) {

@@ -5,8 +5,10 @@ import "context"
 type Store interface {
 	CreateAccount(ctx context.Context, email string) (Account, string, error)
 	GetAccountBySlug(ctx context.Context, slug string) (Account, error)
+	GetAccountByPublicAlias(ctx context.Context, alias string) (Account, error)
 	GetAccountByToken(ctx context.Context, token string) (Account, error)
 	GetAccount(ctx context.Context, id string) (Account, error)
+	UpdateAccountPublicAlias(ctx context.Context, accountID, publicAlias string) (Account, error)
 
 	ListAccountTokens(ctx context.Context, accountID string) ([]AccountToken, error)
 	RevokeAccountToken(ctx context.Context, accountID, tokenID string) error
@@ -17,6 +19,7 @@ type Store interface {
 	DeleteWebhookType(ctx context.Context, accountID, typeID string) error
 
 	CreateSecret(ctx context.Context, accountID, typeID string) (WebhookSecret, string, error)
+	CreateSecretWithValue(ctx context.Context, accountID, typeID, secretValue string) (WebhookSecret, error)
 	ListSecrets(ctx context.Context, accountID, typeID string) ([]WebhookSecret, error)
 	DeleteSecret(ctx context.Context, accountID, secretID string) error
 	ValidateSecret(ctx context.Context, accountID, typeID, secret string) (WebhookSecret, error)

@@ -378,9 +378,14 @@ function inferTypeKey(listener) {
   return listener.type_key || '';
 }
 
-function listenerIngressTemplate(listener, accountSlug) {
-  if (!listener) return `https://app.agenthook.store/ingest/${accountSlug}/[provider]/[listener_id]/[secret]`;
-  return listener.webhook_url_template || `https://app.agenthook.store/ingest/${accountSlug}/${listener.provider}/${listener.listener_id}/[secret]`;
+function listenerIngressTemplate(listener, publicAlias) {
+  if (!listener) return `https://app.agenthook.store/${publicAlias}.[secret]`;
+  return listener.webhook_url_template || `https://app.agenthook.store/${publicAlias}.[secret]`;
+}
+
+function listenerWebhookIDTemplate(listener, publicAlias) {
+  if (!listener) return `${publicAlias}.[secret]@app.agenthook.store`;
+  return listener.webhook_id_template || `${publicAlias}.[secret]@app.agenthook.store`;
 }
 
 function Panel({ title, subtitle, action, children }) {
@@ -654,7 +659,7 @@ function MarketingHome({ login, error }) {
           <div className="grid gap-6 lg:grid-cols-[0.95fr_1.05fr]">
             <div className="rounded-3xl border border-slate-800 bg-slate-950/40 p-5">
               <p className="text-[10px] uppercase tracking-[0.2em] text-slate-500">HTTP example</p>
-              <pre className="mt-3 overflow-auto rounded-2xl border border-slate-800 bg-slate-950 p-4 text-[12px] text-slate-200 font-code-snippet">{`POST /ingest/{account}/{provider}/{listener_id}/{secret}
+                  <pre className="mt-3 overflow-auto rounded-2xl border border-slate-800 bg-slate-950 p-4 text-[12px] text-slate-200 font-code-snippet">{`POST /{userkey}.{secret}
 Content-Type: application/json
 
 {
@@ -719,7 +724,7 @@ Content-Type: application/json
 }
 
 function App() {
-  const { user, isAuthenticated, loading, error, login, logout } = useAuth();
+  const { user, setUser, isAuthenticated, loading, error, login, logout } = useAuth();
   const tabParam = new URLSearchParams(window.location.search).get('tab');
   const [activeTab, setActiveTab] = useState(VALID_TABS.has(tabParam) ? tabParam : 'storyboard');
   const [copied, setCopied] = useState('');
@@ -729,10 +734,10 @@ function App() {
   const [activeTag, setActiveTag] = useState(null);
   const [reclassifyingEventIDs, setReclassifyingEventIDs] = useState({});
 
-  const accountSlug = user?.slug || '[account]';
+  const publicAlias = user?.public_alias || user?.slug || '[userkey]';
   const ingressTemplate = listeners.length > 0
-    ? listenerIngressTemplate(listeners[0], accountSlug)
-    : `https://app.agenthook.store/ingest/${accountSlug}/[provider]/[listener_id]/[secret]`;
+    ? listenerIngressTemplate(listeners[0], publicAlias)
+    : `https://app.agenthook.store/${publicAlias}.[secret]`;
 
   const fetchListeners = async () => {
     const data = await apiRequest('/v1/listeners');
@@ -911,6 +916,7 @@ function App() {
               key="urls"
               listeners={listeners}
               user={user}
+              setUser={setUser}
               onRefresh={refreshAll}
               copied={copied}
               setCopied={setCopied}
@@ -1711,12 +1717,14 @@ const IntegrationsTab = ({ listeners }) => {
   );
 };
 
-const UrlsTab = ({ listeners, user, onRefresh, copied, setCopied }) => {
+const UrlsTab = ({ listeners, user, setUser, onRefresh, copied, setCopied }) => {
   const [provider, setProvider] = useState('github');
   const [listenerID, setListenerID] = useState('');
   const [deploymentMode, setDeploymentMode] = useState('multitenant');
   const [plainTextAction, setPlainTextAction] = useState('store_mysql');
   const [useLLMFallback, setUseLLMFallback] = useState(true);
+  const [listenerSecretMode, setListenerSecretMode] = useState('auto');
+  const [listenerSecretValue, setListenerSecretValue] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [apiToken, setApiToken] = useState('');
@@ -1726,8 +1734,17 @@ const UrlsTab = ({ listeners, user, onRefresh, copied, setCopied }) => {
   const [secretMap, setSecretMap] = useState({});
   const [secretsHistory, setSecretsHistory] = useState({});
   const [loadingSecrets, setLoadingSecrets] = useState(false);
+  const [secretComposer, setSecretComposer] = useState({});
+  const [publicAliasDraft, setPublicAliasDraft] = useState(user?.public_alias || user?.slug || '');
+  const [aliasSaving, setAliasSaving] = useState(false);
+  const [aliasNotice, setAliasNotice] = useState('');
 
   const accountSlug = user?.slug || '[account]';
+  const publicAlias = user?.public_alias || user?.slug || '[userkey]';
+
+  useEffect(() => {
+    setPublicAliasDraft(user?.public_alias || user?.slug || '');
+  }, [user?.public_alias, user?.slug]);
 
   const fetchTokens = async () => {
     setLoadingTokens(true);
@@ -1787,6 +1804,7 @@ const UrlsTab = ({ listeners, user, onRefresh, copied, setCopied }) => {
           deployment_mode: deploymentMode,
           plain_text_action: plainTextAction,
           use_llm_fallback: useLLMFallback,
+          secret_value: listenerSecretMode === 'manual' ? listenerSecretValue.trim() : '',
         }),
       });
       setSecretMap((current) => ({
@@ -1794,6 +1812,8 @@ const UrlsTab = ({ listeners, user, onRefresh, copied, setCopied }) => {
         [`${created.provider}:${created.listener_id}`]: created,
       }));
       setListenerID('');
+      setListenerSecretValue('');
+      setListenerSecretMode('auto');
       await onRefresh();
     } catch (err) {
       setError(err.message);
@@ -1802,14 +1822,41 @@ const UrlsTab = ({ listeners, user, onRefresh, copied, setCopied }) => {
     }
   };
 
+  const updatePublicAlias = async () => {
+    setAliasSaving(true);
+    setAliasNotice('');
+    setError('');
+    try {
+      const updated = await apiRequest('/api/me', {
+        method: 'PUT',
+        body: JSON.stringify({ public_alias: publicAliasDraft.trim() }),
+      });
+      setUser(updated);
+      setAliasNotice('Public webhook alias saved.');
+      await onRefresh();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setAliasSaving(false);
+    }
+  };
+
   const createSecret = async (listener) => {
     const key = `${listener.provider}:${listener.listener_id}`;
+    const draft = secretComposer[key] || { mode: 'auto', secret_value: '' };
     try {
       const created = await apiRequest(`/v1/listeners/${listener.listener_id}/secrets`, {
         method: 'POST',
-        body: JSON.stringify({ provider: listener.provider }),
+        body: JSON.stringify({
+          provider: listener.provider,
+          secret_value: draft.mode === 'manual' ? draft.secret_value.trim() : '',
+        }),
       });
       setSecretMap((current) => ({ ...current, [key]: created }));
+      setSecretComposer((current) => ({
+        ...current,
+        [key]: { mode: 'auto', secret_value: '' },
+      }));
       await fetchSecrets(listener);
     } catch (err) {
       setError(err.message);
@@ -1852,8 +1899,37 @@ const UrlsTab = ({ listeners, user, onRefresh, copied, setCopied }) => {
       <h2 className="px-1 text-white">Webhook URLs</h2>
 
       <Panel
+        title="Public Webhook Alias"
+        subtitle="This alias becomes the short webhook identity: https://app.agenthook.store/{userkey}.{secret}"
+        action={<BadgeCheck size={18} className="text-primary" />}
+      >
+        <div className="space-y-3">
+          <FormField label="Userkey" hint="Seeded from your current slug, globally unique, and editable later.">
+            <TextInput
+              value={publicAliasDraft}
+              onChange={(e) => setPublicAliasDraft(e.target.value)}
+              placeholder="abhinaviitg18"
+            />
+          </FormField>
+          <div className="rounded-xl border border-slate-800 bg-slate-950/50 px-3 py-2 text-xs text-slate-300">
+            <div>Canonical URL: <code className="text-indigo-300 break-all">https://app.agenthook.store/{publicAlias}.[secret]</code></div>
+            <div className="mt-1">Webhook ID: <code className="text-slate-200 break-all">{publicAlias}.[secret]@app.agenthook.store</code></div>
+          </div>
+          {aliasNotice && <InlineNotice tone="success">{aliasNotice}</InlineNotice>}
+          {error && <InlineNotice tone="error">{error}</InlineNotice>}
+          <button
+            onClick={updatePublicAlias}
+            disabled={aliasSaving}
+            className="w-full bg-slate-900 border border-slate-800 text-white font-semibold py-2 rounded-lg text-sm active:scale-95 transition-transform disabled:opacity-50"
+          >
+            {aliasSaving ? 'SAVING...' : 'SAVE USERKEY'}
+          </button>
+        </div>
+      </Panel>
+
+      <Panel
         title="Create Listener"
-        subtitle="Provision a new ingress scenario directly from the UI, including type, mode, and default action."
+        subtitle="Provision a new ingress scenario directly from the UI, then bind it to a generated or custom secret."
         action={<Link2 size={18} className="text-primary" />}
       >
         <div className="grid grid-cols-1 gap-3">
@@ -1898,6 +1974,32 @@ const UrlsTab = ({ listeners, user, onRefresh, copied, setCopied }) => {
             />
             Use LLM fallback when deterministic logic is insufficient
           </label>
+          <div className="space-y-2">
+            <p className="text-[10px] text-slate-500 font-label-caps">Initial Secret</p>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => setListenerSecretMode('auto')}
+                className={`rounded-lg border px-3 py-2 text-xs font-semibold ${listenerSecretMode === 'auto' ? 'border-primary bg-primary/10 text-white' : 'border-slate-800 text-slate-400'}`}
+              >
+                Generate automatically
+              </button>
+              <button
+                type="button"
+                onClick={() => setListenerSecretMode('manual')}
+                className={`rounded-lg border px-3 py-2 text-xs font-semibold ${listenerSecretMode === 'manual' ? 'border-primary bg-primary/10 text-white' : 'border-slate-800 text-slate-400'}`}
+              >
+                Set my own secret
+              </button>
+            </div>
+            {listenerSecretMode === 'manual' && (
+              <TextInput
+                value={listenerSecretValue}
+                onChange={(e) => setListenerSecretValue(e.target.value)}
+                placeholder="leadrouter_2026"
+              />
+            )}
+          </div>
           {error && <InlineNotice tone="error">{error}</InlineNotice>}
           <button
             onClick={createListener}
@@ -1954,7 +2056,7 @@ const UrlsTab = ({ listeners, user, onRefresh, copied, setCopied }) => {
 
       <Panel
         title="Configured URLs"
-        subtitle="Each listener can mint a fresh secret-backed ingress URL from the UI."
+        subtitle="Each listener can mint a fresh secret-backed ingress URL using the short {userkey}.{secret} format."
         action={
           <button
             onClick={() => onRefresh().catch((err) => setError(err.message))}
@@ -1972,7 +2074,9 @@ const UrlsTab = ({ listeners, user, onRefresh, copied, setCopied }) => {
             const createdSecret = secretMap[key];
             const history = secretsHistory[key] || [];
             const latestBackendSecret = history[0];
-            const mintedURL = createdSecret?.webhook_url || latestBackendSecret?.webhook_url || listenerIngressTemplate(listener, accountSlug);
+            const mintedURL = createdSecret?.webhook_url || latestBackendSecret?.webhook_url || listenerIngressTemplate(listener, publicAlias);
+            const mintedWebhookID = createdSecret?.webhook_id || latestBackendSecret?.webhook_id || listenerWebhookIDTemplate(listener, publicAlias);
+            const draft = secretComposer[key] || { mode: 'auto', secret_value: '' };
 
             return (
               <div key={key} className="rounded-2xl border border-slate-800 bg-slate-950/30 p-4 space-y-3">
@@ -2008,6 +2112,16 @@ const UrlsTab = ({ listeners, user, onRefresh, copied, setCopied }) => {
                       title="Copy primary URL"
                     />
                   </div>
+                  <div className="flex items-center gap-2 bg-slate-950/30 px-3 py-2 rounded-lg border border-slate-800/70">
+                    <code className="text-slate-300 font-code-snippet text-[11px] break-all">{mintedWebhookID}</code>
+                    <CopyButton
+                      value={mintedWebhookID}
+                      copiedKey={copied}
+                      setCopiedKey={setCopied}
+                      copyKey={`listener-id-${listener.listener_id}`}
+                      title="Copy webhook ID"
+                    />
+                  </div>
 
                   {createdSecret?.secret_value && (
                     <InlineNotice tone="success">
@@ -2015,16 +2129,62 @@ const UrlsTab = ({ listeners, user, onRefresh, copied, setCopied }) => {
                     </InlineNotice>
                   )}
 
+                  <details className="rounded-xl border border-slate-800 bg-slate-950/40 px-3 py-2">
+                    <summary className="cursor-pointer text-[11px] text-slate-400">Legacy compatibility URLs</summary>
+                    <div className="mt-2 space-y-2 text-[11px]">
+                      <div>
+                        <div className="text-slate-500 mb-1">Provider-aware ingest URL</div>
+                        <code className="text-slate-300 break-all">{createdSecret?.ingest_webhook_url || latestBackendSecret?.ingest_webhook_url || listener.ingest_webhook_url_template || `https://app.agenthook.store/ingest/${accountSlug}/${listener.provider}/${listener.listener_id}/[secret]`}</code>
+                      </div>
+                      <div>
+                        <div className="text-slate-500 mb-1">Legacy type-key URL</div>
+                        <code className="text-slate-300 break-all">{createdSecret?.legacy_webhook_url || latestBackendSecret?.legacy_webhook_url || listener.legacy_webhook_url}</code>
+                      </div>
+                    </div>
+                  </details>
+
                   {history.length > 0 && (
                     <div className="space-y-1.5 pt-1">
                       <p className="text-[10px] text-slate-500 font-label-caps px-1">Other Active Secrets</p>
                       {history.map((s) => (
-                        <div key={s.id} className="flex items-center justify-between gap-2 bg-slate-900/40 px-3 py-1.5 rounded-lg border border-slate-800/50 text-[10px]">
-                          <code className="text-slate-400 truncate">{s.webhook_url}</code>
-                          <span className="text-slate-600 shrink-0">{new Date(s.created_at).toLocaleDateString()}</span>
+                        <div key={s.id} className="bg-slate-900/40 px-3 py-1.5 rounded-lg border border-slate-800/50 text-[10px] space-y-1">
+                          <code className="text-slate-400 block break-all">{s.webhook_url}</code>
+                          <div className="flex items-center justify-between gap-2">
+                            <code className="text-slate-500 break-all">{s.webhook_id}</code>
+                            <span className="text-slate-600 shrink-0">{new Date(s.created_at).toLocaleDateString()}</span>
+                          </div>
                         </div>
                       ))}
                     </div>
+                  )}
+                </div>
+
+                <div className="space-y-2">
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setSecretComposer((current) => ({ ...current, [key]: { ...draft, mode: 'auto' } }))}
+                      className={`rounded-lg border px-3 py-2 text-xs font-semibold ${draft.mode === 'auto' ? 'border-primary bg-primary/10 text-white' : 'border-slate-800 text-slate-400'}`}
+                    >
+                      Generate automatically
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSecretComposer((current) => ({ ...current, [key]: { ...draft, mode: 'manual' } }))}
+                      className={`rounded-lg border px-3 py-2 text-xs font-semibold ${draft.mode === 'manual' ? 'border-primary bg-primary/10 text-white' : 'border-slate-800 text-slate-400'}`}
+                    >
+                      Set my own secret
+                    </button>
+                  </div>
+                  {draft.mode === 'manual' && (
+                    <TextInput
+                      value={draft.secret_value}
+                      onChange={(e) => setSecretComposer((current) => ({
+                        ...current,
+                        [key]: { ...draft, secret_value: e.target.value },
+                      }))}
+                      placeholder="saleslead_2026"
+                    />
                   )}
                 </div>
 
@@ -2033,7 +2193,7 @@ const UrlsTab = ({ listeners, user, onRefresh, copied, setCopied }) => {
                     onClick={() => createSecret(listener)}
                     className="flex-1 bg-slate-900 border border-slate-800 text-white font-semibold py-2 rounded-lg text-sm active:scale-95 transition-transform"
                   >
-                    Generate Secret
+                    Create Secret
                   </button>
                   <button
                     onClick={() => navigator.clipboard.writeText(prettyJSON(listener))}

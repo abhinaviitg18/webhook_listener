@@ -3,11 +3,12 @@ package domain
 import "time"
 
 type Account struct {
-	ID         string    `json:"id"`
-	Slug       string    `json:"slug"`
-	OwnerEmail string    `json:"owner_email"`
-	TokenHash  string    `json:"-"`
-	CreatedAt  time.Time `json:"created_at"`
+	ID          string    `json:"id"`
+	Slug        string    `json:"slug"`
+	PublicAlias string    `json:"public_alias"`
+	OwnerEmail  string    `json:"owner_email"`
+	TokenHash   string    `json:"-"`
+	CreatedAt   time.Time `json:"created_at"`
 }
 
 type AccountToken struct {
