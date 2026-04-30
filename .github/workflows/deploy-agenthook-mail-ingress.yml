@@ -1,0 +1,32 @@
+name: Deploy AgentHook Mail Ingress
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ "master" ]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: us-east-1
+      AWS_REGION: us-east-1
+      MAIL_INGRESS_LAMBDA_FUNCTION_NAME: agenthook-mail-ingress
+      APP_ENV_SSM_PARAM: /agenthook/prod/env
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Deploy mail ingress lambda
+        run: |
+          set -euo pipefail
+          bash scripts/aws/mail_ingress_lambda_deploy.sh

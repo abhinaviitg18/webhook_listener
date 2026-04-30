@@ -1900,7 +1900,7 @@ const UrlsTab = ({ listeners, user, setUser, onRefresh, copied, setCopied }) => 
 
       <Panel
         title="Public Webhook Alias"
-        subtitle="This alias becomes the short webhook identity: https://app.agenthook.store/{userkey}.{secret}"
+        subtitle="This alias becomes both the short webhook URL and the inbox identity for each active secret."
         action={<BadgeCheck size={18} className="text-primary" />}
       >
         <div className="space-y-3">
@@ -1913,7 +1913,8 @@ const UrlsTab = ({ listeners, user, setUser, onRefresh, copied, setCopied }) => 
           </FormField>
           <div className="rounded-xl border border-slate-800 bg-slate-950/50 px-3 py-2 text-xs text-slate-300">
             <div>Canonical URL: <code className="text-indigo-300 break-all">https://app.agenthook.store/{publicAlias}.[secret]</code></div>
-            <div className="mt-1">Webhook ID: <code className="text-slate-200 break-all">{publicAlias}.[secret]@app.agenthook.store</code></div>
+            <div className="mt-1">Inbox address: <code className="text-slate-200 break-all">{publicAlias}.[secret]@app.agenthook.store</code></div>
+            <div className="mt-1 text-slate-500">Changing your userkey changes the canonical inbox address for future secrets too.</div>
           </div>
           {aliasNotice && <InlineNotice tone="success">{aliasNotice}</InlineNotice>}
           {error && <InlineNotice tone="error">{error}</InlineNotice>}
@@ -2119,9 +2120,10 @@ const UrlsTab = ({ listeners, user, setUser, onRefresh, copied, setCopied }) => 
                       copiedKey={copied}
                       setCopiedKey={setCopied}
                       copyKey={`listener-id-${listener.listener_id}`}
-                      title="Copy webhook ID"
+                      title="Copy inbox address"
                     />
                   </div>
+                  <p className="px-1 text-[10px] text-slate-500">This webhook ID also works as the mailbox address for the separate SES mail ingress service.</p>
 
                   {createdSecret?.secret_value && (
                     <InlineNotice tone="success">

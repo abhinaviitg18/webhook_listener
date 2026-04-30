@@ -30,6 +30,10 @@ func sanitizePayloadForProcessing(payload string) string {
 	return string(b)
 }
 
+func SanitizeHTMLText(input string) string {
+	return sanitizeHTMLText(input)
+}
+
 func payloadToText(payload string) string {
 	var root interface{}
 	if err := json.Unmarshal([]byte(payload), &root); err != nil {

@@ -51,6 +51,14 @@ type Config struct {
 	LangfusePublicKey string
 	LangfuseSecretKey string
 
+	MailDBDSN                 string
+	MailDomain                string
+	MailAWSRegion             string
+	MailInboundBucket         string
+	MailAgentHookBaseURL      string
+	MailAgentHookOriginSecret string
+	MailInternalSharedSecret  string
+
 	UseInMemoryStore          bool
 	VerifyHTCSignature        bool
 	DeterministicOnlyTypeKeys []string
@@ -118,6 +126,14 @@ func Load() Config {
 		LangfuseHost:      getenv("LANGFUSE_HOST", "https://cloud.langfuse.com"),
 		LangfusePublicKey: getenv("LANGFUSE_PUBLIC_KEY", ""),
 		LangfuseSecretKey: getenv("LANGFUSE_SECRET_KEY", ""),
+
+		MailDBDSN:                 getenv("MAIL_DB_DSN", storeDSN),
+		MailDomain:                getenv("MAIL_DOMAIN", "app.agenthook.store"),
+		MailAWSRegion:             getenv("MAIL_AWS_REGION", getenv("AWS_REGION", "us-east-1")),
+		MailInboundBucket:         getenv("MAIL_INBOUND_BUCKET", ""),
+		MailAgentHookBaseURL:      getenv("MAIL_AGENTHOOK_BASE_URL", getenv("PUBLIC_BASE_URL", "https://app.agenthook.store")),
+		MailAgentHookOriginSecret: getenv("MAIL_AGENTHOOK_ORIGIN_SECRET", getenv("LAMBDA_ORIGIN_SHARED_SECRET", "")),
+		MailInternalSharedSecret:  getenv("MAIL_INTERNAL_SHARED_SECRET", ""),
 
 		UseInMemoryStore:             getbool("USE_IN_MEMORY_STORE", defaultInMemoryStore),
 		VerifyHTCSignature:           getbool("VERIFY_HTC_SIGNATURE", false),
