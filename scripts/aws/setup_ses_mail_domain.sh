@@ -184,37 +184,19 @@ EOF
 }
 
 ensure_domain_verification() {
-  local existing token
-  existing="$(aws ses get-identity-verification-attributes \
-    --identities "$MAIL_DOMAIN" \
+  DOMAIN_VERIFICATION_TOKEN="$(aws ses verify-domain-identity \
+    --domain "$MAIL_DOMAIN" \
     --region "$AWS_REGION" \
-    --output json)"
-  token="$(printf '%s' "$existing" | jq -r --arg domain "$MAIL_DOMAIN" '.VerificationAttributes[$domain].VerificationToken // empty')"
-  if [[ -z "$token" ]]; then
-    token="$(aws ses verify-domain-identity \
-      --domain "$MAIL_DOMAIN" \
-      --region "$AWS_REGION" \
-      --query 'VerificationToken' \
-      --output text)"
-  fi
-  DOMAIN_VERIFICATION_TOKEN="$token"
+    --query 'VerificationToken' \
+    --output text)"
 }
 
 ensure_dkim_tokens() {
-  local dkim_json token_count
-  dkim_json="$(aws ses get-identity-dkim-attributes \
-    --identities "$MAIL_DOMAIN" \
+  aws ses verify-domain-dkim \
+    --domain "$MAIL_DOMAIN" \
     --region "$AWS_REGION" \
-    --output json)"
-  token_count="$(printf '%s' "$dkim_json" | jq -r --arg domain "$MAIL_DOMAIN" '.DkimAttributes[$domain].DkimTokens | length // 0')"
-  if [[ "$token_count" == "0" ]]; then
-    aws ses verify-domain-dkim --domain "$MAIL_DOMAIN" --region "$AWS_REGION" >/dev/null
-    dkim_json="$(aws ses get-identity-dkim-attributes \
-      --identities "$MAIL_DOMAIN" \
-      --region "$AWS_REGION" \
-      --output json)"
-  fi
-  printf '%s' "$dkim_json" | jq -r --arg domain "$MAIL_DOMAIN" '.DkimAttributes[$domain].DkimTokens[]' >"$WORK_DIR/dkim_tokens.txt"
+    --query 'DkimTokens[]' \
+    --output text | tr '\t' '\n' >"$WORK_DIR/dkim_tokens.txt"
 }
 
 ensure_mail_from() {
