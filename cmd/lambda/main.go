@@ -1,11 +1,8 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"crypto/subtle"
-	"encoding/base64"
-	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -17,18 +14,11 @@ import (
 
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-lambda-go/lambda"
-	awscfg "github.com/aws/aws-sdk-go-v2/config"
-	"github.com/aws/aws-sdk-go-v2/service/ssm"
 	"github.com/awslabs/aws-lambda-go-api-proxy/httpadapter"
 )
 
 const (
-	defaultRegion          = "us-east-1"
-	defaultEnvParameter    = "/agenthook/prod/env"
-	inlineEnvVarName       = "APP_ENV_INLINE_B64"
 	originSecretHeader     = "x-agenthook-origin-secret"
-	lambdaEnvParameterName = "APP_ENV_SSM_PARAM"
-	lambdaRegionEnvName    = "AWS_REGION"
 	lambdaOriginSecretEnv  = "LAMBDA_ORIGIN_SHARED_SECRET"
 )
 
@@ -70,7 +60,7 @@ func handle(ctx context.Context, req events.LambdaFunctionURLRequest) (events.La
 
 func initRuntime(ctx context.Context) error {
 	initOnce.Do(func() {
-		if err := loadEnvFromSSM(ctx); err != nil {
+		if err := config.LoadLambdaRuntimeEnv(ctx); err != nil {
 			initErr = err
 			return
 		}
@@ -114,93 +104,6 @@ func subtleCompare(actual, expected string) bool {
 		return false
 	}
 	return subtle.ConstantTimeCompare([]byte(actual), []byte(expected)) == 1
-}
-
-func loadEnvFromSSM(ctx context.Context) error {
-	if err := loadInlineEnv(); err != nil {
-		return err
-	}
-	if os.Getenv("TIDB_DSN") != "" || os.Getenv("COMMERCE_MYSQL_DSN") != "" || os.Getenv("SCALEKIT_BASE_URL") != "" {
-		return nil
-	}
-
-	paramName := strings.TrimSpace(os.Getenv(lambdaEnvParameterName))
-	if paramName == "" {
-		paramName = defaultEnvParameter
-	}
-
-	region := strings.TrimSpace(os.Getenv(lambdaRegionEnvName))
-	if region == "" {
-		region = defaultRegion
-	}
-
-	awsConfig, err := awscfg.LoadDefaultConfig(ctx, awscfg.WithRegion(region))
-	if err != nil {
-		return fmt.Errorf("load aws config: %w", err)
-	}
-
-	ssmClient := ssm.NewFromConfig(awsConfig)
-	withDecryption := true
-	resp, err := ssmClient.GetParameter(ctx, &ssm.GetParameterInput{
-		Name:           &paramName,
-		WithDecryption: &withDecryption,
-	})
-	if err != nil {
-		return fmt.Errorf("get ssm parameter %s: %w", paramName, err)
-	}
-	if resp.Parameter == nil || resp.Parameter.Value == nil {
-		return fmt.Errorf("ssm parameter %s was empty", paramName)
-	}
-
-	return applyEnvFile(*resp.Parameter.Value)
-}
-
-func loadInlineEnv() error {
-	encoded := strings.TrimSpace(os.Getenv(inlineEnvVarName))
-	if encoded == "" {
-		return nil
-	}
-
-	decoded, err := base64.StdEncoding.DecodeString(encoded)
-	if err != nil {
-		return fmt.Errorf("decode inline env: %w", err)
-	}
-
-	return applyEnvFile(string(decoded))
-}
-
-func applyEnvFile(contents string) error {
-	scanner := bufio.NewScanner(strings.NewReader(contents))
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-
-		key, value, ok := strings.Cut(line, "=")
-		if !ok {
-			return fmt.Errorf("invalid env line: %s", line)
-		}
-
-		key = strings.TrimSpace(key)
-		value = strings.TrimSpace(value)
-		if key == "" {
-			return fmt.Errorf("invalid env key in line: %s", line)
-		}
-
-		if _, exists := os.LookupEnv(key); exists {
-			continue
-		}
-		if err := os.Setenv(key, value); err != nil {
-			return fmt.Errorf("set env %s: %w", key, err)
-		}
-	}
-
-	if err := scanner.Err(); err != nil {
-		return fmt.Errorf("scan env file: %w", err)
-	}
-
-	return nil
 }
 
 func toAPIGatewayV2Request(req events.LambdaFunctionURLRequest) events.APIGatewayV2HTTPRequest {

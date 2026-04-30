@@ -354,6 +354,9 @@ ensure_lambda_trigger() {
     --bucket "$S3_BUCKET_NAME" \
     --region "$AWS_REGION" \
     --output json)"
+  if [[ -z "$notification_json" ]]; then
+    notification_json='{}'
+  fi
 
   printf '%s' "$notification_json" | jq \
     --arg id "$trigger_id" \
@@ -378,10 +381,14 @@ ensure_lambda_trigger() {
       )
     ' >"$WORK_DIR/bucket-notifications.json"
 
+  jq -nc \
+    --arg bucket "$S3_BUCKET_NAME" \
+    --slurpfile cfg "$WORK_DIR/bucket-notifications.json" \
+    '{Bucket: $bucket, NotificationConfiguration: $cfg[0]}' >"$WORK_DIR/put-bucket-notifications.json"
+
   aws s3api put-bucket-notification-configuration \
-    --bucket "$S3_BUCKET_NAME" \
     --region "$AWS_REGION" \
-    --notification-configuration "file://$WORK_DIR/bucket-notifications.json" >/dev/null
+    --cli-input-json "file://$WORK_DIR/put-bucket-notifications.json" >/dev/null
 
   TRIGGER_STATUS="configured"
 }

@@ -7,14 +7,16 @@ import (
 	"os"
 	"testing"
 
+	"agenthook.store/internal/config"
+
 	"github.com/aws/aws-lambda-go/events"
 )
 
 func TestApplyEnvFileSkipsExistingValues(t *testing.T) {
 	t.Setenv("EXISTING_KEY", "keep-me")
 
-	if err := applyEnvFile("EXISTING_KEY=replace-me\nNEW_KEY=created\n"); err != nil {
-		t.Fatalf("applyEnvFile returned error: %v", err)
+	if err := config.ApplyEnvFileContents("EXISTING_KEY=replace-me\nNEW_KEY=created\n"); err != nil {
+		t.Fatalf("ApplyEnvFileContents returned error: %v", err)
 	}
 
 	if got := os.Getenv("EXISTING_KEY"); got != "keep-me" {
@@ -76,10 +78,11 @@ func TestWithOriginSecretRejectsUnexpectedSecret(t *testing.T) {
 
 func TestLoadInlineEnvAppliesValues(t *testing.T) {
 	encoded := base64.StdEncoding.EncodeToString([]byte("INLINE_KEY=inline-value\n"))
-	t.Setenv(inlineEnvVarName, encoded)
+	t.Setenv(config.InlineEnvVarName, encoded)
+	t.Setenv("TIDB_DSN", "inline-only-test")
 
-	if err := loadInlineEnv(); err != nil {
-		t.Fatalf("loadInlineEnv returned error: %v", err)
+	if err := config.LoadLambdaRuntimeEnv(t.Context()); err != nil {
+		t.Fatalf("LoadLambdaRuntimeEnv returned error: %v", err)
 	}
 
 	if got := os.Getenv("INLINE_KEY"); got != "inline-value" {

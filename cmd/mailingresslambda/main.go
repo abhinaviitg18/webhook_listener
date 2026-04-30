@@ -17,6 +17,9 @@ func main() {
 }
 
 func handle(ctx context.Context, event events.S3Event) (map[string]any, error) {
+	if err := config.LoadLambdaRuntimeEnv(ctx); err != nil {
+		return nil, err
+	}
 	if err := config.LoadEnvFiles("local.env", ".env"); err != nil {
 		return nil, err
 	}
