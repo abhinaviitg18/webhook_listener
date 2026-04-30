@@ -20,6 +20,13 @@ if [[ -z "$APP_ENV_INLINE_B64" && -n "$APP_ENV_SSM_PARAM" ]]; then
     --output text | base64 | tr -d '\n')"
 fi
 
+if ! aws lambda get-function \
+  --region "$AWS_REGION" \
+  --function-name "$MAIL_INGRESS_LAMBDA_FUNCTION_NAME" >/dev/null 2>&1; then
+  echo "Mail ingress Lambda ${MAIL_INGRESS_LAMBDA_FUNCTION_NAME} does not exist in ${AWS_REGION}; skipping deploy."
+  exit 0
+fi
+
 go test ./cmd/... ./internal/...
 
 export CGO_ENABLED=0

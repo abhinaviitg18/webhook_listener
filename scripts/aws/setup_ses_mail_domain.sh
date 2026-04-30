@@ -23,6 +23,7 @@ Environment variables:
   RAW_RETENTION_DAYS       Optional. Defaults to 30
   EVENTBRIDGE_ENABLED      Optional. true/false. Defaults to false
   CONFIG_SET_NAME          Optional. Defaults to mail-events-<domain-slug> when EventBridge is enabled
+  ENABLE_S3_LAMBDA_TRIGGER Optional. true/false. Defaults to false
 
 Notes:
   - This script automates AWS only.
@@ -52,6 +53,7 @@ RAW_PREFIX="${RAW_PREFIX:-raw/}"
 ATTACHMENT_PREFIX="${ATTACHMENT_PREFIX:-attachments/}"
 RAW_RETENTION_DAYS="${RAW_RETENTION_DAYS:-30}"
 EVENTBRIDGE_ENABLED="${EVENTBRIDGE_ENABLED:-false}"
+ENABLE_S3_LAMBDA_TRIGGER="${ENABLE_S3_LAMBDA_TRIGGER:-false}"
 LAMBDA_FUNCTION_NAME="${LAMBDA_FUNCTION_NAME:-}"
 
 if [[ -z "$MAIL_DOMAIN" ]]; then
@@ -91,6 +93,7 @@ account_id() {
 ACCOUNT_ID="$(account_id)"
 RECEIPT_RULE_ARN="arn:aws:ses:${AWS_REGION}:${ACCOUNT_ID}:receipt-rule-set/${RECEIPT_RULE_SET}:receipt-rule/${RECEIPT_RULE_NAME}"
 EVENT_BUS_ARN="arn:aws:events:${AWS_REGION}:${ACCOUNT_ID}:event-bus/default"
+TRIGGER_STATUS="not-requested"
 
 ensure_bucket() {
   if aws s3api head-bucket --bucket "$S3_BUCKET_NAME" >/dev/null 2>&1; then
@@ -247,8 +250,7 @@ ensure_receipt_rule() {
     {
       "S3Action": {
         "BucketName": "${S3_BUCKET_NAME}",
-        "ObjectKeyPrefix": "${RAW_PREFIX}",
-        "Position": 1
+        "ObjectKeyPrefix": "${RAW_PREFIX}"
       }
     }
   ],
@@ -328,6 +330,80 @@ EOF
   fi
 }
 
+ensure_lambda_trigger() {
+  if ! bool_is_true "$ENABLE_S3_LAMBDA_TRIGGER"; then
+    TRIGGER_STATUS="disabled"
+    return 0
+  fi
+  if [[ -z "$LAMBDA_FUNCTION_NAME" ]]; then
+    TRIGGER_STATUS="skipped_missing_lambda_name"
+    return 0
+  fi
+
+  local lambda_arn trigger_id statement_id notification_json
+  if ! lambda_arn="$(aws lambda get-function \
+    --region "$AWS_REGION" \
+    --function-name "$LAMBDA_FUNCTION_NAME" \
+    --query 'Configuration.FunctionArn' \
+    --output text 2>/dev/null)"; then
+    echo "warning: Lambda function ${LAMBDA_FUNCTION_NAME} was not found; skipping S3 trigger wiring" >&2
+    TRIGGER_STATUS="skipped_missing_lambda_function"
+    return 0
+  fi
+
+  trigger_id="ses-mail-${DOMAIN_SLUG}"
+  statement_id="allow-s3-${DOMAIN_SLUG}"
+
+  if ! aws lambda get-policy \
+    --region "$AWS_REGION" \
+    --function-name "$LAMBDA_FUNCTION_NAME" \
+    --output json 2>/dev/null | jq -e --arg sid "$statement_id" '.Policy | fromjson | .Statement[]? | select(.Sid == $sid)' >/dev/null; then
+    aws lambda add-permission \
+      --region "$AWS_REGION" \
+      --function-name "$LAMBDA_FUNCTION_NAME" \
+      --statement-id "$statement_id" \
+      --action lambda:InvokeFunction \
+      --principal s3.amazonaws.com \
+      --source-arn "arn:aws:s3:::${S3_BUCKET_NAME}" \
+      --source-account "$ACCOUNT_ID" >/dev/null
+  fi
+
+  notification_json="$(aws s3api get-bucket-notification-configuration \
+    --bucket "$S3_BUCKET_NAME" \
+    --region "$AWS_REGION" \
+    --output json)"
+
+  printf '%s' "$notification_json" | jq \
+    --arg id "$trigger_id" \
+    --arg arn "$lambda_arn" \
+    --arg prefix "$RAW_PREFIX" \
+    '
+      .LambdaFunctionConfigurations = (
+        ((.LambdaFunctionConfigurations // []) | map(select(.Id != $id))) + [
+          {
+            Id: $id,
+            LambdaFunctionArn: $arn,
+            Events: ["s3:ObjectCreated:*"],
+            Filter: {
+              Key: {
+                FilterRules: [
+                  {Name: "prefix", Value: $prefix}
+                ]
+              }
+            }
+          }
+        ]
+      )
+    ' >"$WORK_DIR/bucket-notifications.json"
+
+  aws s3api put-bucket-notification-configuration \
+    --bucket "$S3_BUCKET_NAME" \
+    --region "$AWS_REGION" \
+    --notification-configuration "file://$WORK_DIR/bucket-notifications.json" >/dev/null
+
+  TRIGGER_STATUS="configured"
+}
+
 print_summary() {
   cat <<EOF
 
@@ -344,6 +420,7 @@ receipt_rule_arn=${RECEIPT_RULE_ARN}
 lambda_function_name=${LAMBDA_FUNCTION_NAME:-not-provided}
 eventbridge_enabled=${EVENTBRIDGE_ENABLED}
 config_set_name=$(bool_is_true "$EVENTBRIDGE_ENABLED" && printf '%s' "$CONFIG_SET_NAME" || printf 'not-enabled')
+s3_lambda_trigger_status=${TRIGGER_STATUS}
 EOF
 }
 
@@ -415,6 +492,7 @@ ensure_mail_from
 ensure_receipt_rule_set
 ensure_receipt_rule
 ensure_eventbridge_destination
+ensure_lambda_trigger
 print_summary
 print_dns_block
 print_validation

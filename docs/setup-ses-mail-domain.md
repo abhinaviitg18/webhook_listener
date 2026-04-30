@@ -66,6 +66,7 @@ Optional inputs:
 - `RAW_RETENTION_DAYS`
 - `EVENTBRIDGE_ENABLED`
 - `CONFIG_SET_NAME`
+- `ENABLE_S3_LAMBDA_TRIGGER`
 
 ## Naming convention
 
@@ -117,14 +118,14 @@ Expected records per domain:
 
 ## Wiring S3 to the mail ingress Lambda
 
-The script creates SES -> S3 delivery only.
-S3 notification wiring remains an explicit operator step so existing bucket notifications are not overwritten unexpectedly.
+By default the script creates SES -> S3 delivery only.
+If you set `ENABLE_S3_LAMBDA_TRIGGER=true` and provide `LAMBDA_FUNCTION_NAME`, it will also:
 
-You should:
+1. resolve the Lambda ARN
+2. add Lambda invoke permission for the bucket if missing
+3. upsert a raw-mail prefix notification while preserving existing bucket notifications
 
-1. confirm the mail ingress Lambda exists
-2. grant S3 invoke permission to that Lambda if needed
-3. configure bucket notifications on the raw mail prefix
+If the Lambda does not exist yet, the script reports that and skips trigger wiring without failing the rest of the domain setup.
 
 The target Lambda environment must match the domain:
 
@@ -137,6 +138,12 @@ For example, AgentHook should point to:
 - `MAIL_INBOUND_BUCKET=mail-app-agenthook-store-inbound`
 
 AI Recruiter should point to its own domain and bucket values.
+
+For GitHub Actions-based execution, use:
+
+- `.github/workflows/run-ses-mail-domain-setup.yml`
+
+That workflow runs the same script with the repository’s AWS secrets and uploads the generated DNS block as an artifact.
 
 ## Validating the setup
 

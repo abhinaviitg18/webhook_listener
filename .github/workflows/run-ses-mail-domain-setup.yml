@@ -1,0 +1,65 @@
+name: Run SES Mail Domain Setup
+
+on:
+  workflow_dispatch:
+    inputs:
+      mail_domain:
+        description: "Receiving mail domain, for example app.agentmail.store"
+        required: true
+        type: string
+      s3_bucket_name:
+        description: "Optional inbound bucket override"
+        required: false
+        type: string
+      mail_from_subdomain:
+        description: "Optional MAIL FROM domain override"
+        required: false
+        type: string
+      lambda_function_name:
+        description: "Optional Lambda name for S3 trigger wiring"
+        required: false
+        default: "agenthook-mail-ingress"
+        type: string
+      enable_s3_lambda_trigger:
+        description: "Configure the S3 bucket notification to the Lambda if the function exists"
+        required: false
+        default: true
+        type: boolean
+      eventbridge_enabled:
+        description: "Create/update SESv2 EventBridge config set"
+        required: false
+        default: false
+        type: boolean
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: us-east-1
+      AWS_REGION: us-east-1
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run SES domain setup
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x scripts/aws/setup_ses_mail_domain.sh
+          MAIL_DOMAIN="${{ inputs.mail_domain }}" \
+          S3_BUCKET_NAME="${{ inputs.s3_bucket_name }}" \
+          MAIL_FROM_SUBDOMAIN="${{ inputs.mail_from_subdomain }}" \
+          LAMBDA_FUNCTION_NAME="${{ inputs.lambda_function_name }}" \
+          ENABLE_S3_LAMBDA_TRIGGER="${{ inputs.enable_s3_lambda_trigger }}" \
+          EVENTBRIDGE_ENABLED="${{ inputs.eventbridge_enabled }}" \
+          bash scripts/aws/setup_ses_mail_domain.sh | tee /tmp/ses-domain-setup.txt
+
+      - name: Upload setup output
+        uses: actions/upload-artifact@v4
+        with:
+          name: ses-domain-setup-output
+          path: /tmp/ses-domain-setup.txt
