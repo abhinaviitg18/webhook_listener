@@ -30,7 +30,7 @@ import {
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from './context/AuthContext';
 
-const VALID_TABS = new Set(['storyboard', 'skills', 'integrations', 'urls', 'docs', 'byok']);
+const VALID_TABS = new Set(['storyboard', 'skills', 'integrations', 'integration-secrets', 'urls', 'docs', 'byok']);
 
 const PROVIDER_OPTIONS = [
   'github',
@@ -1339,6 +1339,18 @@ function App() {
             </motion.div>
           )}
 
+          {activeTab === 'integration-secrets' && (
+            <motion.div
+              key="integration-secrets"
+              initial={{ opacity: 0, x: -20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: 20 }}
+              className="space-y-4"
+            >
+              <IntegrationSecretsTab listeners={listeners} />
+            </motion.div>
+          )}
+
           {activeTab === 'byok' && (
             <motion.div
               key="byok"
@@ -1485,7 +1497,193 @@ const BYOKSettings = () => {
   );
 };
 
-const IntegrationsTab = ({ listeners }) => {
+const IntegrationSecretsTab = ({ listeners }) => {
+  const defaultSecretForm = () => ({
+    secret_key: '',
+    purpose: '',
+    secret_value: '',
+  });
+
+  const [secrets, setSecrets] = useState([]);
+  const [loadingSecrets, setLoadingSecrets] = useState(false);
+  const [savingSecret, setSavingSecret] = useState(false);
+  const [notice, setNotice] = useState('');
+  const [editingSecretID, setEditingSecretID] = useState('');
+  const [secretForm, setSecretForm] = useState(defaultSecretForm);
+
+  const hasSingleTenant = listeners.some((listener) => listener.deployment_mode === 'single_tenant');
+
+  const fetchSecrets = async () => {
+    setLoadingSecrets(true);
+    try {
+      const data = await apiRequest('/api/integration-secrets');
+      setSecrets(Array.isArray(data) ? data : []);
+    } catch (err) {
+      setNotice(err.message);
+    } finally {
+      setLoadingSecrets(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchSecrets();
+  }, []);
+
+  const persistSecret = async () => {
+    setSavingSecret(true);
+    setNotice('');
+    try {
+      if (!secretForm.secret_key.trim()) {
+        throw new Error('secret_key is required');
+      }
+      if (!editingSecretID && !secretForm.secret_value.trim()) {
+        throw new Error('secret_value is required');
+      }
+      const path = editingSecretID ? `/api/integration-secrets/${editingSecretID}` : '/api/integration-secrets';
+      const method = editingSecretID ? 'PUT' : 'POST';
+      await apiRequest(path, {
+        method,
+        body: JSON.stringify(secretForm),
+      });
+      await fetchSecrets();
+      setEditingSecretID('');
+      setSecretForm(defaultSecretForm());
+      setNotice(`Integration secret ${method === 'POST' ? 'created' : 'updated'} successfully.`);
+    } catch (err) {
+      setNotice(err.message);
+    } finally {
+      setSavingSecret(false);
+    }
+  };
+
+  const beginEditSecret = (secret) => {
+    setEditingSecretID(secret.id);
+    setSecretForm({
+      secret_key: secret.secret_key || '',
+      purpose: secret.purpose || '',
+      secret_value: '',
+    });
+  };
+
+  const deleteSecret = async (secret) => {
+    if (!window.confirm(`Delete integration secret "${secret.secret_key}"?`)) return;
+    try {
+      await apiRequest(`/api/integration-secrets/${secret.id}`, { method: 'DELETE' });
+      if (editingSecretID === secret.id) {
+        setEditingSecretID('');
+        setSecretForm(defaultSecretForm());
+      }
+      await fetchSecrets();
+      setNotice('Integration secret deleted.');
+    } catch (err) {
+      setNotice(err.message);
+    }
+  };
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, x: -20 }}
+      animate={{ opacity: 1, x: 0 }}
+      exit={{ opacity: 0, x: 20 }}
+      className="space-y-4"
+    >
+      <h2 className="px-1 text-white">Integration Secrets</h2>
+
+      <Panel
+        title="Secret Registry"
+        subtitle="Store named secret refs for OpenClaw, CRMs, and any downstream integration without exposing raw credentials in target config."
+        action={<KeyRound size={18} className="text-primary" />}
+      >
+        <InlineNotice>
+          {hasSingleTenant
+            ? 'Single-tenant listeners can auto-resolve conventional env vars when no secret ref is attached. Multitenant listeners should still prefer named secret refs.'
+            : 'This deployment is multitenant right now, so integrations should attach named secret refs. Env fallback stays an operator override only.'}
+        </InlineNotice>
+        <div className="grid grid-cols-1 gap-3">
+          <FormField label="Secret Key" hint="Stable reference like openclaw_api_key or crm_bearer_token.">
+            <TextInput
+              value={secretForm.secret_key}
+              onChange={(e) => setSecretForm((current) => ({ ...current, secret_key: e.target.value }))}
+              placeholder="openclaw_api_key"
+            />
+          </FormField>
+          <FormField label="Purpose">
+            <TextInput
+              value={secretForm.purpose}
+              onChange={(e) => setSecretForm((current) => ({ ...current, purpose: e.target.value }))}
+              placeholder="Bearer token for OpenClaw intake API"
+            />
+          </FormField>
+          <FormField label={editingSecretID ? 'Rotate Secret Value (optional)' : 'Secret Value'}>
+            <TextInput
+              type="password"
+              value={secretForm.secret_value}
+              onChange={(e) => setSecretForm((current) => ({ ...current, secret_value: e.target.value }))}
+              placeholder={editingSecretID ? 'Leave blank to keep current value' : 'Paste token'}
+            />
+          </FormField>
+        </div>
+        {notice && <InlineNotice tone={notice.toLowerCase().includes('success') || notice.toLowerCase().includes('created') || notice.toLowerCase().includes('updated') ? 'success' : 'info'}>{notice}</InlineNotice>}
+        <div className="flex gap-2">
+          <button
+            onClick={persistSecret}
+            disabled={savingSecret}
+            className="flex-1 bg-primary text-on-primary font-bold py-2 rounded-lg text-sm active:scale-95 transition-transform disabled:opacity-50"
+          >
+            {savingSecret ? 'SAVING...' : editingSecretID ? 'SAVE SECRET' : 'CREATE SECRET'}
+          </button>
+          {editingSecretID && (
+            <button
+              onClick={() => {
+                setEditingSecretID('');
+                setSecretForm(defaultSecretForm());
+              }}
+              className="px-4 border border-slate-800 rounded-lg text-sm text-slate-200 hover:bg-slate-900"
+            >
+              Cancel
+            </button>
+          )}
+        </div>
+      </Panel>
+
+      <Panel
+        title="Saved Secret Refs"
+        subtitle="Reference these keys from integration targets instead of embedding tokens directly in config JSON."
+        action={
+          <button onClick={fetchSecrets} className="text-slate-400 hover:text-white" title="Refresh secret refs">
+            <RefreshCw size={16} className={loadingSecrets ? 'animate-spin' : ''} />
+          </button>
+        }
+      >
+        <div className="space-y-3">
+          {secrets.map((secret) => (
+            <div key={secret.id} className="rounded-xl border border-slate-800 bg-slate-950/40 p-3 space-y-2">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm text-white font-medium">{secret.secret_key}</p>
+                  <p className="text-[11px] text-slate-500">{secret.purpose || 'No purpose provided'}</p>
+                </div>
+                <div className="flex gap-2">
+                  <button onClick={() => beginEditSecret(secret)} className="px-2 py-1 rounded-lg border border-slate-700 text-[11px] text-slate-200 hover:bg-slate-900">
+                    Rotate
+                  </button>
+                  <button onClick={() => deleteSecret(secret)} className="px-2 py-1 rounded-lg border border-red-900/60 text-[11px] text-red-300 hover:bg-red-950/40">
+                    Delete
+                  </button>
+                </div>
+              </div>
+            </div>
+          ))}
+          {!secrets.length && !loadingSecrets && (
+            <p className="text-slate-500 text-xs text-center py-3">No integration secrets saved yet.</p>
+          )}
+        </div>
+      </Panel>
+    </motion.div>
+  );
+};
+
+const IntegrationsTab = () => {
   const defaultTargetForm = () => ({
     target_key: '',
     target_type: 'http',
@@ -1503,26 +1701,14 @@ const IntegrationsTab = ({ listeners }) => {
     header_secret_refs_text: prettyJSON({}),
     header_env_refs_text: prettyJSON({}),
   });
-  const defaultSecretForm = () => ({
-    secret_key: '',
-    purpose: '',
-    secret_value: '',
-  });
-
   const [targets, setTargets] = useState([]);
   const [secrets, setSecrets] = useState([]);
   const [loadingTargets, setLoadingTargets] = useState(false);
-  const [loadingSecrets, setLoadingSecrets] = useState(false);
   const [savingTarget, setSavingTarget] = useState(false);
-  const [savingSecret, setSavingSecret] = useState(false);
   const [notice, setNotice] = useState('');
   const [expandedTargetID, setExpandedTargetID] = useState('');
   const [editingTargetID, setEditingTargetID] = useState('');
-  const [editingSecretID, setEditingSecretID] = useState('');
   const [targetForm, setTargetForm] = useState(defaultTargetForm);
-  const [secretForm, setSecretForm] = useState(defaultSecretForm);
-
-  const hasSingleTenant = listeners.some((listener) => listener.deployment_mode === 'single_tenant');
 
   const fetchTargets = async () => {
     setLoadingTargets(true);
@@ -1537,14 +1723,11 @@ const IntegrationsTab = ({ listeners }) => {
   };
 
   const fetchSecrets = async () => {
-    setLoadingSecrets(true);
     try {
       const data = await apiRequest('/api/integration-secrets');
       setSecrets(Array.isArray(data) ? data : []);
     } catch (err) {
       setNotice(err.message);
-    } finally {
-      setLoadingSecrets(false);
     }
   };
 
@@ -1621,33 +1804,6 @@ const IntegrationsTab = ({ listeners }) => {
     }
   };
 
-  const persistSecret = async () => {
-    setSavingSecret(true);
-    setNotice('');
-    try {
-      if (!secretForm.secret_key.trim()) {
-        throw new Error('secret_key is required');
-      }
-      if (!editingSecretID && !secretForm.secret_value.trim()) {
-        throw new Error('secret_value is required');
-      }
-      const path = editingSecretID ? `/api/integration-secrets/${editingSecretID}` : '/api/integration-secrets';
-      const method = editingSecretID ? 'PUT' : 'POST';
-      await apiRequest(path, {
-        method,
-        body: JSON.stringify(secretForm),
-      });
-      await fetchSecrets();
-      setEditingSecretID('');
-      setSecretForm(defaultSecretForm());
-      setNotice(`Integration secret ${method === 'POST' ? 'created' : 'updated'} successfully.`);
-    } catch (err) {
-      setNotice(err.message);
-    } finally {
-      setSavingSecret(false);
-    }
-  };
-
   const beginEditTarget = (target) => {
     const details = targetRecordDetails(target);
     const config = targetConfigFromRecord(target);
@@ -1675,15 +1831,6 @@ const IntegrationsTab = ({ listeners }) => {
     });
   };
 
-  const beginEditSecret = (secret) => {
-    setEditingSecretID(secret.id);
-    setSecretForm({
-      secret_key: secret.secret_key || '',
-      purpose: secret.purpose || '',
-      secret_value: '',
-    });
-  };
-
   const deleteTarget = async (target) => {
     if (!window.confirm(`Delete integration "${target.target_key || target.id}"?`)) return;
     try {
@@ -1694,21 +1841,6 @@ const IntegrationsTab = ({ listeners }) => {
       }
       await fetchTargets();
       setNotice('Integration deleted.');
-    } catch (err) {
-      setNotice(err.message);
-    }
-  };
-
-  const deleteSecret = async (secret) => {
-    if (!window.confirm(`Delete integration secret "${secret.secret_key}"?`)) return;
-    try {
-      await apiRequest(`/api/integration-secrets/${secret.id}`, { method: 'DELETE' });
-      if (editingSecretID === secret.id) {
-        setEditingSecretID('');
-        setSecretForm(defaultSecretForm());
-      }
-      await fetchSecrets();
-      setNotice('Integration secret deleted.');
     } catch (err) {
       setNotice(err.message);
     }
@@ -1736,93 +1868,13 @@ const IntegrationsTab = ({ listeners }) => {
       <h2 className="px-1 text-white">Integrations</h2>
 
       <Panel
-        title="Integration Secrets"
-        subtitle="Store named secret refs for multitenant accounts. Single-tenant listeners can also fall back to env vars automatically."
-        action={<KeyRound size={18} className="text-primary" />}
-      >
-        <InlineNotice>
-          {hasSingleTenant
-            ? 'Single-tenant listeners can auto-resolve conventional env vars when no secret ref is attached. Multitenant listeners should use named secret refs.'
-            : 'Multitenant listeners should attach named secret refs. Env fallback is kept as an operator override only.'}
-        </InlineNotice>
-        <div className="grid grid-cols-1 gap-3">
-          <FormField label="Secret Key" hint="Stable reference like openclaw_api_key or crm_bearer_token.">
-            <TextInput
-              value={secretForm.secret_key}
-              onChange={(e) => setSecretForm((current) => ({ ...current, secret_key: e.target.value }))}
-              placeholder="openclaw_api_key"
-            />
-          </FormField>
-          <FormField label="Purpose">
-            <TextInput
-              value={secretForm.purpose}
-              onChange={(e) => setSecretForm((current) => ({ ...current, purpose: e.target.value }))}
-              placeholder="Bearer token for OpenClaw intake API"
-            />
-          </FormField>
-          <FormField label={editingSecretID ? 'Rotate Secret Value (optional)' : 'Secret Value'}>
-            <TextInput
-              type="password"
-              value={secretForm.secret_value}
-              onChange={(e) => setSecretForm((current) => ({ ...current, secret_value: e.target.value }))}
-              placeholder={editingSecretID ? 'Leave blank to keep current value' : 'Paste token'}
-            />
-          </FormField>
-        </div>
-        <div className="flex gap-2">
-          <button
-            onClick={persistSecret}
-            disabled={savingSecret}
-            className="flex-1 bg-primary text-on-primary font-bold py-2 rounded-lg text-sm active:scale-95 transition-transform disabled:opacity-50"
-          >
-            {savingSecret ? 'SAVING...' : editingSecretID ? 'SAVE SECRET' : 'CREATE SECRET'}
-          </button>
-          {editingSecretID && (
-            <button
-              onClick={() => {
-                setEditingSecretID('');
-                setSecretForm(defaultSecretForm());
-              }}
-              className="px-4 border border-slate-800 rounded-lg text-sm text-slate-200 hover:bg-slate-900"
-            >
-              Cancel
-            </button>
-          )}
-        </div>
-        <div className="space-y-2 pt-2">
-          <div className="flex items-center justify-between px-1">
-            <p className="text-[10px] text-slate-500 font-label-caps">Saved Secret Refs</p>
-            {loadingSecrets && <RefreshCw size={12} className="text-slate-500 animate-spin" />}
-          </div>
-          {secrets.map((secret) => (
-            <div key={secret.id} className="rounded-xl border border-slate-800 bg-slate-950/40 p-3 space-y-2">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <p className="text-sm text-white font-medium">{secret.secret_key}</p>
-                  <p className="text-[11px] text-slate-500">{secret.purpose || 'No purpose provided'}</p>
-                </div>
-                <div className="flex gap-2">
-                  <button onClick={() => beginEditSecret(secret)} className="px-2 py-1 rounded-lg border border-slate-700 text-[11px] text-slate-200 hover:bg-slate-900">
-                    Rotate
-                  </button>
-                  <button onClick={() => deleteSecret(secret)} className="px-2 py-1 rounded-lg border border-red-900/60 text-[11px] text-red-300 hover:bg-red-950/40">
-                    Delete
-                  </button>
-                </div>
-              </div>
-            </div>
-          ))}
-          {!secrets.length && !loadingSecrets && (
-            <p className="text-slate-500 text-xs text-center py-3">No integration secrets saved yet.</p>
-          )}
-        </div>
-      </Panel>
-
-      <Panel
         title="Create Integration"
         subtitle="Define reusable named targets for OpenClaw, custom forward URLs, or any downstream system your skills can call."
         action={<Cable size={18} className="text-primary" />}
       >
+        <InlineNotice>
+          Use the separate <span className="text-white font-semibold">Integration Secrets</span> tab to create or rotate named secret refs, then attach them here to keep tokens out of target config.
+        </InlineNotice>
         <div className="flex flex-wrap gap-2">
           <button
             onClick={() => applyIntegrationPreset('openclaw')}
