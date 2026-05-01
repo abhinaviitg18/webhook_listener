@@ -519,6 +519,11 @@ function DocsContent({ appProfile, login, inApp = false }) {
           uses <span className="text-white font-semibold">multitenant</span> routing. Enterprise-only behavior and
           single-tenant deployment decisions are controlled by environment variables at deploy time, not by per-listener UI choices here.
         </p>
+        <p className="text-sm text-slate-300">
+          You can also deploy the full architecture on your own AWS account or any cloud you prefer, bind it to the domain you want,
+          and run it comfortably as your own stack. That deployment path is intended as a <span className="text-white font-semibold">one-time setup plan</span>,
+          not a recurring platform charge.
+        </p>
       </div>
 
       <div className="grid gap-4 lg:grid-cols-[1.05fr_0.95fr]">
@@ -584,6 +589,11 @@ payload -> preprocess -> deterministic routing -> optional LLM routing -> select
               what is noise versus signal, stores a clear record in Storyboard, and forwards only meaningful events into your
               downstream workflows.
             </p>
+            <p className="text-sm text-slate-300">
+              If you want full control, you can deploy this architecture for your own company on AWS or another cloud, connect your own
+              domain, and keep the whole stack in your environment. The intent there is a one-time deployment charge rather than an ongoing
+              recurring software fee.
+            </p>
             <div className="space-y-2 text-sm text-slate-300">
               <p><span className="text-white font-semibold">Webhook magic:</span> every active secret gives you a short URL like <code className="text-indigo-300">https://app.agenthook.store/abhinaviitg18.demo</code>.</p>
               <p><span className="text-white font-semibold">Email magic:</span> the same identity also works as <code className="text-indigo-300">abhinaviitg18.demo@app.agenthook.store</code>.</p>
@@ -605,6 +615,10 @@ payload -> preprocess -> deterministic routing -> optional LLM routing -> select
               <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-3">
                 <p className="text-white font-semibold">3. OpenClaw cost control</p>
                 <p>Let AgentHook discard heartbeats and routine status updates before they ever reach OpenClaw, so only high-signal events consume downstream automation.</p>
+              </div>
+              <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-3">
+                <p className="text-white font-semibold">4. Self-hosted company deployment</p>
+                <p>Deploy the same webhook, email, SES, S3, Lambda, and UI architecture on your own AWS account or any cloud, attach your domain, and run it as a one-time setup for your team.</p>
               </div>
             </div>
           </div>
@@ -860,6 +874,12 @@ Content-Type: application/json
               </div>
             ))}
           </div>
+          <div className="rounded-3xl border border-slate-800 bg-slate-950/40 p-5">
+            <p className="text-sm text-slate-300">
+              Teams that do not want another recurring SaaS bill can deploy AgentHook on their own infrastructure, point it at their own domain,
+              and keep the architecture portable across AWS or another cloud from day one.
+            </p>
+          </div>
         </LandingSection>
 
         <section className="rounded-[32px] border border-indigo-500/20 bg-[linear-gradient(135deg,rgba(79,70,229,0.16),rgba(15,23,42,0.92))] px-6 py-8 md:px-8 md:py-10">
@@ -867,7 +887,7 @@ Content-Type: application/json
             <p className="text-[10px] uppercase tracking-[0.24em] text-indigo-200 font-label-caps">Start with one noisy webhook</p>
             <h2 className="text-3xl md:text-4xl font-h1 text-white">Create a listener, send a sample payload, and decide what should be dropped, stored, or forwarded.</h2>
             <p className="text-slate-200">
-              AgentHook is built to sit in front of the tools you already use, not replace them.
+              AgentHook is built to sit in front of the tools you already use, not replace them. You can use this hosted deployment or take the same architecture to your own domain and cloud as a one-time setup.
             </p>
             <div className="flex flex-col sm:flex-row gap-3">
               <button
