@@ -8,6 +8,7 @@ import {
   RefreshCw,
   Copy,
   Check,
+  CalendarDays,
   Brain,
   LogIn,
   Link2,
@@ -22,6 +23,7 @@ import {
   Mail,
   BadgeCheck,
   BookOpen,
+  ArrowUpRight,
   Save,
   Trash2,
 } from 'lucide-react';
@@ -52,6 +54,8 @@ const DEFAULT_APP_PROFILE = {
   docs_path: '/app?tab=docs',
   home_docs_anchor: '/#docs',
 };
+const ENTERPRISE_SETUP_PRICE = import.meta.env.VITE_ENTERPRISE_SETUP_PRICE || '200';
+const ENTERPRISE_CAL_URL = import.meta.env.VITE_ENTERPRISE_CAL_URL || 'https://cal.com/agenthook/enterprise';
 
 const INTEGRATION_PRESETS = {
   openclaw: {
@@ -488,6 +492,157 @@ function LandingSection({ id, eyebrow, title, children, className = '' }) {
   );
 }
 
+function enterprisePrefillURL(baseURL, form) {
+  const params = new URLSearchParams();
+  if (form.name.trim()) params.set('name', form.name.trim());
+  if (form.email.trim()) params.set('email', form.email.trim());
+  const notes = [form.company.trim(), form.useCase.trim()].filter(Boolean).join(' | ');
+  if (notes) params.set('notes', notes);
+  const query = params.toString();
+  return query ? `${baseURL}${baseURL.includes('?') ? '&' : '?'}${query}` : baseURL;
+}
+
+function EnterpriseSection({ inApp = false, onPrimaryAction }) {
+  const [form, setForm] = useState({
+    name: '',
+    email: '',
+    company: '',
+    useCase: '',
+  });
+
+  const bookingURL = enterprisePrefillURL(ENTERPRISE_CAL_URL, form);
+
+  return (
+    <div className="space-y-5">
+      <div className="rounded-[32px] border border-amber-400/20 bg-[linear-gradient(135deg,rgba(245,158,11,0.16),rgba(15,23,42,0.96))] p-6 md:p-8 space-y-4">
+        <div className="flex items-start justify-between gap-4 flex-wrap">
+          <div className="space-y-2 max-w-2xl">
+            <p className="text-[10px] uppercase tracking-[0.24em] text-amber-300 font-label-caps">Switch to Enterprise</p>
+            <h3 className="text-2xl md:text-3xl font-h1 text-white">No monthly subscription. One setup cost of ${ENTERPRISE_SETUP_PRICE}.</h3>
+            <p className="text-sm md:text-base text-slate-200">
+              Enterprise is for teams that want the whole AgentHook architecture deployed on their own cloud, their own domain,
+              and their own operational boundary. We set it up once, wire the domain, webhook ingress, SES mail path, storage,
+              and UI, and you run it comfortably from there.
+            </p>
+          </div>
+          <div className="rounded-2xl border border-amber-300/20 bg-slate-950/50 px-4 py-3 text-sm text-slate-100">
+            <div className="font-semibold text-white">Enterprise includes</div>
+            <div className="mt-1 text-slate-300">Single-tenant deployment, custom domain wiring, AWS/cloud setup, and guided handoff.</div>
+          </div>
+        </div>
+
+        <div className="grid gap-3 md:grid-cols-4">
+          {[
+            'Single-tenant deployment path for your company',
+            'Your own AWS account or other cloud environment',
+            'Webhook, SES mail, storage, and UI setup included',
+            'One-time setup cost instead of recurring subscription',
+          ].map((item) => (
+            <div key={item} className="rounded-2xl border border-slate-800 bg-slate-950/45 px-4 py-4 text-sm text-slate-200">
+              {item}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="grid gap-5 lg:grid-cols-[0.9fr_1.1fr]">
+        <div className="rounded-3xl border border-slate-800 bg-slate-950/40 p-5 space-y-4">
+          <div>
+            <p className="text-[10px] uppercase tracking-[0.22em] text-indigo-400 font-label-caps">Request enterprise setup</p>
+            <h4 className="text-xl text-white font-semibold">Tell us what you want deployed.</h4>
+            <p className="text-sm text-slate-300 mt-1">
+              Share the basics, then book an appointment on Cal.com so the deployment plan can be scoped against your domain, cloud, and event volume.
+            </p>
+          </div>
+
+          <div className="space-y-3">
+            <FormField label="Name">
+              <TextInput value={form.name} onChange={(e) => setForm((current) => ({ ...current, name: e.target.value }))} placeholder="Abhinav" />
+            </FormField>
+            <FormField label="Work Email">
+              <TextInput value={form.email} onChange={(e) => setForm((current) => ({ ...current, email: e.target.value }))} placeholder="founder@yourcompany.com" />
+            </FormField>
+            <FormField label="Company or Domain">
+              <TextInput value={form.company} onChange={(e) => setForm((current) => ({ ...current, company: e.target.value }))} placeholder="yourcompany.com" />
+            </FormField>
+            <FormField label="What should we deploy?" hint="Examples: inbound mail, WhatsApp routing, OpenClaw filtering, custom domain, single-tenant AWS setup.">
+              <TextArea value={form.useCase} onChange={(e) => setForm((current) => ({ ...current, useCase: e.target.value }))} placeholder="We want AgentHook on our own AWS account with SES mail ingest, a custom domain, and CRM/OpenClaw routing." />
+            </FormField>
+          </div>
+
+          <div className="flex flex-col sm:flex-row gap-3">
+            <a
+              href={bookingURL}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center justify-center gap-2 bg-primary text-on-primary px-4 py-3 rounded-2xl font-semibold active:scale-95 transition-transform"
+            >
+              <CalendarDays size={16} />
+              Set appointment on Cal.com
+            </a>
+            <button
+              type="button"
+              onClick={onPrimaryAction}
+              className="inline-flex items-center justify-center gap-2 border border-slate-700 bg-slate-950/50 px-4 py-3 rounded-2xl font-semibold text-white hover:bg-slate-900 transition-colors"
+            >
+              <ArrowUpRight size={16} />
+              {inApp ? 'Stay in docs' : 'See enterprise benefits'}
+            </button>
+          </div>
+        </div>
+
+        <div className="rounded-3xl border border-slate-800 bg-slate-950/40 p-4 space-y-3">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="text-[10px] uppercase tracking-[0.22em] text-slate-400 font-label-caps">Cal.com booking</p>
+              <h4 className="text-lg text-white font-semibold">Pick a deployment planning slot.</h4>
+            </div>
+            <a
+              href={bookingURL}
+              target="_blank"
+              rel="noreferrer"
+              className="text-sm text-indigo-300 hover:text-indigo-200 inline-flex items-center gap-1"
+            >
+              Open full page
+              <ArrowUpRight size={14} />
+            </a>
+          </div>
+          <div className="overflow-hidden rounded-2xl border border-slate-800 bg-slate-950">
+            <iframe
+              title="Enterprise booking calendar"
+              src={bookingURL}
+              className="w-full min-h-[760px] bg-white"
+              loading="lazy"
+              referrerPolicy="no-referrer-when-downgrade"
+            />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function EnterpriseFloatingCTA({ onClick }) {
+  return (
+    <button
+      onClick={onClick}
+      className="fixed right-4 bottom-24 md:bottom-6 z-50 rounded-2xl border border-amber-300/25 bg-[linear-gradient(135deg,rgba(245,158,11,0.92),rgba(251,191,36,0.82))] px-4 py-3 text-left shadow-2xl shadow-amber-950/30 active:scale-95 transition-transform max-w-[240px]"
+      title="Switch to Enterprise"
+    >
+      <div className="flex items-start gap-3">
+        <div className="rounded-xl bg-black/15 p-2 text-slate-950">
+          <CalendarDays size={18} />
+        </div>
+        <div>
+          <div className="text-[10px] uppercase tracking-[0.18em] text-black/70 font-label-caps">Switch to Enterprise</div>
+          <div className="text-sm font-bold text-slate-950">No monthly subscription</div>
+          <div className="text-xs text-black/75">One setup cost of ${ENTERPRISE_SETUP_PRICE}</div>
+        </div>
+      </div>
+    </button>
+  );
+}
+
 function normalizeAppProfile(profile) {
   return {
     ...DEFAULT_APP_PROFILE,
@@ -497,7 +652,7 @@ function normalizeAppProfile(profile) {
   };
 }
 
-function DocsContent({ appProfile, login, inApp = false }) {
+function DocsContent({ appProfile, login, inApp = false, onOpenEnterprise }) {
   const planLabel = appProfile.plan === 'enterprise' ? 'Enterprise' : 'Basic';
   const deploymentLabel = appProfile.deployment_mode === 'single_tenant' ? 'Single-tenant' : 'Multitenant';
 
@@ -649,6 +804,16 @@ payload -> preprocess -> deterministic routing -> optional LLM routing -> select
                 Open the public docs section
               </a>
             )}
+            {onOpenEnterprise && (
+              <button
+                type="button"
+                onClick={onOpenEnterprise}
+                className="inline-flex items-center gap-2 text-sm text-amber-300 hover:text-amber-200"
+              >
+                <CalendarDays size={16} />
+                Switch to Enterprise
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -662,6 +827,9 @@ function MarketingHome({ login, error, appProfile }) {
   };
   const scrollToDocs = () => {
     document.getElementById('docs')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+  const scrollToEnterprise = () => {
+    document.getElementById('enterprise')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   };
 
   return (
@@ -863,7 +1031,11 @@ Content-Type: application/json
         </LandingSection>
 
         <LandingSection id="docs" eyebrow="Docs" title="Readable by humans, explicit enough for agents.">
-          <DocsContent appProfile={appProfile} login={login} />
+          <DocsContent appProfile={appProfile} login={login} onOpenEnterprise={scrollToEnterprise} />
+        </LandingSection>
+
+        <LandingSection id="enterprise" eyebrow="Enterprise" title="Deploy AgentHook on your own cloud, domain, and operational boundary.">
+          <EnterpriseSection onPrimaryAction={scrollToEnterprise} />
         </LandingSection>
 
         <LandingSection eyebrow="Why teams use AgentHook" title="Practical automation without scattering glue code everywhere.">
@@ -907,6 +1079,7 @@ Content-Type: application/json
           </div>
         </section>
       </main>
+      <EnterpriseFloatingCTA onClick={scrollToEnterprise} />
     </div>
   );
 }
@@ -963,6 +1136,13 @@ function App() {
 
   const refreshAll = async () => {
     await Promise.allSettled([fetchListeners(), fetchEvents(activeTag)]);
+  };
+
+  const openEnterprise = () => {
+    setActiveTab('docs');
+    window.setTimeout(() => {
+      document.getElementById('enterprise')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 80);
   };
 
   const handleTagClick = (tag) => {
@@ -1129,7 +1309,10 @@ function App() {
               className="space-y-6"
             >
               <h2 className="px-1 text-white">Docs</h2>
-              <DocsContent appProfile={effectiveAppProfile} inApp />
+              <DocsContent appProfile={effectiveAppProfile} inApp onOpenEnterprise={openEnterprise} />
+              <section id="enterprise" className="pt-2">
+                <EnterpriseSection inApp onPrimaryAction={openEnterprise} />
+              </section>
             </motion.div>
           )}
 
@@ -1180,6 +1363,7 @@ function App() {
       </button>
 
       <BottomNavBar activeTab={activeTab} onTabChange={setActiveTab} />
+      <EnterpriseFloatingCTA onClick={openEnterprise} />
     </div>
   );
 }
