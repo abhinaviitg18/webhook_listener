@@ -41,8 +41,12 @@ func IsValidManualSecret(secret string) bool {
 	return !strings.ContainsAny(secret, "/?.#@")
 }
 
+func BuildLocalPart(publicAlias, secret string) string {
+	return NormalizePublicAlias(publicAlias) + "." + NormalizeWebhookSecret(secret)
+}
+
 func BuildEmailAddress(publicAlias, secret, domain string) string {
-	return NormalizePublicAlias(publicAlias) + "." + NormalizeWebhookSecret(secret) + "@" + strings.TrimSpace(strings.ToLower(domain))
+	return BuildLocalPart(publicAlias, secret) + "@" + strings.TrimSpace(strings.ToLower(domain))
 }
 
 func ParseEmailAddress(address string) (publicAlias, secret, domain string, ok bool) {

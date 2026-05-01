@@ -333,6 +333,89 @@ func TestListenerV1AllowsDuplicateTypeKeysAndUsesLatestListener(t *testing.T) {
 	}
 }
 
+func TestShortWebhookBlockedIdentityStopsIngress(t *testing.T) {
+	st := store.NewMemoryStore()
+	proc := &service.Processor{
+		Store:    st,
+		Pinecone: integrations.NewPineconeClient("", "", ""),
+		LLM:      integrations.NewLLMClient("", "", "", ""),
+		Executor: service.NewActionService(nil),
+	}
+	h := &Handler{Store: st, Processor: proc, MailDomain: "app.agenthook.store"}
+	r := NewRouter(h, auth.TokenVerifier{Store: st})
+	ts := httptest.NewServer(r)
+	defer ts.Close()
+	h.PublicBaseURL = ts.URL
+
+	acct, token, err := registerAccount(ts.URL, "blocked@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	createBody := []byte(`{"provider":"generic-json","listener_id":"blockedmail","deployment_mode":"multitenant","plain_text_action":"store_mysql","use_llm_fallback":false,"secret_value":"blockme"}`)
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/v1/listeners", bytes.NewReader(createBody))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("unexpected create status %d", resp.StatusCode)
+	}
+	var created map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&created); err != nil {
+		t.Fatal(err)
+	}
+
+	reqIDs, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/webhook-identities", nil)
+	reqIDs.Header.Set("Authorization", "Bearer "+token)
+	respIDs, err := http.DefaultClient.Do(reqIDs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer respIDs.Body.Close()
+	var identities []map[string]any
+	if err := json.NewDecoder(respIDs.Body).Decode(&identities); err != nil {
+		t.Fatal(err)
+	}
+	if len(identities) == 0 {
+		t.Fatal("expected webhook identity to be listed")
+	}
+	identityID, _ := identities[0]["id"].(string)
+	blockReq, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/webhook-identities/"+identityID+"/block", nil)
+	blockReq.Header.Set("Authorization", "Bearer "+token)
+	blockResp, err := http.DefaultClient.Do(blockReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer blockResp.Body.Close()
+	if blockResp.StatusCode != http.StatusOK {
+		t.Fatalf("unexpected block status %d", blockResp.StatusCode)
+	}
+
+	webhookURL, _ := created["webhook_url"].(string)
+	u, _ := url.Parse(webhookURL)
+	if u != nil {
+		u.Scheme = "http"
+		u.Host = strings.TrimPrefix(ts.URL, "http://")
+		webhookURL = u.String()
+	}
+	resp2, err := http.Post(webhookURL, "application/json", bytes.NewReader([]byte(`{"hello":"world"}`)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp2.Body.Close()
+	if resp2.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("expected blocked short webhook to return 401, got %d", resp2.StatusCode)
+	}
+
+	if _, err := st.ResolveSecretAnyType(context.Background(), acct["id"].(string), "blockme"); err == nil {
+		t.Fatal("expected blocked identity to invalidate secret resolution")
+	}
+}
+
 func registerAccount(baseURL, email string) (map[string]interface{}, string, error) {
 	regBody := []byte(`{"email":"` + email + `"}`)
 	resp, err := http.Post(baseURL+"/api/register/email", "application/json", bytes.NewReader(regBody))

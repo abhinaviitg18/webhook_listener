@@ -33,6 +33,7 @@ type Handler struct {
 	VerifyHTCSignature   bool
 	AppPlan              string
 	AppDeploymentMode    string
+	MailDomain           string
 	ScaleKitBaseURL      string
 	ScaleKitClientID     string
 	ScaleKitClientSecret string
@@ -62,6 +63,9 @@ func NewRouter(h *Handler, verifier auth.RequestVerifier) http.Handler {
 		ar.Get("/api/webhooks/types", h.ListTypes)
 		ar.Post("/api/webhooks/secrets", h.CreateSecret)
 		ar.Delete("/api/webhooks/secrets/{secretID}", h.DeleteSecret)
+		ar.Get("/api/webhook-identities", h.ListWebhookIdentities)
+		ar.Post("/api/webhook-identities/{identityID}/block", h.BlockWebhookIdentity)
+		ar.Post("/api/webhook-identities/{identityID}/restore", h.RestoreWebhookIdentity)
 		ar.Post("/api/forward-targets", h.CreateForwardTarget)
 		ar.Get("/api/forward-targets", h.ListForwardTargets)
 		ar.Put("/api/forward-targets/{targetID}", h.UpdateForwardTarget)
@@ -243,12 +247,12 @@ func (h *Handler) UserInfo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"id":          acct.ID,
-		"slug":        acct.Slug,
+		"id":           acct.ID,
+		"slug":         acct.Slug,
 		"public_alias": acct.PublicAlias,
-		"owner_email": acct.OwnerEmail,
-		"created_at":  acct.CreatedAt,
-		"app_profile": h.appProfilePayload(),
+		"owner_email":  acct.OwnerEmail,
+		"created_at":   acct.CreatedAt,
+		"app_profile":  h.appProfilePayload(),
 	})
 }
 
@@ -702,6 +706,93 @@ func (h *Handler) DeleteSecret(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"deleted": true})
+}
+
+func (h *Handler) ListWebhookIdentities(w http.ResponseWriter, r *http.Request) {
+	acct, ok := auth.AccountFromContext(r.Context())
+	if !ok {
+		writeErr(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	items, err := h.Store.ListWebhookIdentities(r.Context(), acct.ID)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	resp := make([]map[string]any, 0, len(items))
+	for _, item := range items {
+		resp = append(resp, h.webhookIdentityResponse(item))
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (h *Handler) BlockWebhookIdentity(w http.ResponseWriter, r *http.Request) {
+	acct, ok := auth.AccountFromContext(r.Context())
+	if !ok {
+		writeErr(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	identityID := strings.TrimSpace(chi.URLParam(r, "identityID"))
+	if identityID == "" {
+		writeErr(w, http.StatusBadRequest, "identityID required")
+		return
+	}
+	item, err := h.Store.UpdateWebhookIdentityStatus(r.Context(), acct.ID, identityID, "blocked")
+	if err != nil {
+		if errors.Is(err, domain.ErrWebhookIdentityNotFound) {
+			writeErr(w, http.StatusNotFound, err.Error())
+			return
+		}
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, h.webhookIdentityResponse(item))
+}
+
+func (h *Handler) RestoreWebhookIdentity(w http.ResponseWriter, r *http.Request) {
+	acct, ok := auth.AccountFromContext(r.Context())
+	if !ok {
+		writeErr(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	identityID := strings.TrimSpace(chi.URLParam(r, "identityID"))
+	if identityID == "" {
+		writeErr(w, http.StatusBadRequest, "identityID required")
+		return
+	}
+	item, err := h.Store.UpdateWebhookIdentityStatus(r.Context(), acct.ID, identityID, "active")
+	if err != nil {
+		if errors.Is(err, domain.ErrWebhookIdentityNotFound) {
+			writeErr(w, http.StatusNotFound, err.Error())
+			return
+		}
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, h.webhookIdentityResponse(item))
+}
+
+func (h *Handler) webhookIdentityResponse(item domain.WebhookIdentity) map[string]any {
+	mailDomain := strings.TrimSpace(strings.ToLower(h.MailDomain))
+	if mailDomain == "" {
+		mailDomain = "app.agenthook.store"
+	}
+	emailAddress := item.LocalPart + "@" + mailDomain
+	return map[string]any{
+		"id":            item.ID,
+		"account_id":    item.AccountID,
+		"type_id":       item.TypeID,
+		"secret_id":     item.SecretID,
+		"public_alias":  item.PublicAlias,
+		"secret_value":  item.SecretValue,
+		"local_part":    item.LocalPart,
+		"webhook_id":    emailAddress,
+		"email_address": emailAddress,
+		"status":        item.Status,
+		"created_at":    item.CreatedAt,
+		"updated_at":    item.UpdatedAt,
+		"deleted_at":    item.DeletedAt,
+	}
 }
 
 func (h *Handler) CreateForwardTarget(w http.ResponseWriter, r *http.Request) {
@@ -1325,8 +1416,12 @@ func (h *Handler) CreateListener(w http.ResponseWriter, r *http.Request) {
 		}
 		secret, err = h.Store.CreateSecretWithValue(r.Context(), acct.ID, whType.ID, raw)
 		if err != nil {
-			if strings.Contains(strings.ToLower(err.Error()), "already in use") {
-				writeErr(w, http.StatusConflict, "secret_value already in use")
+			if errors.Is(err, domain.ErrWebhookIdentityAlreadyActive) {
+				writeErr(w, http.StatusConflict, "secret_value already active for this userkey")
+				return
+			}
+			if errors.Is(err, domain.ErrWebhookIdentityReserved) {
+				writeErr(w, http.StatusConflict, "secret_value is reserved by another account for that exact userkey")
 				return
 			}
 			writeErr(w, http.StatusInternalServerError, err.Error())
@@ -1427,8 +1522,12 @@ func (h *Handler) CreateListenerSecret(w http.ResponseWriter, r *http.Request) {
 		}
 		secret, err = h.Store.CreateSecretWithValue(r.Context(), acct.ID, whType.ID, raw)
 		if err != nil {
-			if strings.Contains(strings.ToLower(err.Error()), "already in use") {
-				writeErr(w, http.StatusConflict, "secret_value already in use")
+			if errors.Is(err, domain.ErrWebhookIdentityAlreadyActive) {
+				writeErr(w, http.StatusConflict, "secret_value already active for this userkey")
+				return
+			}
+			if errors.Is(err, domain.ErrWebhookIdentityReserved) {
+				writeErr(w, http.StatusConflict, "secret_value is reserved by another account for that exact userkey")
 				return
 			}
 			writeErr(w, http.StatusInternalServerError, err.Error())

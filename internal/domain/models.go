@@ -1,6 +1,15 @@
 package domain
 
-import "time"
+import (
+	"errors"
+	"time"
+)
+
+var (
+	ErrWebhookIdentityAlreadyActive = errors.New("webhook identity already active")
+	ErrWebhookIdentityReserved      = errors.New("webhook identity reserved by another account")
+	ErrWebhookIdentityNotFound      = errors.New("webhook identity not found")
+)
 
 type Account struct {
 	ID          string    `json:"id"`
@@ -34,6 +43,20 @@ type WebhookSecret struct {
 	SecretValue string    `json:"-"`
 	Status      string    `json:"status"`
 	CreatedAt   time.Time `json:"created_at"`
+}
+
+type WebhookIdentity struct {
+	ID          string     `json:"id"`
+	AccountID   string     `json:"account_id"`
+	TypeID      string     `json:"type_id"`
+	SecretID    string     `json:"secret_id"`
+	PublicAlias string     `json:"public_alias"`
+	SecretValue string     `json:"secret_value"`
+	LocalPart   string     `json:"local_part"`
+	Status      string     `json:"status"`
+	CreatedAt   time.Time  `json:"created_at"`
+	UpdatedAt   time.Time  `json:"updated_at"`
+	DeletedAt   *time.Time `json:"deleted_at,omitempty"`
 }
 
 type ForwardTarget struct {

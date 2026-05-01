@@ -81,6 +81,7 @@ func BuildHTTPHandler(ctx context.Context, cfg config.Config) (http.Handler, err
 		VerifyHTCSignature:   cfg.VerifyHTCSignature,
 		AppPlan:              cfg.AppPlan,
 		AppDeploymentMode:    cfg.AppDeploymentMode,
+		MailDomain:           cfg.MailDomain,
 		ScaleKitBaseURL:      cfg.ScaleKitBaseURL,
 		ScaleKitClientID:     cfg.ScaleKitClientID,
 		ScaleKitClientSecret: cfg.ScaleKitClientSecret,

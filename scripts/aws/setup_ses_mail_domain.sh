@@ -8,6 +8,7 @@ Usage:
   AWS_REGION=us-east-1 \
   S3_BUCKET_NAME=mail-app-agenthook-store-inbound \
   LAMBDA_FUNCTION_NAME=agenthook-mail-ingress \
+  MAIL_RECEIPT_GUARD_LAMBDA_FUNCTION_NAME=agenthook-mail-receipt-guard \
   scripts/aws/setup_ses_mail_domain.sh
 
 Environment variables:
@@ -18,6 +19,7 @@ Environment variables:
   RECEIPT_RULE_SET         Optional. Defaults to mail-ingress-<domain-slug>
   RECEIPT_RULE_NAME        Optional. Defaults to store-raw-mail-<domain-slug>
   LAMBDA_FUNCTION_NAME     Optional. Used only to print S3 notification wiring commands
+  MAIL_RECEIPT_GUARD_LAMBDA_FUNCTION_NAME Optional. When provided and present, SES invokes it synchronously before S3 delivery.
   RAW_PREFIX               Optional. Defaults to raw/
   ATTACHMENT_PREFIX        Optional. Defaults to attachments/
   RAW_RETENTION_DAYS       Optional. Defaults to 30
@@ -55,6 +57,7 @@ RAW_RETENTION_DAYS="${RAW_RETENTION_DAYS:-30}"
 EVENTBRIDGE_ENABLED="${EVENTBRIDGE_ENABLED:-false}"
 ENABLE_S3_LAMBDA_TRIGGER="${ENABLE_S3_LAMBDA_TRIGGER:-false}"
 LAMBDA_FUNCTION_NAME="${LAMBDA_FUNCTION_NAME:-}"
+MAIL_RECEIPT_GUARD_LAMBDA_FUNCTION_NAME="${MAIL_RECEIPT_GUARD_LAMBDA_FUNCTION_NAME:-}"
 
 if [[ -z "$MAIL_DOMAIN" ]]; then
   echo "MAIL_DOMAIN is required" >&2
@@ -221,21 +224,76 @@ ensure_receipt_rule_set() {
     --region "$AWS_REGION" >/dev/null
 }
 
+ensure_receipt_guard_permission() {
+  if [[ -z "$MAIL_RECEIPT_GUARD_LAMBDA_FUNCTION_NAME" ]]; then
+    return 0
+  fi
+  if ! aws lambda get-function \
+    --region "$AWS_REGION" \
+    --function-name "$MAIL_RECEIPT_GUARD_LAMBDA_FUNCTION_NAME" >/dev/null 2>&1; then
+    return 0
+  fi
+  if ! aws lambda get-policy \
+    --region "$AWS_REGION" \
+    --function-name "$MAIL_RECEIPT_GUARD_LAMBDA_FUNCTION_NAME" \
+    --query 'Policy' \
+    --output text 2>/dev/null | grep -q "AllowSESMailReceiptGuard${DOMAIN_SLUG}"; then
+    aws lambda add-permission \
+      --region "$AWS_REGION" \
+      --function-name "$MAIL_RECEIPT_GUARD_LAMBDA_FUNCTION_NAME" \
+      --statement-id "AllowSESMailReceiptGuard${DOMAIN_SLUG}" \
+      --action lambda:InvokeFunction \
+      --principal ses.amazonaws.com \
+      --source-account "$ACCOUNT_ID" \
+      --source-arn "$RECEIPT_RULE_ARN" >/dev/null
+  fi
+}
+
 ensure_receipt_rule() {
+  local actions_json lambda_arn
+  actions_json="$(jq -cn --arg bucket "$S3_BUCKET_NAME" --arg prefix "$RAW_PREFIX" '
+    [
+      {
+        S3Action: {
+          BucketName: $bucket,
+          ObjectKeyPrefix: $prefix
+        }
+      }
+    ]')"
+
+  if [[ -n "$MAIL_RECEIPT_GUARD_LAMBDA_FUNCTION_NAME" ]]; then
+    if lambda_arn="$(aws lambda get-function \
+      --region "$AWS_REGION" \
+      --function-name "$MAIL_RECEIPT_GUARD_LAMBDA_FUNCTION_NAME" \
+      --query 'Configuration.FunctionArn' \
+      --output text 2>/dev/null)"; then
+      actions_json="$(jq -cn --arg guard_arn "$lambda_arn" --arg bucket "$S3_BUCKET_NAME" --arg prefix "$RAW_PREFIX" '
+        [
+          {
+            LambdaAction: {
+              FunctionArn: $guard_arn,
+              InvocationType: "RequestResponse"
+            }
+          },
+          {
+            S3Action: {
+              BucketName: $bucket,
+              ObjectKeyPrefix: $prefix
+            }
+          }
+        ]')"
+    else
+      echo "mail receipt guard lambda not found, continuing with S3-only receipt rule: ${MAIL_RECEIPT_GUARD_LAMBDA_FUNCTION_NAME}"
+    fi
+  fi
+
   cat >"$WORK_DIR/receipt-rule.json" <<EOF
 {
   "Name": "${RECEIPT_RULE_NAME}",
   "Enabled": true,
   "TlsPolicy": "Optional",
   "Recipients": ["${MAIL_DOMAIN}"],
-  "Actions": [
-    {
-      "S3Action": {
-        "BucketName": "${S3_BUCKET_NAME}",
-        "ObjectKeyPrefix": "${RAW_PREFIX}"
-      }
-    }
-  ],
+  "Actions": ${actions_json},
   "ScanEnabled": true
 }
 EOF
@@ -479,6 +537,7 @@ ensure_domain_verification
 ensure_dkim_tokens
 ensure_mail_from
 ensure_receipt_rule_set
+ensure_receipt_guard_permission
 ensure_receipt_rule
 ensure_eventbridge_destination
 ensure_lambda_trigger

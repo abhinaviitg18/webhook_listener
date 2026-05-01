@@ -12,6 +12,7 @@ import (
 
 	"agenthook.store/internal/domain"
 	"agenthook.store/internal/security"
+	"agenthook.store/internal/webhookid"
 )
 
 type MemoryStore struct {
@@ -25,8 +26,10 @@ type MemoryStore struct {
 	typesByID         map[string]domain.WebhookType
 	typesByAccountKey map[string]string
 
-	secretsByID  map[string]domain.WebhookSecret
-	secretByHash map[string]string
+	secretsByID         map[string]domain.WebhookSecret
+	secretByHash        map[string]string
+	identitiesByID      map[string]domain.WebhookIdentity
+	identityByLocalPart map[string]string
 
 	targets            map[string]domain.ForwardTarget
 	integrationSecrets map[string]domain.IntegrationSecret
@@ -45,24 +48,26 @@ type MemoryStore struct {
 
 func NewMemoryStore() *MemoryStore {
 	return &MemoryStore{
-		accountsByID:       map[string]domain.Account{},
-		accountsBySlug:     map[string]string{},
-		accountsByAlias:    map[string]string{},
-		tokens:             map[string]string{},
-		typesByID:          map[string]domain.WebhookType{},
-		typesByAccountKey:  map[string]string{},
-		secretsByID:        map[string]domain.WebhookSecret{},
-		secretByHash:       map[string]string{},
-		targets:            map[string]domain.ForwardTarget{},
-		integrationSecrets: map[string]domain.IntegrationSecret{},
-		events:             map[string]domain.WebhookEvent{},
-		eventBySource:      map[string]string{},
-		signatures:         map[string]domain.WebhookTypeSignature{},
-		transforms:         map[string]domain.WebhookTransform{},
-		runs:               map[string]domain.TransformRun{},
-		policiesByAccount:  map[string]domain.MasterPromptPolicy{},
-		skills:             map[string]domain.WebhookSkill{},
-		autoStates:         map[string]domain.AutoPromoteState{},
+		accountsByID:        map[string]domain.Account{},
+		accountsBySlug:      map[string]string{},
+		accountsByAlias:     map[string]string{},
+		tokens:              map[string]string{},
+		typesByID:           map[string]domain.WebhookType{},
+		typesByAccountKey:   map[string]string{},
+		secretsByID:         map[string]domain.WebhookSecret{},
+		secretByHash:        map[string]string{},
+		identitiesByID:      map[string]domain.WebhookIdentity{},
+		identityByLocalPart: map[string]string{},
+		targets:             map[string]domain.ForwardTarget{},
+		integrationSecrets:  map[string]domain.IntegrationSecret{},
+		events:              map[string]domain.WebhookEvent{},
+		eventBySource:       map[string]string{},
+		signatures:          map[string]domain.WebhookTypeSignature{},
+		transforms:          map[string]domain.WebhookTransform{},
+		runs:                map[string]domain.TransformRun{},
+		policiesByAccount:   map[string]domain.MasterPromptPolicy{},
+		skills:              map[string]domain.WebhookSkill{},
+		autoStates:          map[string]domain.AutoPromoteState{},
 	}
 }
 
@@ -176,9 +181,13 @@ func (s *MemoryStore) UpdateAccountPublicAlias(_ context.Context, accountID, pub
 		return domain.Account{}, errors.New("public alias already in use")
 	}
 	delete(s.accountsByAlias, acct.PublicAlias)
+	oldAlias := acct.PublicAlias
 	acct.PublicAlias = publicAlias
 	s.accountsByID[accountID] = acct
 	s.accountsByAlias[publicAlias] = accountID
+	if err := s.rekeyActiveIdentitiesForAliasChange(accountID, oldAlias, publicAlias); err != nil {
+		return domain.Account{}, err
+	}
 	return acct, nil
 }
 
@@ -251,51 +260,39 @@ func (s *MemoryStore) DeleteWebhookType(_ context.Context, accountID, typeID str
 		return errors.New("type not found")
 	}
 	delete(s.typesByID, typeID)
+	for secretID, sec := range s.secretsByID {
+		if sec.AccountID == accountID && sec.TypeID == typeID && sec.Status == "active" {
+			sec.Status = "revoked"
+			s.secretsByID[secretID] = sec
+			s.tombstoneIdentityBySecretLocked(secretID)
+		}
+	}
 	return nil
 }
 
 func (s *MemoryStore) CreateSecret(_ context.Context, accountID, typeID string) (domain.WebhookSecret, string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	raw, err := security.NewToken(18)
-	if err != nil {
-		return domain.WebhookSecret{}, "", err
+	for attempt := 0; attempt < 5; attempt++ {
+		raw, err := security.NewToken(18)
+		if err != nil {
+			return domain.WebhookSecret{}, "", err
+		}
+		obj, err := s.createSecretLocked(accountID, typeID, raw)
+		if err == nil {
+			return obj, raw, nil
+		}
+		if !errors.Is(err, domain.ErrWebhookIdentityAlreadyActive) {
+			return domain.WebhookSecret{}, "", err
+		}
 	}
-	id := uuid.NewString()
-	obj := domain.WebhookSecret{
-		ID:          id,
-		AccountID:   accountID,
-		TypeID:      typeID,
-		SecretValue: raw,
-		Status:      "active",
-		CreatedAt:   time.Now().UTC(),
-	}
-	s.secretsByID[id] = obj
-	s.secretByHash[raw] = id
-	return obj, raw, nil
+	return domain.WebhookSecret{}, "", errors.New("failed to generate unique secret")
 }
 
 func (s *MemoryStore) CreateSecretWithValue(_ context.Context, accountID, typeID, secretValue string) (domain.WebhookSecret, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if existingID, ok := s.secretByHash[secretValue]; ok {
-		existing := s.secretsByID[existingID]
-		if existing.AccountID == accountID && existing.Status == "active" {
-			return domain.WebhookSecret{}, errors.New("secret already in use")
-		}
-	}
-	id := uuid.NewString()
-	obj := domain.WebhookSecret{
-		ID:          id,
-		AccountID:   accountID,
-		TypeID:      typeID,
-		SecretValue: secretValue,
-		Status:      "active",
-		CreatedAt:   time.Now().UTC(),
-	}
-	s.secretsByID[id] = obj
-	s.secretByHash[secretValue] = id
-	return obj, nil
+	return s.createSecretLocked(accountID, typeID, secretValue)
 }
 
 func (s *MemoryStore) ListSecrets(_ context.Context, accountID, typeID string) ([]domain.WebhookSecret, error) {
@@ -320,6 +317,7 @@ func (s *MemoryStore) DeleteSecret(_ context.Context, accountID, secretID string
 	}
 	sec.Status = "revoked"
 	s.secretsByID[secretID] = sec
+	s.tombstoneIdentityBySecretLocked(secretID)
 	return nil
 }
 
@@ -332,6 +330,9 @@ func (s *MemoryStore) ValidateSecret(_ context.Context, accountID, typeID, secre
 	}
 	sec := s.secretsByID[id]
 	if sec.AccountID != accountID || sec.TypeID != typeID || sec.Status != "active" {
+		return domain.WebhookSecret{}, errors.New("invalid secret")
+	}
+	if !s.isIdentityActiveForSecretLocked(sec.AccountID, sec.SecretValue) {
 		return domain.WebhookSecret{}, errors.New("invalid secret")
 	}
 	return sec, nil
@@ -348,7 +349,196 @@ func (s *MemoryStore) ResolveSecretAnyType(_ context.Context, accountID, secret 
 	if sec.AccountID != accountID || sec.Status != "active" {
 		return domain.WebhookSecret{}, errors.New("invalid secret")
 	}
+	if !s.isIdentityActiveForSecretLocked(sec.AccountID, sec.SecretValue) {
+		return domain.WebhookSecret{}, errors.New("invalid secret")
+	}
 	return sec, nil
+}
+
+func (s *MemoryStore) ListWebhookIdentities(_ context.Context, accountID string) ([]domain.WebhookIdentity, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var out []domain.WebhookIdentity
+	for _, identity := range s.identitiesByID {
+		if identity.AccountID == accountID {
+			out = append(out, identity)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].UpdatedAt.Equal(out[j].UpdatedAt) {
+			return out[i].LocalPart < out[j].LocalPart
+		}
+		return out[i].UpdatedAt.After(out[j].UpdatedAt)
+	})
+	return out, nil
+}
+
+func (s *MemoryStore) GetWebhookIdentityByLocalPart(_ context.Context, localPart string) (domain.WebhookIdentity, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	id, ok := s.identityByLocalPart[webhookid.NormalizeWebhookSecret(localPart)]
+	if !ok {
+		return domain.WebhookIdentity{}, domain.ErrWebhookIdentityNotFound
+	}
+	return s.identitiesByID[id], nil
+}
+
+func (s *MemoryStore) UpdateWebhookIdentityStatus(_ context.Context, accountID, identityID, status string) (domain.WebhookIdentity, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	identity, ok := s.identitiesByID[identityID]
+	if !ok || identity.AccountID != accountID {
+		return domain.WebhookIdentity{}, domain.ErrWebhookIdentityNotFound
+	}
+	now := time.Now().UTC()
+	switch status {
+	case "blocked":
+		identity.Status = "blocked"
+		identity.UpdatedAt = now
+		identity.DeletedAt = nil
+	case "active":
+		if identity.Status == "deleted_tombstoned" {
+			if !s.hasActiveSecretLocked(accountID, identity.SecretValue) {
+				return domain.WebhookIdentity{}, errors.New("matching active secret required to restore deleted identity")
+			}
+		}
+		identity.Status = "active"
+		identity.UpdatedAt = now
+		identity.DeletedAt = nil
+	default:
+		return domain.WebhookIdentity{}, errors.New("unsupported identity status")
+	}
+	s.identitiesByID[identity.ID] = identity
+	return identity, nil
+}
+
+func (s *MemoryStore) createSecretLocked(accountID, typeID, secretValue string) (domain.WebhookSecret, error) {
+	acct, ok := s.accountsByID[accountID]
+	if !ok {
+		return domain.WebhookSecret{}, errors.New("account not found")
+	}
+	localPart := webhookid.BuildLocalPart(acct.PublicAlias, secretValue)
+	if identityID, ok := s.identityByLocalPart[localPart]; ok {
+		identity := s.identitiesByID[identityID]
+		if identity.AccountID != accountID {
+			return domain.WebhookSecret{}, domain.ErrWebhookIdentityReserved
+		}
+		if identity.Status == "active" {
+			return domain.WebhookSecret{}, domain.ErrWebhookIdentityAlreadyActive
+		}
+	}
+	id := uuid.NewString()
+	now := time.Now().UTC()
+	obj := domain.WebhookSecret{
+		ID:          id,
+		AccountID:   accountID,
+		TypeID:      typeID,
+		SecretValue: secretValue,
+		Status:      "active",
+		CreatedAt:   now,
+	}
+	s.secretsByID[id] = obj
+	s.secretByHash[secretValue] = id
+	s.activateIdentityLocked(acct, obj)
+	return obj, nil
+}
+
+func (s *MemoryStore) activateIdentityLocked(acct domain.Account, secret domain.WebhookSecret) {
+	now := time.Now().UTC()
+	localPart := webhookid.BuildLocalPart(acct.PublicAlias, secret.SecretValue)
+	if identityID, ok := s.identityByLocalPart[localPart]; ok {
+		identity := s.identitiesByID[identityID]
+		identity.TypeID = secret.TypeID
+		identity.SecretID = secret.ID
+		identity.PublicAlias = acct.PublicAlias
+		identity.SecretValue = secret.SecretValue
+		identity.Status = "active"
+		identity.UpdatedAt = now
+		identity.DeletedAt = nil
+		s.identitiesByID[identityID] = identity
+		return
+	}
+	identity := domain.WebhookIdentity{
+		ID:          uuid.NewString(),
+		AccountID:   acct.ID,
+		TypeID:      secret.TypeID,
+		SecretID:    secret.ID,
+		PublicAlias: acct.PublicAlias,
+		SecretValue: secret.SecretValue,
+		LocalPart:   localPart,
+		Status:      "active",
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}
+	s.identitiesByID[identity.ID] = identity
+	s.identityByLocalPart[localPart] = identity.ID
+}
+
+func (s *MemoryStore) tombstoneIdentityBySecretLocked(secretID string) {
+	now := time.Now().UTC()
+	for id, identity := range s.identitiesByID {
+		if identity.SecretID != secretID {
+			continue
+		}
+		identity.Status = "deleted_tombstoned"
+		identity.UpdatedAt = now
+		identity.DeletedAt = &now
+		s.identitiesByID[id] = identity
+	}
+}
+
+func (s *MemoryStore) rekeyActiveIdentitiesForAliasChange(accountID, oldAlias, newAlias string) error {
+	now := time.Now().UTC()
+	for id, identity := range s.identitiesByID {
+		if identity.AccountID != accountID || identity.Status != "active" || identity.PublicAlias != oldAlias {
+			continue
+		}
+		newLocalPart := webhookid.BuildLocalPart(newAlias, identity.SecretValue)
+		if existingID, ok := s.identityByLocalPart[newLocalPart]; ok {
+			existing := s.identitiesByID[existingID]
+			if existing.AccountID != accountID {
+				return domain.ErrWebhookIdentityReserved
+			}
+		}
+		identity.Status = "deleted_tombstoned"
+		identity.UpdatedAt = now
+		identity.DeletedAt = &now
+		s.identitiesByID[id] = identity
+
+		activeCopy := identity
+		activeCopy.ID = uuid.NewString()
+		activeCopy.PublicAlias = newAlias
+		activeCopy.LocalPart = newLocalPart
+		activeCopy.Status = "active"
+		activeCopy.CreatedAt = now
+		activeCopy.UpdatedAt = now
+		activeCopy.DeletedAt = nil
+		s.identitiesByID[activeCopy.ID] = activeCopy
+		s.identityByLocalPart[newLocalPart] = activeCopy.ID
+	}
+	return nil
+}
+
+func (s *MemoryStore) isIdentityActiveForSecretLocked(accountID, secretValue string) bool {
+	acct, ok := s.accountsByID[accountID]
+	if !ok {
+		return false
+	}
+	localPart := webhookid.BuildLocalPart(acct.PublicAlias, secretValue)
+	identityID, ok := s.identityByLocalPart[localPart]
+	if !ok {
+		return false
+	}
+	return s.identitiesByID[identityID].Status == "active"
+}
+
+func (s *MemoryStore) hasActiveSecretLocked(accountID, secretValue string) bool {
+	for _, secret := range s.secretsByID {
+		if secret.AccountID == accountID && secret.SecretValue == secretValue && secret.Status == "active" {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *MemoryStore) CreateForwardTarget(_ context.Context, accountID, targetType, configJSON string) (domain.ForwardTarget, error) {

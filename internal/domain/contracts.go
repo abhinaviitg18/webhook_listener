@@ -24,6 +24,9 @@ type Store interface {
 	DeleteSecret(ctx context.Context, accountID, secretID string) error
 	ValidateSecret(ctx context.Context, accountID, typeID, secret string) (WebhookSecret, error)
 	ResolveSecretAnyType(ctx context.Context, accountID, secret string) (WebhookSecret, error)
+	ListWebhookIdentities(ctx context.Context, accountID string) ([]WebhookIdentity, error)
+	GetWebhookIdentityByLocalPart(ctx context.Context, localPart string) (WebhookIdentity, error)
+	UpdateWebhookIdentityStatus(ctx context.Context, accountID, identityID, status string) (WebhookIdentity, error)
 	GetWebhookTypeByID(ctx context.Context, typeID string) (WebhookType, error)
 
 	CreateForwardTarget(ctx context.Context, accountID, targetType, configJSON string) (ForwardTarget, error)

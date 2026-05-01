@@ -2127,6 +2127,9 @@ const UrlsTab = ({ listeners, user, appProfile, setUser, onRefresh, copied, setC
   const [loadingTokens, setLoadingTokens] = useState(false);
   const [secretMap, setSecretMap] = useState({});
   const [secretsHistory, setSecretsHistory] = useState({});
+  const [webhookIdentities, setWebhookIdentities] = useState([]);
+  const [loadingIdentities, setLoadingIdentities] = useState(false);
+  const [identityBusyID, setIdentityBusyID] = useState('');
   const [loadingSecrets, setLoadingSecrets] = useState(false);
   const [secretComposer, setSecretComposer] = useState({});
   const [publicAliasDraft, setPublicAliasDraft] = useState(user?.public_alias || user?.slug || '');
@@ -2156,6 +2159,18 @@ const UrlsTab = ({ listeners, user, appProfile, setUser, onRefresh, copied, setC
     }
   };
 
+  const fetchWebhookIdentities = async () => {
+    setLoadingIdentities(true);
+    try {
+      const data = await apiRequest('/api/webhook-identities');
+      setWebhookIdentities(Array.isArray(data) ? data : []);
+    } catch (err) {
+      console.error('Failed to fetch webhook identities', err);
+    } finally {
+      setLoadingIdentities(false);
+    }
+  };
+
   const fetchSecrets = async (listener) => {
     try {
       const data = await apiRequest(`/v1/listeners/${listener.listener_id}/secrets?provider=${listener.provider}`);
@@ -2170,6 +2185,7 @@ const UrlsTab = ({ listeners, user, appProfile, setUser, onRefresh, copied, setC
 
   useEffect(() => {
     fetchTokens();
+    fetchWebhookIdentities();
     if (listeners.length === 0) return;
     setLoadingSecrets(true);
     Promise.allSettled(listeners.map((listener) => fetchSecrets(listener))).finally(() => setLoadingSecrets(false));
@@ -2185,6 +2201,7 @@ const UrlsTab = ({ listeners, user, appProfile, setUser, onRefresh, copied, setC
         return next;
       });
       await onRefresh();
+      await fetchWebhookIdentities();
     } catch (err) {
       setError(`Failed to delete listener: ${err.message}`);
     }
@@ -2213,6 +2230,7 @@ const UrlsTab = ({ listeners, user, appProfile, setUser, onRefresh, copied, setC
       setListenerSecretValue('');
       setListenerSecretMode('auto');
       await onRefresh();
+      await fetchWebhookIdentities();
     } catch (err) {
       setError(err.message);
     } finally {
@@ -2256,8 +2274,25 @@ const UrlsTab = ({ listeners, user, appProfile, setUser, onRefresh, copied, setC
         [key]: { mode: 'auto', secret_value: '' },
       }));
       await fetchSecrets(listener);
+      await fetchWebhookIdentities();
     } catch (err) {
       setError(err.message);
+    }
+  };
+
+  const changeIdentityStatus = async (identityID, nextStatus) => {
+    setIdentityBusyID(identityID);
+    setError('');
+    try {
+      const path = nextStatus === 'blocked'
+        ? `/api/webhook-identities/${identityID}/block`
+        : `/api/webhook-identities/${identityID}/restore`;
+      await apiRequest(path, { method: 'POST' });
+      await fetchWebhookIdentities();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setIdentityBusyID('');
     }
   };
 
@@ -2629,6 +2664,84 @@ const UrlsTab = ({ listeners, user, appProfile, setUser, onRefresh, copied, setC
           {listeners.length === 0 && (
             <p className="text-slate-500 text-center py-10">
               No specific URLs configured yet. Create your first listener above to unlock secret-backed ingress URLs.
+            </p>
+          )}
+        </div>
+      </Panel>
+
+      <Panel
+        title="Mailbox / Webhook ID Registry"
+        subtitle="This exact-ID registry controls whether a short webhook ID or mailbox address is active, blocked, or reserved for your account."
+        action={
+          <button
+            onClick={() => fetchWebhookIdentities().catch((err) => setError(err.message))}
+            className="text-slate-400 hover:text-white"
+            title="Refresh identity registry"
+          >
+            <RefreshCw size={16} className={loadingIdentities ? 'animate-spin' : ''} />
+          </button>
+        }
+      >
+        <div className="space-y-3">
+          {webhookIdentities.map((identity) => {
+            const isBusy = identityBusyID === identity.id;
+            return (
+              <div key={identity.id} className="rounded-2xl border border-slate-800 bg-slate-950/30 p-4 space-y-2">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <code className="text-indigo-300 text-xs break-all">{identity.email_address}</code>
+                      <span className={`text-[10px] uppercase tracking-[0.18em] px-2 py-1 rounded-full border ${
+                        identity.status === 'active'
+                          ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-300'
+                          : identity.status === 'blocked'
+                            ? 'border-amber-500/20 bg-amber-500/10 text-amber-300'
+                            : 'border-slate-700 bg-slate-900 text-slate-300'
+                      }`}>
+                        {identity.status}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-500 mt-1">
+                      Secret: <code className="text-slate-300 break-all">{identity.secret_value}</code>
+                    </p>
+                    {identity.deleted_at && (
+                      <p className="text-[11px] text-slate-500">Reserved for this account since {new Date(identity.deleted_at).toLocaleString()}</p>
+                    )}
+                  </div>
+                  <div className="flex gap-2 shrink-0">
+                    {identity.status === 'active' && (
+                      <button
+                        type="button"
+                        disabled={isBusy}
+                        onClick={() => changeIdentityStatus(identity.id, 'blocked')}
+                        className="rounded-lg border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-[11px] font-semibold text-amber-200 disabled:opacity-50"
+                      >
+                        {isBusy ? 'BLOCKING...' : 'Block'}
+                      </button>
+                    )}
+                    {identity.status === 'blocked' && (
+                      <button
+                        type="button"
+                        disabled={isBusy}
+                        onClick={() => changeIdentityStatus(identity.id, 'active')}
+                        className="rounded-lg border border-emerald-500/20 bg-emerald-500/10 px-3 py-2 text-[11px] font-semibold text-emerald-200 disabled:opacity-50"
+                      >
+                        {isBusy ? 'RESTORING...' : 'Restore'}
+                      </button>
+                    )}
+                    {identity.status === 'deleted_tombstoned' && (
+                      <div className="rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-[11px] text-slate-400">
+                        Recreate the same secret to restore
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+          {!webhookIdentities.length && !loadingIdentities && (
+            <p className="text-slate-500 text-center py-6">
+              No exact webhook identities tracked yet. Create a listener secret to activate both the short URL and mailbox ID.
             </p>
           )}
         </div>

@@ -14,6 +14,7 @@ import (
 
 	"agenthook.store/internal/domain"
 	"agenthook.store/internal/security"
+	"agenthook.store/internal/webhookid"
 )
 
 type MySQLStore struct {
@@ -29,6 +30,8 @@ type MySQLStore struct {
 	accountAliasSchemaReady      bool
 	webhookTypeSchemaMu          sync.Mutex
 	webhookTypeSchemaReady       bool
+	webhookIdentitySchemaMu      sync.Mutex
+	webhookIdentitySchemaReady   bool
 }
 
 type eventSelectVariant struct {
@@ -115,6 +118,34 @@ func (s *MySQLStore) ensureWebhookTypeSchema(ctx context.Context) error {
 		}
 	}
 	s.webhookTypeSchemaReady = true
+	return nil
+}
+
+func (s *MySQLStore) ensureWebhookIdentitySchema(ctx context.Context) error {
+	s.webhookIdentitySchemaMu.Lock()
+	defer s.webhookIdentitySchemaMu.Unlock()
+	if s.webhookIdentitySchemaReady {
+		return nil
+	}
+	if _, err := s.db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS webhook_identities (
+		id VARCHAR(64) PRIMARY KEY,
+		account_id VARCHAR(64) NOT NULL,
+		type_id VARCHAR(64) NOT NULL,
+		secret_id VARCHAR(64) NOT NULL,
+		public_alias VARCHAR(128) NOT NULL,
+		secret_value VARCHAR(255) NOT NULL,
+		local_part VARCHAR(384) NOT NULL,
+		status VARCHAR(32) NOT NULL,
+		created_at DATETIME NOT NULL,
+		updated_at DATETIME NOT NULL,
+		deleted_at DATETIME NULL,
+		UNIQUE KEY uq_webhook_identity_local_part (local_part),
+		INDEX idx_webhook_identity_account_status (account_id, status),
+		INDEX idx_webhook_identity_secret (secret_id)
+	)`); err != nil {
+		return err
+	}
+	s.webhookIdentitySchemaReady = true
 	return nil
 }
 
@@ -243,14 +274,129 @@ func (s *MySQLStore) UpdateAccountPublicAlias(ctx context.Context, accountID, pu
 	if err := s.ensureAccountAliasSchema(ctx); err != nil {
 		return domain.Account{}, err
 	}
-	_, err := s.db.ExecContext(ctx, `UPDATE accounts SET public_alias=? WHERE id=?`, publicAlias, accountID)
+	if err := s.ensureWebhookIdentitySchema(ctx); err != nil {
+		return domain.Account{}, err
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
+		return domain.Account{}, err
+	}
+	defer tx.Rollback()
+	current, err := s.getAccountTx(ctx, tx, accountID)
+	if err != nil {
+		return domain.Account{}, err
+	}
+	if err := s.ensureAliasChangeIdentityReservationTx(ctx, tx, accountID, current.PublicAlias, publicAlias); err != nil {
+		return domain.Account{}, err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE accounts SET public_alias=? WHERE id=?`, publicAlias, accountID); err != nil {
 		if isDuplicateEntryErr(err) {
 			return domain.Account{}, errors.New("public alias already in use")
 		}
 		return domain.Account{}, err
 	}
+	if err := s.rekeyActiveWebhookIdentitiesTx(ctx, tx, accountID, current.PublicAlias, publicAlias); err != nil {
+		return domain.Account{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return domain.Account{}, err
+	}
 	return s.GetAccount(ctx, accountID)
+}
+
+func (s *MySQLStore) getAccountTx(ctx context.Context, tx *sql.Tx, accountID string) (domain.Account, error) {
+	var acct domain.Account
+	err := tx.QueryRowContext(ctx, `SELECT id, slug, COALESCE(NULLIF(public_alias,''), slug), owner_email, created_at FROM accounts WHERE id=? LIMIT 1`, accountID).
+		Scan(&acct.ID, &acct.Slug, &acct.PublicAlias, &acct.OwnerEmail, &acct.CreatedAt)
+	return acct, err
+}
+
+func (s *MySQLStore) upsertWebhookIdentityTx(ctx context.Context, tx *sql.Tx, identity domain.WebhookIdentity) error {
+	now := time.Now().UTC()
+	if identity.ID == "" {
+		identity.ID = uuid.NewString()
+	}
+	var existingID string
+	err := tx.QueryRowContext(ctx, `SELECT id FROM webhook_identities WHERE local_part=? LIMIT 1`, identity.LocalPart).Scan(&existingID)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	if err == nil && existingID != "" {
+		_, err = tx.ExecContext(ctx, `UPDATE webhook_identities SET account_id=?, type_id=?, secret_id=?, public_alias=?, secret_value=?, status=?, updated_at=?, deleted_at=? WHERE id=?`,
+			identity.AccountID, identity.TypeID, identity.SecretID, identity.PublicAlias, identity.SecretValue, identity.Status, now, identity.DeletedAt, existingID)
+		return err
+	}
+	createdAt := identity.CreatedAt
+	if createdAt.IsZero() {
+		createdAt = now
+	}
+	_, err = tx.ExecContext(ctx, `INSERT INTO webhook_identities(id, account_id, type_id, secret_id, public_alias, secret_value, local_part, status, created_at, updated_at, deleted_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
+		identity.ID, identity.AccountID, identity.TypeID, identity.SecretID, identity.PublicAlias, identity.SecretValue, identity.LocalPart, identity.Status, createdAt, now, identity.DeletedAt)
+	return err
+}
+
+func (s *MySQLStore) ensureAliasChangeIdentityReservationTx(ctx context.Context, tx *sql.Tx, accountID, oldAlias, newAlias string) error {
+	rows, err := tx.QueryContext(ctx, `SELECT COALESCE(secret_value,'') FROM webhook_secrets WHERE account_id=? AND status='active'`, accountID)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var secretValue string
+		if err := rows.Scan(&secretValue); err != nil {
+			return err
+		}
+		localPart := webhookid.BuildLocalPart(newAlias, secretValue)
+		var existingAccountID string
+		err := tx.QueryRowContext(ctx, `SELECT account_id FROM webhook_identities WHERE local_part=? LIMIT 1`, localPart).Scan(&existingAccountID)
+		if errors.Is(err, sql.ErrNoRows) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		if existingAccountID != accountID {
+			return domain.ErrWebhookIdentityReserved
+		}
+	}
+	return nil
+}
+
+func (s *MySQLStore) rekeyActiveWebhookIdentitiesTx(ctx context.Context, tx *sql.Tx, accountID, oldAlias, newAlias string) error {
+	rows, err := tx.QueryContext(ctx, `SELECT id, type_id, secret_id, COALESCE(secret_value,'') FROM webhook_identities WHERE account_id=? AND public_alias=? AND status='active'`, accountID, oldAlias)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	type row struct {
+		id, typeID, secretID, secretValue string
+	}
+	var items []row
+	for rows.Next() {
+		var item row
+		if err := rows.Scan(&item.id, &item.typeID, &item.secretID, &item.secretValue); err != nil {
+			return err
+		}
+		items = append(items, item)
+	}
+	now := time.Now().UTC()
+	for _, item := range items {
+		if _, err := tx.ExecContext(ctx, `UPDATE webhook_identities SET status='deleted_tombstoned', updated_at=?, deleted_at=? WHERE id=?`, now, now, item.id); err != nil {
+			return err
+		}
+		if err := s.upsertWebhookIdentityTx(ctx, tx, domain.WebhookIdentity{
+			AccountID:   accountID,
+			TypeID:      item.typeID,
+			SecretID:    item.secretID,
+			PublicAlias: newAlias,
+			SecretValue: item.secretValue,
+			LocalPart:   webhookid.BuildLocalPart(newAlias, item.secretValue),
+			Status:      "active",
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (s *MySQLStore) ListWebhookTypes(ctx context.Context, accountID string) ([]domain.WebhookType, error) {
@@ -320,17 +466,55 @@ func (s *MySQLStore) CreateSecret(ctx context.Context, accountID, typeID string)
 }
 
 func (s *MySQLStore) CreateSecretWithValue(ctx context.Context, accountID, typeID, secretValue string) (domain.WebhookSecret, error) {
-	var existingID string
-	err := s.db.QueryRowContext(ctx, `SELECT id FROM webhook_secrets WHERE account_id=? AND secret_value=? AND status='active' LIMIT 1`, accountID, secretValue).Scan(&existingID)
-	if err == nil && existingID != "" {
-		return domain.WebhookSecret{}, errors.New("secret already in use")
+	if err := s.ensureAccountAliasSchema(ctx); err != nil {
+		return domain.WebhookSecret{}, err
 	}
+	if err := s.ensureWebhookIdentitySchema(ctx); err != nil {
+		return domain.WebhookSecret{}, err
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return domain.WebhookSecret{}, err
+	}
+	defer tx.Rollback()
+
+	acct, err := s.getAccountTx(ctx, tx, accountID)
+	if err != nil {
+		return domain.WebhookSecret{}, err
+	}
+	localPart := webhookid.BuildLocalPart(acct.PublicAlias, secretValue)
+	var identity domain.WebhookIdentity
+	err = tx.QueryRowContext(ctx, `SELECT id, account_id, type_id, secret_id, public_alias, COALESCE(secret_value,''), local_part, status, created_at, updated_at, deleted_at FROM webhook_identities WHERE local_part=? LIMIT 1`, localPart).
+		Scan(&identity.ID, &identity.AccountID, &identity.TypeID, &identity.SecretID, &identity.PublicAlias, &identity.SecretValue, &identity.LocalPart, &identity.Status, &identity.CreatedAt, &identity.UpdatedAt, &identity.DeletedAt)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return domain.WebhookSecret{}, err
 	}
+	if err == nil {
+		if identity.AccountID != accountID {
+			return domain.WebhookSecret{}, domain.ErrWebhookIdentityReserved
+		}
+		if identity.Status == "active" {
+			return domain.WebhookSecret{}, domain.ErrWebhookIdentityAlreadyActive
+		}
+	}
+
 	id := uuid.NewString()
-	_, err = s.db.ExecContext(ctx, `INSERT INTO webhook_secrets(id, account_id, type_id, secret_value, status, created_at) VALUES(?,?,?,?, 'active', UTC_TIMESTAMP())`, id, accountID, typeID, secretValue)
-	if err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO webhook_secrets(id, account_id, type_id, secret_value, status, created_at) VALUES(?,?,?,?, 'active', UTC_TIMESTAMP())`, id, accountID, typeID, secretValue); err != nil {
+		return domain.WebhookSecret{}, err
+	}
+	if err := s.upsertWebhookIdentityTx(ctx, tx, domain.WebhookIdentity{
+		ID:          identity.ID,
+		AccountID:   accountID,
+		TypeID:      typeID,
+		SecretID:    id,
+		PublicAlias: acct.PublicAlias,
+		SecretValue: secretValue,
+		LocalPart:   localPart,
+		Status:      "active",
+	}); err != nil {
+		return domain.WebhookSecret{}, err
+	}
+	if err := tx.Commit(); err != nil {
 		return domain.WebhookSecret{}, err
 	}
 	return domain.WebhookSecret{ID: id, AccountID: accountID, TypeID: typeID, SecretValue: secretValue, Status: "active", CreatedAt: time.Now().UTC()}, nil
@@ -354,13 +538,39 @@ func (s *MySQLStore) ListSecrets(ctx context.Context, accountID, typeID string) 
 }
 
 func (s *MySQLStore) DeleteSecret(ctx context.Context, accountID, secretID string) error {
-	_, err := s.db.ExecContext(ctx, `UPDATE webhook_secrets SET status='revoked' WHERE id=? AND account_id=?`, secretID, accountID)
-	return err
+	if err := s.ensureWebhookIdentitySchema(ctx); err != nil {
+		return err
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `UPDATE webhook_secrets SET status='revoked' WHERE id=? AND account_id=?`, secretID, accountID); err != nil {
+		return err
+	}
+	now := time.Now().UTC()
+	if _, err := tx.ExecContext(ctx, `UPDATE webhook_identities SET status='deleted_tombstoned', updated_at=?, deleted_at=? WHERE secret_id=? AND account_id=? AND status IN ('active','blocked')`, now, now, secretID, accountID); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (s *MySQLStore) ValidateSecret(ctx context.Context, accountID, typeID, secret string) (domain.WebhookSecret, error) {
+	if err := s.ensureWebhookIdentitySchema(ctx); err != nil {
+		return domain.WebhookSecret{}, err
+	}
 	var sec domain.WebhookSecret
-	err := s.db.QueryRowContext(ctx, `SELECT id, account_id, type_id, COALESCE(secret_value, ''), status, created_at FROM webhook_secrets WHERE account_id=? AND type_id=? AND secret_value=? AND status='active' LIMIT 1`, accountID, typeID, secret).Scan(&sec.ID, &sec.AccountID, &sec.TypeID, &sec.SecretValue, &sec.Status, &sec.CreatedAt)
+	err := s.db.QueryRowContext(ctx, `SELECT ws.id, ws.account_id, ws.type_id, COALESCE(ws.secret_value, ''), ws.status, ws.created_at
+		FROM webhook_secrets ws
+		INNER JOIN accounts a ON a.id = ws.account_id
+		INNER JOIN webhook_identities wi
+			ON wi.account_id = ws.account_id
+			AND wi.secret_id = ws.id
+			AND wi.local_part = CONCAT(COALESCE(NULLIF(a.public_alias,''), a.slug), '.', ws.secret_value)
+			AND wi.status='active'
+		WHERE ws.account_id=? AND ws.type_id=? AND ws.secret_value=? AND ws.status='active'
+		LIMIT 1`, accountID, typeID, secret).Scan(&sec.ID, &sec.AccountID, &sec.TypeID, &sec.SecretValue, &sec.Status, &sec.CreatedAt)
 	if err != nil {
 		return domain.WebhookSecret{}, errors.New("invalid secret")
 	}
@@ -368,12 +578,107 @@ func (s *MySQLStore) ValidateSecret(ctx context.Context, accountID, typeID, secr
 }
 
 func (s *MySQLStore) ResolveSecretAnyType(ctx context.Context, accountID, secret string) (domain.WebhookSecret, error) {
+	if err := s.ensureWebhookIdentitySchema(ctx); err != nil {
+		return domain.WebhookSecret{}, err
+	}
 	var sec domain.WebhookSecret
-	err := s.db.QueryRowContext(ctx, `SELECT id, account_id, type_id, COALESCE(secret_value, ''), status, created_at FROM webhook_secrets WHERE account_id=? AND secret_value=? AND status='active' LIMIT 1`, accountID, secret).Scan(&sec.ID, &sec.AccountID, &sec.TypeID, &sec.SecretValue, &sec.Status, &sec.CreatedAt)
+	err := s.db.QueryRowContext(ctx, `SELECT ws.id, ws.account_id, ws.type_id, COALESCE(ws.secret_value, ''), ws.status, ws.created_at
+		FROM webhook_secrets ws
+		INNER JOIN accounts a ON a.id = ws.account_id
+		INNER JOIN webhook_identities wi
+			ON wi.account_id = ws.account_id
+			AND wi.secret_id = ws.id
+			AND wi.local_part = CONCAT(COALESCE(NULLIF(a.public_alias,''), a.slug), '.', ws.secret_value)
+			AND wi.status='active'
+		WHERE ws.account_id=? AND ws.secret_value=? AND ws.status='active'
+		LIMIT 1`, accountID, secret).Scan(&sec.ID, &sec.AccountID, &sec.TypeID, &sec.SecretValue, &sec.Status, &sec.CreatedAt)
 	if err != nil {
 		return domain.WebhookSecret{}, errors.New("invalid secret")
 	}
 	return sec, nil
+}
+
+func (s *MySQLStore) ListWebhookIdentities(ctx context.Context, accountID string) ([]domain.WebhookIdentity, error) {
+	if err := s.ensureWebhookIdentitySchema(ctx); err != nil {
+		return nil, err
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT id, account_id, type_id, secret_id, public_alias, COALESCE(secret_value,''), local_part, status, created_at, updated_at, deleted_at FROM webhook_identities WHERE account_id=? ORDER BY updated_at DESC, created_at DESC`, accountID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []domain.WebhookIdentity
+	for rows.Next() {
+		var item domain.WebhookIdentity
+		if err := rows.Scan(&item.ID, &item.AccountID, &item.TypeID, &item.SecretID, &item.PublicAlias, &item.SecretValue, &item.LocalPart, &item.Status, &item.CreatedAt, &item.UpdatedAt, &item.DeletedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, item)
+	}
+	return out, nil
+}
+
+func (s *MySQLStore) GetWebhookIdentityByLocalPart(ctx context.Context, localPart string) (domain.WebhookIdentity, error) {
+	if err := s.ensureWebhookIdentitySchema(ctx); err != nil {
+		return domain.WebhookIdentity{}, err
+	}
+	var item domain.WebhookIdentity
+	err := s.db.QueryRowContext(ctx, `SELECT id, account_id, type_id, secret_id, public_alias, COALESCE(secret_value,''), local_part, status, created_at, updated_at, deleted_at FROM webhook_identities WHERE local_part=? LIMIT 1`, webhookid.NormalizeWebhookSecret(localPart)).
+		Scan(&item.ID, &item.AccountID, &item.TypeID, &item.SecretID, &item.PublicAlias, &item.SecretValue, &item.LocalPart, &item.Status, &item.CreatedAt, &item.UpdatedAt, &item.DeletedAt)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return domain.WebhookIdentity{}, domain.ErrWebhookIdentityNotFound
+		}
+		return domain.WebhookIdentity{}, err
+	}
+	return item, nil
+}
+
+func (s *MySQLStore) UpdateWebhookIdentityStatus(ctx context.Context, accountID, identityID, status string) (domain.WebhookIdentity, error) {
+	if err := s.ensureWebhookIdentitySchema(ctx); err != nil {
+		return domain.WebhookIdentity{}, err
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return domain.WebhookIdentity{}, err
+	}
+	defer tx.Rollback()
+	var item domain.WebhookIdentity
+	err = tx.QueryRowContext(ctx, `SELECT id, account_id, type_id, secret_id, public_alias, COALESCE(secret_value,''), local_part, status, created_at, updated_at, deleted_at FROM webhook_identities WHERE id=? AND account_id=? LIMIT 1`, identityID, accountID).
+		Scan(&item.ID, &item.AccountID, &item.TypeID, &item.SecretID, &item.PublicAlias, &item.SecretValue, &item.LocalPart, &item.Status, &item.CreatedAt, &item.UpdatedAt, &item.DeletedAt)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return domain.WebhookIdentity{}, domain.ErrWebhookIdentityNotFound
+		}
+		return domain.WebhookIdentity{}, err
+	}
+	now := time.Now().UTC()
+	switch status {
+	case "blocked":
+		if _, err := tx.ExecContext(ctx, `UPDATE webhook_identities SET status='blocked', updated_at=?, deleted_at=NULL WHERE id=? AND account_id=?`, now, identityID, accountID); err != nil {
+			return domain.WebhookIdentity{}, err
+		}
+	case "active":
+		if item.Status == "deleted_tombstoned" {
+			var activeSecretID string
+			if err := tx.QueryRowContext(ctx, `SELECT id FROM webhook_secrets WHERE account_id=? AND secret_value=? AND status='active' ORDER BY created_at DESC LIMIT 1`, accountID, item.SecretValue).Scan(&activeSecretID); err != nil {
+				if errors.Is(err, sql.ErrNoRows) {
+					return domain.WebhookIdentity{}, errors.New("matching active secret required to restore deleted identity")
+				}
+				return domain.WebhookIdentity{}, err
+			}
+			item.SecretID = activeSecretID
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE webhook_identities SET status='active', secret_id=?, updated_at=?, deleted_at=NULL WHERE id=? AND account_id=?`, item.SecretID, now, identityID, accountID); err != nil {
+			return domain.WebhookIdentity{}, err
+		}
+	default:
+		return domain.WebhookIdentity{}, errors.New("unsupported identity status")
+	}
+	if err := tx.Commit(); err != nil {
+		return domain.WebhookIdentity{}, err
+	}
+	return s.GetWebhookIdentityByLocalPart(ctx, item.LocalPart)
 }
 
 func (s *MySQLStore) CreateForwardTarget(ctx context.Context, accountID, targetType, configJSON string) (domain.ForwardTarget, error) {
