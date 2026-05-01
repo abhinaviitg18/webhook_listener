@@ -31,6 +31,8 @@ type Handler struct {
 	Store                domain.Store
 	Processor            *service.Processor
 	VerifyHTCSignature   bool
+	AppPlan              string
+	AppDeploymentMode    string
 	ScaleKitBaseURL      string
 	ScaleKitClientID     string
 	ScaleKitClientSecret string
@@ -47,6 +49,7 @@ func NewRouter(h *Handler, verifier auth.RequestVerifier) http.Handler {
 	})
 
 	r.Post("/api/register/email", h.RegisterEmail)
+	r.Get("/api/app-profile", h.AppProfile)
 	r.Get("/auth/scalekit/start", h.ScaleKitStart)
 	r.Get("/auth/scalekit/login", h.ScaleKitLoginRedirect)
 	r.Get("/auth/scalekit/signup", h.ScaleKitSignupRedirect)
@@ -239,7 +242,35 @@ func (h *Handler) UserInfo(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
-	writeJSON(w, http.StatusOK, acct)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"id":          acct.ID,
+		"slug":        acct.Slug,
+		"public_alias": acct.PublicAlias,
+		"owner_email": acct.OwnerEmail,
+		"created_at":  acct.CreatedAt,
+		"app_profile": h.appProfilePayload(),
+	})
+}
+
+func (h *Handler) AppProfile(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, h.appProfilePayload())
+}
+
+func (h *Handler) appProfilePayload() map[string]any {
+	plan := strings.TrimSpace(strings.ToLower(h.AppPlan))
+	if plan == "" {
+		plan = "basic"
+	}
+	deploymentMode := strings.TrimSpace(strings.ToLower(h.AppDeploymentMode))
+	if deploymentMode == "" {
+		deploymentMode = "multitenant"
+	}
+	return map[string]any{
+		"plan":             plan,
+		"deployment_mode":  deploymentMode,
+		"docs_path":        "/app?tab=docs",
+		"home_docs_anchor": "/#docs",
+	}
 }
 
 func (h *Handler) UpdateAccountProfile(w http.ResponseWriter, r *http.Request) {
@@ -1269,6 +1300,10 @@ func (h *Handler) CreateListener(w http.ResponseWriter, r *http.Request) {
 		listenerID = "wh_" + strings.ReplaceAll(uuid.NewString()[:12], "-", "")
 	}
 	deploymentMode := normalizeDeploymentMode(body.DeploymentMode)
+	if rawMode := strings.TrimSpace(h.AppDeploymentMode); rawMode != "" {
+		forcedMode := normalizeDeploymentMode(rawMode)
+		deploymentMode = forcedMode
+	}
 	typeKey := buildListenerTypeKey(provider, listenerID, deploymentMode)
 	whType, err := h.Store.CreateWebhookType(r.Context(), acct.ID, typeKey, strings.TrimSpace(body.PlainTextAction), body.UseLLMFallback)
 	if err != nil {

@@ -1,5 +1,5 @@
 import React from 'react';
-import { Activity, BrainCircuit, Cable, Cpu, Link as LinkIcon } from 'lucide-react';
+import { Activity, BookOpen, BrainCircuit, Cable, Cpu, Link as LinkIcon } from 'lucide-react';
 import { motion } from 'framer-motion';
 
 export const BottomNavBar = ({ activeTab, onTabChange }) => {
@@ -8,6 +8,7 @@ export const BottomNavBar = ({ activeTab, onTabChange }) => {
         { id: 'skills', label: 'Skills', icon: BrainCircuit },
         { id: 'integrations', label: 'Integrations', icon: Cable },
         { id: 'urls', label: 'URLs', icon: LinkIcon },
+        { id: 'docs', label: 'Docs', icon: BookOpen },
         { id: 'byok', label: 'BYOK', icon: Cpu },
     ];
 

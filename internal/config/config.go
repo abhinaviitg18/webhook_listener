@@ -9,6 +9,8 @@ import (
 
 type Config struct {
 	Port string
+	AppPlan string
+	AppDeploymentMode string
 
 	ScaleKitBaseURL      string
 	ScaleKitAPIKey       string
@@ -85,6 +87,8 @@ func Load() Config {
 
 	return Config{
 		Port: getenv("PORT", "8080"),
+		AppPlan: normalizePlan(getenv("APP_PLAN", "basic")),
+		AppDeploymentMode: normalizeDeploymentModeEnv(getenv("APP_DEPLOYMENT_MODE", "")),
 
 		ScaleKitBaseURL:      getenv("SCALEKIT_BASE_URL", ""),
 		ScaleKitAPIKey:       getenv("SCALEKIT_API_KEY", ""),
@@ -144,6 +148,32 @@ func Load() Config {
 		AutoPromoteShadowToActive:    getint("AUTOPROMOTE_SHADOW_TO_ACTIVE", 3),
 		AutoPromoteMinSuccessRate:    getfloat("AUTOPROMOTE_MIN_SUCCESS_RATE", 0.9),
 	}
+}
+
+func normalizePlan(in string) string {
+	switch strings.TrimSpace(strings.ToLower(in)) {
+	case "enterprise":
+		return "enterprise"
+	default:
+		return "basic"
+	}
+}
+
+func normalizeDeploymentModeValue(in string) string {
+	switch strings.TrimSpace(strings.ToLower(in)) {
+	case "enterprise", "single_tenant":
+		return "single_tenant"
+	default:
+		return "multitenant"
+	}
+}
+
+func normalizeDeploymentModeEnv(in string) string {
+	trimmed := strings.TrimSpace(strings.ToLower(in))
+	if trimmed == "" {
+		return ""
+	}
+	return normalizeDeploymentModeValue(trimmed)
 }
 
 func (c Config) Validate() error {

@@ -21,13 +21,14 @@ import {
   MessageSquareQuote,
   Mail,
   BadgeCheck,
+  BookOpen,
   Save,
   Trash2,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from './context/AuthContext';
 
-const VALID_TABS = new Set(['storyboard', 'skills', 'integrations', 'urls', 'byok']);
+const VALID_TABS = new Set(['storyboard', 'skills', 'integrations', 'urls', 'docs', 'byok']);
 
 const PROVIDER_OPTIONS = [
   'github',
@@ -45,6 +46,12 @@ const FORCED_ACTION_OPTIONS = ['store_mysql', 'no_action', 'manual_review', 'for
 const INTEGRATION_TARGET_TYPES = ['http', 'telegram', 'openclaw', 'custom'];
 const INTEGRATION_ACTION_OPTIONS = ['forward_http', 'forward_telegram', 'slack_notify', 'crm_upsert', 'ticket_create'];
 const INTEGRATION_AUTH_TYPES = ['none', 'bearer_header', 'custom_header', 'query_param'];
+const DEFAULT_APP_PROFILE = {
+  plan: 'basic',
+  deployment_mode: 'multitenant',
+  docs_path: '/app?tab=docs',
+  home_docs_anchor: '/#docs',
+};
 
 const INTEGRATION_PRESETS = {
   openclaw: {
@@ -481,9 +488,166 @@ function LandingSection({ id, eyebrow, title, children, className = '' }) {
   );
 }
 
-function MarketingHome({ login, error }) {
+function normalizeAppProfile(profile) {
+  return {
+    ...DEFAULT_APP_PROFILE,
+    ...(profile || {}),
+    plan: profile?.plan === 'enterprise' ? 'enterprise' : 'basic',
+    deployment_mode: profile?.deployment_mode === 'single_tenant' ? 'single_tenant' : 'multitenant',
+  };
+}
+
+function DocsContent({ appProfile, login, inApp = false }) {
+  const planLabel = appProfile.plan === 'enterprise' ? 'Enterprise' : 'Basic';
+  const deploymentLabel = appProfile.deployment_mode === 'single_tenant' ? 'Single-tenant' : 'Multitenant';
+
+  return (
+    <div className="space-y-6">
+      <div className="rounded-3xl border border-slate-800 bg-slate-950/40 p-5 space-y-3">
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <div>
+            <p className="text-[10px] uppercase tracking-[0.22em] text-indigo-400 font-label-caps">Docs Overview</p>
+            <h3 className="text-xl text-white font-semibold">One guide for humans, agents, webhooks, and mailbox-style ingress.</h3>
+          </div>
+          <div className="flex gap-2 text-[10px] uppercase tracking-[0.18em]">
+            <span className="rounded-full border border-slate-700 bg-slate-900/80 px-3 py-1 text-slate-300">{planLabel} plan</span>
+            <span className="rounded-full border border-slate-700 bg-slate-900/80 px-3 py-1 text-slate-300">{deploymentLabel}</span>
+          </div>
+        </div>
+        <p className="text-sm text-slate-300">
+          This deployment runs the current product in the <span className="text-white font-semibold">Basic</span> plan and
+          uses <span className="text-white font-semibold">multitenant</span> routing. Enterprise-only behavior and
+          single-tenant deployment decisions are controlled by environment variables at deploy time, not by per-listener UI choices here.
+        </p>
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-[1.05fr_0.95fr]">
+        <div className="rounded-3xl border border-slate-800 bg-slate-950/40 p-5 space-y-3">
+          <p className="text-[10px] uppercase tracking-[0.22em] text-indigo-400 font-label-caps">Agent-readable contract</p>
+          <p className="text-sm text-slate-300">
+            This section is intentionally compact and explicit so an LLM can ingest it with minimal ambiguity.
+          </p>
+          <pre className="overflow-auto rounded-2xl border border-slate-800 bg-slate-950 p-4 text-[12px] text-slate-200 font-code-snippet whitespace-pre-wrap">{`AGENTHOOK_DEPLOYMENT
+- plan: ${appProfile.plan}
+- deployment_mode: ${appProfile.deployment_mode}
+- public_base_url: https://app.agenthook.store
+
+INGRESS_MODES
+1. HTTP webhook
+   POST /{public_alias}.{secret}
+   body: JSON payload
+
+2. Email ingress
+   {public_alias}.{secret}@app.agenthook.store
+   path: SES -> S3 -> mail ingress Lambda -> AgentHook event
+
+PRIMARY OBJECTS
+- listener: provider + listener_id + deployment_mode + type_key
+- secret: activates both webhook URL and inbox address
+- skill: classifies, routes, tags, summarizes, or nominates actions
+- integration: named target like OpenClaw or any forward URL
+- event: stored storyboard item with payload, processed_text, action, tags
+
+BASIC PLAN CAPABILITIES
+- create listeners
+- create reusable secrets
+- ingest HTTP or email events
+- classify and reclassify events
+- manage skills, integrations, BYOK, and integration secrets
+- forward important events to downstream systems
+
+CURRENT DEPLOYMENT RULES
+- deployment mode is fixed by env for this deployment
+- current mode: ${appProfile.deployment_mode}
+- current UI should be treated as multitenant only
+- enterprise behavior is enabled only when APP_PLAN=enterprise
+
+OPERATOR API BASICS
+- GET /api/app-profile
+- GET /api/me
+- GET /v1/listeners
+- POST /v1/listeners
+- GET /v1/listeners/{listener_id}/secrets?provider={provider}
+- POST /api/events/{event_id}/re-run
+- GET /api/policy/skills?type_key={type_key}
+- GET /api/forward-targets
+
+EXPECTED EVENT FLOW
+payload -> preprocess -> deterministic routing -> optional LLM routing -> selected skill(s) -> action/integration -> storyboard storage`}</pre>
+        </div>
+
+        <div className="space-y-4">
+          <div className="rounded-3xl border border-slate-800 bg-slate-950/40 p-5 space-y-3">
+            <p className="text-[10px] uppercase tracking-[0.22em] text-emerald-400 font-label-caps">Human-readable guide</p>
+            <p className="text-sm text-slate-300">
+              AgentHook sits in front of your noisy systems. It accepts events from apps, email, or internal tools, decides
+              what is noise versus signal, stores a clear record in Storyboard, and forwards only meaningful events into your
+              downstream workflows.
+            </p>
+            <div className="space-y-2 text-sm text-slate-300">
+              <p><span className="text-white font-semibold">Webhook magic:</span> every active secret gives you a short URL like <code className="text-indigo-300">https://app.agenthook.store/abhinaviitg18.demo</code>.</p>
+              <p><span className="text-white font-semibold">Email magic:</span> the same identity also works as <code className="text-indigo-300">abhinaviitg18.demo@app.agenthook.store</code>.</p>
+              <p><span className="text-white font-semibold">In-app magic:</span> Storyboard shows raw or processed content, Skills decide routing, Integrations control side effects, and Reclassify lets you replay past events after improving rules.</p>
+            </div>
+          </div>
+
+          <div className="rounded-3xl border border-slate-800 bg-slate-950/40 p-5 space-y-3">
+            <p className="text-[10px] uppercase tracking-[0.22em] text-slate-400 font-label-caps">Examples</p>
+            <div className="space-y-3 text-sm text-slate-300">
+              <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-3">
+                <p className="text-white font-semibold">1. Website lead intake</p>
+                <p>Send a JSON payload to the short webhook URL. A lead skill tags it, stores a summary, and forwards the clean payload to OpenClaw or your CRM.</p>
+              </div>
+              <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-3">
+                <p className="text-white font-semibold">2. Email inbox automation</p>
+                <p>Email the webhook ID directly. SES receives the raw MIME, the mail Lambda normalizes the message, and AgentHook stores it as an event that skills can triage.</p>
+              </div>
+              <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-3">
+                <p className="text-white font-semibold">3. OpenClaw cost control</p>
+                <p>Let AgentHook discard heartbeats and routine status updates before they ever reach OpenClaw, so only high-signal events consume downstream automation.</p>
+              </div>
+            </div>
+          </div>
+
+          <div className="rounded-3xl border border-slate-800 bg-slate-950/40 p-5 space-y-3">
+            <p className="text-[10px] uppercase tracking-[0.22em] text-slate-400 font-label-caps">Getting started</p>
+            <ol className="space-y-2 text-sm text-slate-300 list-decimal pl-5">
+              <li>Create a listener.</li>
+              <li>Copy the short webhook URL or inbox address.</li>
+              <li>Add skills and integrations for the specific outcomes you want.</li>
+              <li>Send a sample event, then inspect Storyboard and Reclassify if needed.</li>
+            </ol>
+            {!inApp && (
+              <button
+                onClick={login}
+                className="inline-flex items-center gap-2 bg-primary text-on-primary px-4 py-3 rounded-2xl font-semibold active:scale-95 transition-transform"
+              >
+                <LogIn size={16} />
+                Open the app
+              </button>
+            )}
+            {inApp && (
+              <a
+                href={appProfile.home_docs_anchor || '/#docs'}
+                className="inline-flex items-center gap-2 text-sm text-indigo-300 hover:text-indigo-200"
+              >
+                <BookOpen size={16} />
+                Open the public docs section
+              </a>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MarketingHome({ login, error, appProfile }) {
   const scrollToExamples = () => {
     document.getElementById('examples')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+  const scrollToDocs = () => {
+    document.getElementById('docs')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   };
 
   return (
@@ -532,10 +696,10 @@ function MarketingHome({ login, error }) {
                   Create listener
                 </button>
                 <button
-                  onClick={scrollToExamples}
+                  onClick={scrollToDocs}
                   className="inline-flex items-center justify-center gap-2 border border-slate-700 bg-slate-950/50 px-6 py-4 rounded-2xl font-semibold text-white hover:bg-slate-900 transition-colors"
                 >
-                  View examples
+                  View docs
                 </button>
               </div>
 
@@ -607,7 +771,7 @@ function MarketingHome({ login, error }) {
           </div>
           <div className="rounded-3xl border border-slate-800 bg-slate-950/40 p-5">
             <p className="text-sm text-slate-300">
-              You also get a storyboard of past events, reclassification for historical messages, reusable skills and integrations, and support for both single-tenant and multitenant listener modes.
+              You also get a storyboard of past events, reclassification for historical messages, reusable skills and integrations, and an env-controlled deployment profile. This deployment is currently <span className="text-white font-semibold">Basic</span> and <span className="text-white font-semibold">multitenant</span>.
             </p>
           </div>
         </LandingSection>
@@ -684,6 +848,10 @@ Content-Type: application/json
           </div>
         </LandingSection>
 
+        <LandingSection id="docs" eyebrow="Docs" title="Readable by humans, explicit enough for agents.">
+          <DocsContent appProfile={appProfile} login={login} />
+        </LandingSection>
+
         <LandingSection eyebrow="Why teams use AgentHook" title="Practical automation without scattering glue code everywhere.">
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
             {HOMEPAGE_VALUE_POINTS.map((item) => (
@@ -710,10 +878,10 @@ Content-Type: application/json
                 Create listener
               </button>
               <button
-                onClick={scrollToExamples}
+                onClick={scrollToDocs}
                 className="inline-flex items-center justify-center gap-2 border border-indigo-200/20 bg-slate-950/30 px-6 py-4 rounded-2xl font-semibold text-white hover:bg-slate-900/60 transition-colors"
               >
-                View example integrations
+                View docs
               </button>
             </div>
           </div>
@@ -727,6 +895,7 @@ function App() {
   const { user, setUser, isAuthenticated, loading, error, login, logout } = useAuth();
   const tabParam = new URLSearchParams(window.location.search).get('tab');
   const [activeTab, setActiveTab] = useState(VALID_TABS.has(tabParam) ? tabParam : 'storyboard');
+  const [appProfile, setAppProfile] = useState(DEFAULT_APP_PROFILE);
   const [copied, setCopied] = useState('');
   const [events, setEvents] = useState([]);
   const [listeners, setListeners] = useState([]);
@@ -735,6 +904,7 @@ function App() {
   const [reclassifyingEventIDs, setReclassifyingEventIDs] = useState({});
 
   const publicAlias = user?.public_alias || user?.slug || '[userkey]';
+  const effectiveAppProfile = normalizeAppProfile(user?.app_profile || appProfile);
   const ingressTemplate = listeners.length > 0
     ? listenerIngressTemplate(listeners[0], publicAlias)
     : `https://app.agenthook.store/${publicAlias}.[secret]`;
@@ -756,6 +926,12 @@ function App() {
       setFetching(false);
     }
   };
+
+  useEffect(() => {
+    apiRequest('/api/app-profile')
+      .then((data) => setAppProfile(normalizeAppProfile(data)))
+      .catch((err) => console.error('Failed to fetch app profile', err));
+  }, []);
 
   useEffect(() => {
     if (!isAuthenticated) return;
@@ -803,7 +979,7 @@ function App() {
   }
 
   if (!user) {
-    return <MarketingHome login={login} error={error} />;
+    return <MarketingHome login={login} error={error} appProfile={effectiveAppProfile} />;
   }
 
   return (
@@ -916,11 +1092,25 @@ function App() {
               key="urls"
               listeners={listeners}
               user={user}
+              appProfile={effectiveAppProfile}
               setUser={setUser}
               onRefresh={refreshAll}
               copied={copied}
               setCopied={setCopied}
             />
+          )}
+
+          {activeTab === 'docs' && (
+            <motion.div
+              key="docs"
+              initial={{ opacity: 0, x: -20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: 20 }}
+              className="space-y-6"
+            >
+              <h2 className="px-1 text-white">Docs</h2>
+              <DocsContent appProfile={effectiveAppProfile} inApp />
+            </motion.div>
           )}
 
           {activeTab === 'skills' && (
@@ -1717,10 +1907,10 @@ const IntegrationsTab = ({ listeners }) => {
   );
 };
 
-const UrlsTab = ({ listeners, user, setUser, onRefresh, copied, setCopied }) => {
+const UrlsTab = ({ listeners, user, appProfile, setUser, onRefresh, copied, setCopied }) => {
   const [provider, setProvider] = useState('github');
   const [listenerID, setListenerID] = useState('');
-  const [deploymentMode, setDeploymentMode] = useState('multitenant');
+  const [deploymentMode, setDeploymentMode] = useState(appProfile?.deployment_mode || 'multitenant');
   const [plainTextAction, setPlainTextAction] = useState('store_mysql');
   const [useLLMFallback, setUseLLMFallback] = useState(true);
   const [listenerSecretMode, setListenerSecretMode] = useState('auto');
@@ -1745,6 +1935,10 @@ const UrlsTab = ({ listeners, user, setUser, onRefresh, copied, setCopied }) => 
   useEffect(() => {
     setPublicAliasDraft(user?.public_alias || user?.slug || '');
   }, [user?.public_alias, user?.slug]);
+
+  useEffect(() => {
+    setDeploymentMode(appProfile?.deployment_mode || 'multitenant');
+  }, [appProfile?.deployment_mode]);
 
   const fetchTokens = async () => {
     setLoadingTokens(true);
@@ -1930,7 +2124,7 @@ const UrlsTab = ({ listeners, user, setUser, onRefresh, copied, setCopied }) => 
 
       <Panel
         title="Create Listener"
-        subtitle="Provision a new ingress scenario directly from the UI, then bind it to a generated or custom secret."
+        subtitle="Provision a new ingress scenario directly from the UI, then bind it to a generated or custom secret. This deployment keeps listener mode env-backed and multitenant."
         action={<Link2 size={18} className="text-primary" />}
       >
         <div className="grid grid-cols-1 gap-3">
@@ -1952,10 +2146,9 @@ const UrlsTab = ({ listeners, user, setUser, onRefresh, copied, setCopied }) => 
           </FormField>
           <div className="grid grid-cols-2 gap-3">
             <FormField label="Deployment Mode">
-              <Select value={deploymentMode} onChange={(e) => setDeploymentMode(e.target.value)}>
-                <option value="multitenant">Multitenant</option>
-                <option value="single_tenant">Single Tenant</option>
-              </Select>
+              <div className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-sm text-white">
+                {deploymentMode === 'single_tenant' ? 'Single-tenant (env controlled)' : 'Multitenant (env controlled)'}
+              </div>
             </FormField>
             <FormField label="Default Action">
               <Select value={plainTextAction} onChange={(e) => setPlainTextAction(e.target.value)}>
