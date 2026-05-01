@@ -2125,10 +2125,19 @@ const UrlsTab = ({ listeners, user, setUser, onRefresh, copied, setCopied }) => 
                   </div>
                   <p className="px-1 text-[10px] text-slate-500">This webhook ID also works as the mailbox address for the separate SES mail ingress service.</p>
 
-                  {createdSecret?.secret_value && (
-                    <InlineNotice tone="success">
-                      Fresh secret created. Save the URL now: the raw secret is only returned once.
-                    </InlineNotice>
+                  {(createdSecret?.secret_value || latestBackendSecret?.secret_value) && (
+                    <div className="flex items-center gap-2 bg-slate-950/30 px-3 py-2 rounded-lg border border-slate-800/70">
+                      <code className="text-emerald-300 font-code-snippet text-[11px] break-all">
+                        {createdSecret?.secret_value || latestBackendSecret?.secret_value}
+                      </code>
+                      <CopyButton
+                        value={createdSecret?.secret_value || latestBackendSecret?.secret_value}
+                        copiedKey={copied}
+                        setCopiedKey={setCopied}
+                        copyKey={`listener-secret-${listener.listener_id}`}
+                        title="Copy raw secret"
+                      />
+                    </div>
                   )}
 
                   <details className="rounded-xl border border-slate-800 bg-slate-950/40 px-3 py-2">
@@ -2155,6 +2164,18 @@ const UrlsTab = ({ listeners, user, setUser, onRefresh, copied, setCopied }) => 
                             <code className="text-slate-500 break-all">{s.webhook_id}</code>
                             <span className="text-slate-600 shrink-0">{new Date(s.created_at).toLocaleDateString()}</span>
                           </div>
+                          {s.secret_value && (
+                            <div className="flex items-center gap-2">
+                              <code className="text-emerald-300 break-all">{s.secret_value}</code>
+                              <CopyButton
+                                value={s.secret_value}
+                                copiedKey={copied}
+                                setCopiedKey={setCopied}
+                                copyKey={`listener-history-secret-${s.id}`}
+                                title="Copy historical raw secret"
+                              />
+                            </div>
+                          )}
                         </div>
                       ))}
                     </div>
