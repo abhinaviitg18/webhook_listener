@@ -27,6 +27,8 @@ type MySQLStore struct {
 	integrationSecretSchemaReady bool
 	accountAliasSchemaMu         sync.Mutex
 	accountAliasSchemaReady      bool
+	webhookTypeSchemaMu          sync.Mutex
+	webhookTypeSchemaReady       bool
 }
 
 type eventSelectVariant struct {
@@ -98,6 +100,21 @@ func (s *MySQLStore) ensureAccountAliasSchema(ctx context.Context) error {
 		}
 	}
 	s.accountAliasSchemaReady = true
+	return nil
+}
+
+func (s *MySQLStore) ensureWebhookTypeSchema(ctx context.Context) error {
+	s.webhookTypeSchemaMu.Lock()
+	defer s.webhookTypeSchemaMu.Unlock()
+	if s.webhookTypeSchemaReady {
+		return nil
+	}
+	if s.indexExists("webhook_types", "uniq_account_type") {
+		if _, err := s.db.ExecContext(ctx, `DROP INDEX uniq_account_type ON webhook_types`); err != nil {
+			return err
+		}
+	}
+	s.webhookTypeSchemaReady = true
 	return nil
 }
 
@@ -201,6 +218,9 @@ func (s *MySQLStore) RevokeAccountToken(ctx context.Context, accountID, tokenID 
 }
 
 func (s *MySQLStore) CreateWebhookType(ctx context.Context, accountID, typeKey, plainTextAction string, useLLMFallback bool) (domain.WebhookType, error) {
+	if err := s.ensureWebhookTypeSchema(ctx); err != nil {
+		return domain.WebhookType{}, err
+	}
 	id := uuid.NewString()
 	_, err := s.db.ExecContext(ctx, `INSERT INTO webhook_types(id, account_id, type_key, plain_text_action, use_llm_fallback, created_at) VALUES(?,?,?,?,?,UTC_TIMESTAMP())`, id, accountID, typeKey, plainTextAction, useLLMFallback)
 	if err != nil {
@@ -234,6 +254,9 @@ func (s *MySQLStore) UpdateAccountPublicAlias(ctx context.Context, accountID, pu
 }
 
 func (s *MySQLStore) ListWebhookTypes(ctx context.Context, accountID string) ([]domain.WebhookType, error) {
+	if err := s.ensureWebhookTypeSchema(ctx); err != nil {
+		return nil, err
+	}
 	rows, err := s.db.QueryContext(ctx, `SELECT id, account_id, type_key, plain_text_action, use_llm_fallback, created_at FROM webhook_types WHERE account_id=? ORDER BY created_at ASC`, accountID)
 	if err != nil {
 		return nil, err
@@ -251,8 +274,11 @@ func (s *MySQLStore) ListWebhookTypes(ctx context.Context, accountID string) ([]
 }
 
 func (s *MySQLStore) GetWebhookTypeByAccountAndKey(ctx context.Context, accountID, typeKey string) (domain.WebhookType, error) {
+	if err := s.ensureWebhookTypeSchema(ctx); err != nil {
+		return domain.WebhookType{}, err
+	}
 	var w domain.WebhookType
-	err := s.db.QueryRowContext(ctx, `SELECT id, account_id, type_key, plain_text_action, use_llm_fallback, created_at FROM webhook_types WHERE account_id=? AND type_key=? LIMIT 1`, accountID, typeKey).Scan(&w.ID, &w.AccountID, &w.TypeKey, &w.PlainTextAction, &w.UseLLMFallback, &w.CreatedAt)
+	err := s.db.QueryRowContext(ctx, `SELECT id, account_id, type_key, plain_text_action, use_llm_fallback, created_at FROM webhook_types WHERE account_id=? AND type_key=? ORDER BY created_at DESC, id DESC LIMIT 1`, accountID, typeKey).Scan(&w.ID, &w.AccountID, &w.TypeKey, &w.PlainTextAction, &w.UseLLMFallback, &w.CreatedAt)
 	if err != nil {
 		return domain.WebhookType{}, err
 	}
@@ -269,6 +295,9 @@ func (s *MySQLStore) GetWebhookTypeByID(ctx context.Context, typeID string) (dom
 }
 
 func (s *MySQLStore) DeleteWebhookType(ctx context.Context, accountID, typeID string) error {
+	if err := s.ensureWebhookTypeSchema(ctx); err != nil {
+		return err
+	}
 	_, err := s.db.ExecContext(ctx, `DELETE FROM webhook_types WHERE id=? AND account_id=?`, typeID, accountID)
 	return err
 }

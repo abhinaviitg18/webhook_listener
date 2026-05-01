@@ -1285,7 +1285,7 @@ func (h *Handler) CreateListener(w http.ResponseWriter, r *http.Request) {
 		}
 	} else {
 		if !isValidWebhookSecret(raw) {
-			writeErr(w, http.StatusBadRequest, "secret_value must be 8-128 chars using lowercase letters, numbers, _ or -")
+			writeErr(w, http.StatusBadRequest, "secret_value is required and cannot contain / ? . # or @")
 			return
 		}
 		secret, err = h.Store.CreateSecretWithValue(r.Context(), acct.ID, whType.ID, raw)
@@ -1387,7 +1387,7 @@ func (h *Handler) CreateListenerSecret(w http.ResponseWriter, r *http.Request) {
 		}
 	} else {
 		if !isValidWebhookSecret(raw) {
-			writeErr(w, http.StatusBadRequest, "secret_value must be 8-128 chars using lowercase letters, numbers, _ or -")
+			writeErr(w, http.StatusBadRequest, "secret_value is required and cannot contain / ? . # or @")
 			return
 		}
 		secret, err = h.Store.CreateSecretWithValue(r.Context(), acct.ID, whType.ID, raw)
@@ -2184,16 +2184,26 @@ func (h *Handler) findListenerType(ctx context.Context, st domain.Store, account
 	if err != nil {
 		return domain.WebhookType{}, err
 	}
+	var (
+		found   bool
+		current domain.WebhookType
+	)
 	for _, item := range types {
 		ref, ok := parseListenerTypeKey(item.TypeKey)
 		if !ok {
 			continue
 		}
 		if ref.Provider == provider && ref.ListenerID == listenerID {
-			return item, nil
+			if !found || item.CreatedAt.After(current.CreatedAt) || (item.CreatedAt.Equal(current.CreatedAt) && item.ID > current.ID) {
+				current = item
+				found = true
+			}
 		}
 	}
-	return domain.WebhookType{}, errors.New("listener not found")
+	if !found {
+		return domain.WebhookType{}, errors.New("listener not found")
+	}
+	return current, nil
 }
 
 func parseModeFromTypeKey(typeKey string) string {

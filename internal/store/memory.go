@@ -195,7 +195,6 @@ func (s *MemoryStore) CreateWebhookType(_ context.Context, accountID, typeKey, p
 		CreatedAt:       time.Now().UTC(),
 	}
 	s.typesByID[id] = obj
-	s.typesByAccountKey[accountID+"::"+typeKey] = id
 	return obj, nil
 }
 
@@ -225,11 +224,23 @@ func (s *MemoryStore) ListWebhookTypes(_ context.Context, accountID string) ([]d
 func (s *MemoryStore) GetWebhookTypeByAccountAndKey(_ context.Context, accountID, typeKey string) (domain.WebhookType, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	id, ok := s.typesByAccountKey[accountID+"::"+typeKey]
-	if !ok {
+	var (
+		found   bool
+		current domain.WebhookType
+	)
+	for _, t := range s.typesByID {
+		if t.AccountID != accountID || t.TypeKey != typeKey {
+			continue
+		}
+		if !found || t.CreatedAt.After(current.CreatedAt) || (t.CreatedAt.Equal(current.CreatedAt) && t.ID > current.ID) {
+			current = t
+			found = true
+		}
+	}
+	if !found {
 		return domain.WebhookType{}, errors.New("type not found")
 	}
-	return s.typesByID[id], nil
+	return current, nil
 }
 
 func (s *MemoryStore) DeleteWebhookType(_ context.Context, accountID, typeID string) error {
@@ -240,7 +251,6 @@ func (s *MemoryStore) DeleteWebhookType(_ context.Context, accountID, typeID str
 		return errors.New("type not found")
 	}
 	delete(s.typesByID, typeID)
-	delete(s.typesByAccountKey, accountID+"::"+wt.TypeKey)
 	return nil
 }
 

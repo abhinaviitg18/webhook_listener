@@ -1,11 +1,6 @@
 package webhookid
 
-import (
-	"regexp"
-	"strings"
-)
-
-var manualSecretPattern = regexp.MustCompile(`^[a-z0-9_-]{8,128}$`)
+import "strings"
 
 func NormalizePublicAlias(in string) string {
 	alias := strings.ToLower(strings.TrimSpace(in))
@@ -39,7 +34,11 @@ func NormalizeWebhookSecret(in string) string {
 }
 
 func IsValidManualSecret(secret string) bool {
-	return manualSecretPattern.MatchString(secret)
+	secret = NormalizeWebhookSecret(secret)
+	if secret == "" {
+		return false
+	}
+	return !strings.ContainsAny(secret, "/?.#@")
 }
 
 func BuildEmailAddress(publicAlias, secret, domain string) string {

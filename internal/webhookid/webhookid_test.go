@@ -24,3 +24,17 @@ func TestBuildEmailAddress(t *testing.T) {
 		t.Fatalf("unexpected email address %q", got)
 	}
 }
+
+func TestIsValidManualSecretAllowsMixedReadableTokens(t *testing.T) {
+	if !IsValidManualSecret("My Secret-2026_token!") {
+		t.Fatal("expected flexible secret to be accepted")
+	}
+}
+
+func TestIsValidManualSecretRejectsRoutingSeparators(t *testing.T) {
+	for _, secret := range []string{"", "bad.secret", "bad/secret", "bad?secret", "bad#secret", "bad@secret"} {
+		if IsValidManualSecret(secret) {
+			t.Fatalf("expected %q to be rejected", secret)
+		}
+	}
+}
