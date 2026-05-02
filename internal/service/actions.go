@@ -187,16 +187,6 @@ func (a *ActionService) buildHTTPRequest(ctx context.Context, account domain.Acc
 	if rawURL == "" {
 		return nil, fmt.Errorf("http target %s missing url", target.TargetKey)
 	}
-
-	// Internal loopback bypass: If targeting our own public URL, route it locally to bypass Cloudflare Bot Fight Mode.
-	if publicBaseURL, ok := a.lookupEnv("PUBLIC_BASE_URL"); ok && publicBaseURL != "" && strings.HasPrefix(rawURL, publicBaseURL) {
-		port, ok := a.lookupEnv("PORT")
-		if !ok || port == "" {
-			port = "8131" // Default local port
-		}
-		rawURL = strings.Replace(rawURL, publicBaseURL, "http://127.0.0.1:"+port, 1)
-	}
-
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, rawURL, strings.NewReader(payload))
 	if err != nil {
 		return nil, err
