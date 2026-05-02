@@ -622,23 +622,21 @@ function EnterpriseSection({ inApp = false, onPrimaryAction }) {
   );
 }
 
-function EnterpriseFloatingCTA({ onClick }) {
+function EnterpriseBanner({ onClick }) {
   return (
     <button
       onClick={onClick}
-      className="fixed right-4 bottom-24 md:bottom-6 z-50 rounded-2xl border border-amber-300/25 bg-[linear-gradient(135deg,rgba(245,158,11,0.92),rgba(251,191,36,0.82))] px-4 py-3 text-left shadow-2xl shadow-amber-950/30 active:scale-95 transition-transform max-w-[240px]"
+      className="w-full relative z-50 bg-[linear-gradient(135deg,rgba(245,158,11,0.92),rgba(251,191,36,0.82))] hover:bg-[linear-gradient(135deg,rgba(245,158,11,1),rgba(251,191,36,1))] px-4 py-2 text-center transition-colors flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-3 group"
       title="Switch to Enterprise"
     >
-      <div className="flex items-start gap-3">
-        <div className="rounded-xl bg-black/15 p-2 text-slate-950">
-          <CalendarDays size={18} />
-        </div>
-        <div>
-          <div className="text-[10px] uppercase tracking-[0.18em] text-black/70 font-label-caps">Switch to Enterprise</div>
-          <div className="text-sm font-bold text-slate-950">No monthly subscription</div>
-          <div className="text-xs text-black/75">One setup cost of ${ENTERPRISE_SETUP_PRICE}</div>
-        </div>
+      <div className="flex items-center gap-2">
+        <CalendarDays size={14} className="text-amber-950" />
+        <span className="text-[11px] sm:text-xs font-bold text-amber-950 uppercase tracking-[0.1em]">Switch to Enterprise:</span>
       </div>
+      <span className="text-xs sm:text-sm text-amber-950/90 font-medium group-hover:text-amber-950 transition-colors">
+        No monthly subscription. One setup cost of ${ENTERPRISE_SETUP_PRICE}.
+      </span>
+      <span className="text-xs text-amber-950/70 underline group-hover:text-amber-950 ml-1">Learn more &rarr;</span>
     </button>
   );
 }
@@ -834,6 +832,7 @@ function MarketingHome({ login, error, appProfile }) {
 
   return (
     <div className="min-h-screen bg-surface text-on-surface">
+      <EnterpriseBanner onClick={scrollToEnterprise} />
       <div className="relative overflow-hidden border-b border-slate-800 bg-[radial-gradient(circle_at_top,_rgba(99,102,241,0.18),_transparent_45%),linear-gradient(180deg,_rgba(15,23,42,0.94),_rgba(2,6,23,1))]">
         <div className="absolute inset-0 bg-[linear-gradient(120deg,transparent_0%,rgba(59,130,246,0.06)_32%,transparent_70%)]" />
         <div className="relative max-w-6xl mx-auto px-6 py-8 md:py-10">
@@ -1079,7 +1078,6 @@ Content-Type: application/json
           </div>
         </section>
       </main>
-      <EnterpriseFloatingCTA onClick={scrollToEnterprise} />
     </div>
   );
 }
@@ -1184,9 +1182,10 @@ function App() {
 
   return (
     <div className="min-h-screen pb-24 bg-surface text-on-surface">
+      <EnterpriseBanner onClick={openEnterprise} />
       <TopAppBar user={user} onLogout={logout} />
 
-      <main className="pt-20 px-4 max-w-md mx-auto">
+      <main className="pt-6 px-4 max-w-md mx-auto">
         <AnimatePresence mode="wait">
           {activeTab === 'storyboard' && (
             <motion.div
@@ -1375,7 +1374,6 @@ function App() {
       </button>
 
       <BottomNavBar activeTab={activeTab} onTabChange={setActiveTab} />
-      <EnterpriseFloatingCTA onClick={openEnterprise} />
     </div>
   );
 }

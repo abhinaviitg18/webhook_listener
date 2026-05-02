@@ -3,7 +3,7 @@ import { LogOut, Menu, Zap } from 'lucide-react';
 
 export const TopAppBar = ({ user, onLogout }) => {
   return (
-    <header className="fixed top-0 left-0 w-full z-50 flex items-center justify-between px-4 h-16 bg-slate-950/80 backdrop-blur-lg border-b border-slate-800">
+    <header className="sticky top-0 w-full z-50 flex items-center justify-between px-4 h-16 bg-slate-950/80 backdrop-blur-lg border-b border-slate-800">
       <div className="flex items-center gap-3">
         <button className="p-2 text-slate-400 hover:bg-slate-800/50 transition-colors active:scale-95 duration-200 rounded-lg">
           <Menu size={20} />
