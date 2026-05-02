@@ -27,7 +27,10 @@ def load_env_files():
 
 
 def json_request(method, url, payload=None, token=None, timeout=20):
-    headers = {"Accept": "application/json"}
+    headers = {
+        "Accept": "application/json",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+    }
     data = None
     if payload is not None:
         data = json.dumps(payload).encode("utf-8")

@@ -192,6 +192,7 @@ func (a *ActionService) buildHTTPRequest(ctx context.Context, account domain.Acc
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", "AgentHook-Forwarder/1.0")
 	if headers, ok := resolvedConfig["headers"].(map[string]interface{}); ok {
 		for key, raw := range headers {
 			value, _ := raw.(string)
