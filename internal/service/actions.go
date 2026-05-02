@@ -22,7 +22,6 @@ import (
 type processorCtxKey string
 
 const skipTransformCtxKey processorCtxKey = "skip_transform"
-const originHostCtxKey processorCtxKey = "origin_host"
 
 func WithSkipTransform(ctx context.Context) context.Context {
 	return context.WithValue(ctx, skipTransformCtxKey, true)
@@ -30,15 +29,6 @@ func WithSkipTransform(ctx context.Context) context.Context {
 
 func shouldSkipTransform(ctx context.Context) bool {
 	v, _ := ctx.Value(skipTransformCtxKey).(bool)
-	return v
-}
-
-func WithOriginHost(ctx context.Context, host string) context.Context {
-	return context.WithValue(ctx, originHostCtxKey, host)
-}
-
-func getOriginHost(ctx context.Context) string {
-	v, _ := ctx.Value(originHostCtxKey).(string)
 	return v
 }
 
@@ -197,14 +187,6 @@ func (a *ActionService) buildHTTPRequest(ctx context.Context, account domain.Acc
 	if rawURL == "" {
 		return nil, fmt.Errorf("http target %s missing url", target.TargetKey)
 	}
-
-	// Internal loopback bypass for AWS Lambda to avoid Cloudflare Bot Fight Mode blocking
-	if publicBaseURL, ok := a.lookupEnv("PUBLIC_BASE_URL"); ok && publicBaseURL != "" && strings.HasPrefix(rawURL, publicBaseURL) {
-		if originHost := getOriginHost(ctx); originHost != "" && strings.Contains(originHost, "lambda-url") {
-			rawURL = strings.Replace(rawURL, publicBaseURL, "https://"+originHost, 1)
-		}
-	}
-
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, rawURL, strings.NewReader(payload))
 	if err != nil {
 		return nil, err

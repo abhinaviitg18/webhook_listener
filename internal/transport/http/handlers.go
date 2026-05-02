@@ -45,13 +45,6 @@ type Handler struct {
 func NewRouter(h *Handler, verifier auth.RequestVerifier) http.Handler {
 	r := chi.NewRouter()
 
-	r.Use(func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			ctx := service.WithOriginHost(r.Context(), r.Host)
-			next.ServeHTTP(w, r.WithContext(ctx))
-		})
-	})
-
 	r.Get("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 	})
