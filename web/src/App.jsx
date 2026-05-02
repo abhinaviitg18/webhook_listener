@@ -30,7 +30,7 @@ import {
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from './context/AuthContext';
 
-const VALID_TABS = new Set(['storyboard', 'skills', 'integrations', 'integration-secrets', 'urls', 'api-tokens', 'docs', 'byok']);
+const VALID_TABS = new Set(['storyboard', 'skills', 'integrations', 'integration-secrets', 'urls', 'api-tokens', 'enterprise', 'docs', 'byok']);
 
 const PROVIDER_OPTIONS = [
   'github',
@@ -1163,10 +1163,7 @@ function App() {
   };
 
   const openEnterprise = () => {
-    setActiveTab('docs');
-    window.setTimeout(() => {
-      document.getElementById('enterprise')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }, 80);
+    setActiveTab('enterprise');
   };
 
   const handleTagClick = (tag) => {
@@ -1343,9 +1340,19 @@ function App() {
             >
               <h2 className="px-1 text-white">Docs</h2>
               <DocsContent appProfile={effectiveAppProfile} inApp onOpenEnterprise={openEnterprise} />
-              <section id="enterprise" className="pt-2">
-                <EnterpriseSection inApp onPrimaryAction={openEnterprise} />
-              </section>
+            </motion.div>
+          )}
+
+          {activeTab === 'enterprise' && (
+            <motion.div
+              key="enterprise"
+              initial={{ opacity: 0, x: -20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: 20 }}
+              className="space-y-6"
+            >
+              <h2 className="px-1 text-white">Enterprise Plan</h2>
+              <EnterpriseSection inApp onPrimaryAction={openEnterprise} />
             </motion.div>
           )}
 
