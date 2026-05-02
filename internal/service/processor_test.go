@@ -197,6 +197,35 @@ func TestProcessor_SkillForcedActionAndNoMemoryWrite(t *testing.T) {
 	}
 }
 
+func TestProcessor_ForcedActionSkillSkipsLLMWithoutPrompt(t *testing.T) {
+	st := store.NewMemoryStore()
+	acct, _, _ := st.CreateAccount(context.Background(), "forced-action-no-llm@agentmail.to")
+	wt, _ := st.CreateWebhookType(context.Background(), acct.ID, "generic-json", "", false)
+	sec, _, _ := st.CreateSecret(context.Background(), acct.ID, wt.ID)
+	_, _ = st.CreateWebhookSkill(context.Background(), domain.WebhookSkill{
+		AccountID:     acct.ID,
+		TypeKey:       wt.TypeKey,
+		SkillKey:      "relay-sink",
+		MatchContains: "forward-me",
+		ForcedAction:  "forward_http",
+		Priority:      1,
+		Enabled:       true,
+	})
+	exec := &fakeExec{}
+	llm := &countingLLM{action: "store_mysql"}
+	p := &Processor{Store: st, Pinecone: fakePinecone{}, LLM: llm, Executor: exec}
+	_, d, err := p.ProcessWebhook(context.Background(), acct, wt, sec, "forced-no-llm", `{"message":"please forward-me to the sink"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if llm.called != 0 {
+		t.Fatalf("expected forced-action skill without prompt to skip llm, got %d calls", llm.called)
+	}
+	if d.ActionName != "forward_http" {
+		t.Fatalf("expected forced action forward_http, got %s", d.ActionName)
+	}
+}
+
 func TestProcessor_SkillInsertOnlyMemory(t *testing.T) {
 	st := store.NewMemoryStore()
 	acct, _, _ := st.CreateAccount(context.Background(), "7204909316@agentmail.to")

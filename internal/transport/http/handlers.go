@@ -1787,7 +1787,6 @@ func (h *Handler) ReceiveWebhookShort(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	headers := requestHeaders(r)
 	whType, err := h.Store.GetWebhookTypeByID(r.Context(), sec.TypeID)
 	if err != nil {
 		writeErr(w, http.StatusNotFound, "type not found")
@@ -1816,30 +1815,21 @@ func (h *Handler) ReceiveWebhookShort(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	resolution, err := h.Processor.ResolveType(r.Context(), acct.ID, string(buf), headers)
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "type resolution failed: "+err.Error())
-		return
-	}
-	if resolution.TypeKey != "" && resolution.TypeKey != "unknown" {
-		if matched, mErr := h.Store.GetWebhookTypeByAccountAndKey(r.Context(), acct.ID, resolution.TypeKey); mErr == nil {
-			whType = matched
-		}
-	}
-	processCtx := r.Context()
-	if strings.TrimSpace(resolution.TypeKey) == "" || resolution.TypeKey == "unknown" {
-		whType.PlainTextAction = ""
-		whType.UseLLMFallback = true
-		processCtx = service.WithSkipTransform(processCtx)
-	}
 	requestID := r.Header.Get("X-Request-Id")
 	if requestID == "" {
 		requestID = uuid.NewString()
 	}
-	event, decision, err := h.Processor.ProcessWebhook(processCtx, acct, whType, sec, requestID, string(buf))
+	event, decision, err := h.Processor.ProcessWebhook(r.Context(), acct, whType, sec, requestID, string(buf))
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "processing failed: "+err.Error())
 		return
+	}
+	resolution := domain.TypeResolution{
+		TypeKey:      whType.TypeKey,
+		Confidence:   1,
+		Source:       "secret",
+		Reason:       "listener-specific webhook secret resolved type",
+		ManualReview: false,
 	}
 	writeJSON(w, http.StatusAccepted, map[string]any{"event": event, "decision": decision, "resolution": resolution})
 }
@@ -1868,7 +1858,6 @@ func (h *Handler) ReceiveWebhookAuto(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	headers := requestHeaders(r)
 	whType, err := h.Store.GetWebhookTypeByID(r.Context(), sec.TypeID)
 	if err != nil {
 		writeErr(w, http.StatusNotFound, "type not found")
@@ -1897,31 +1886,21 @@ func (h *Handler) ReceiveWebhookAuto(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	resolution, err := h.Processor.ResolveType(r.Context(), acct.ID, string(buf), headers)
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "type resolution failed: "+err.Error())
-		return
-	}
-	if resolution.TypeKey != "" && resolution.TypeKey != "unknown" {
-		if matched, mErr := h.Store.GetWebhookTypeByAccountAndKey(r.Context(), acct.ID, resolution.TypeKey); mErr == nil {
-			whType = matched
-		}
-	}
-	processCtx := r.Context()
-	if strings.TrimSpace(resolution.TypeKey) == "" || resolution.TypeKey == "unknown" {
-		// If resolver is uncertain, still process via LLM on full JSON after secret validation.
-		whType.PlainTextAction = ""
-		whType.UseLLMFallback = true
-		processCtx = service.WithSkipTransform(processCtx)
-	}
 	requestID := r.Header.Get("X-Request-Id")
 	if requestID == "" {
 		requestID = uuid.NewString()
 	}
-	event, decision, err := h.Processor.ProcessWebhook(processCtx, acct, whType, sec, requestID, string(buf))
+	event, decision, err := h.Processor.ProcessWebhook(r.Context(), acct, whType, sec, requestID, string(buf))
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "processing failed: "+err.Error())
 		return
+	}
+	resolution := domain.TypeResolution{
+		TypeKey:      whType.TypeKey,
+		Confidence:   1,
+		Source:       "secret",
+		Reason:       "listener-specific webhook secret resolved type",
+		ManualReview: false,
 	}
 	writeJSON(w, http.StatusAccepted, map[string]any{"event": event, "decision": decision, "resolution": resolution})
 }

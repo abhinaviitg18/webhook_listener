@@ -599,7 +599,10 @@ func (p *Processor) processWithPolicy(ctx context.Context, account domain.Accoun
 
 	activePolicy := policyCtx
 	activePolicy.Skills = selectedSkills
-	needsLLM := (whType.UseLLMFallback && decision.ActionName == "store_mysql") || activePolicy.MasterPrompt != "" || (matched && skill.SkillPrompt != "") || route.CandidateAction != ""
+	needsLLM := (whType.UseLLMFallback && decision.ActionName == "store_mysql") ||
+		activePolicy.MasterPrompt != "" ||
+		(matched && skill.SkillPrompt != "") ||
+		(route.CandidateAction != "" && !(matched && strings.TrimSpace(skill.ForcedAction) != ""))
 	log.Printf("reprocess.llm_decision event_id=%s type_key=%s needs_llm=%t deterministic_only=%t use_llm_fallback=%t matched_skill_prompt=%t master_prompt=%t initial_action=%s", event.ID, whType.TypeKey, needsLLM, p.IsDeterministicOnlyType(whType.TypeKey), whType.UseLLMFallback, matched && strings.TrimSpace(skill.SkillPrompt) != "", policyCtx.MasterPrompt != "", decision.ActionName)
 	var llmTrace observability.LLMDecisionTrace
 	if needsLLM && !p.IsDeterministicOnlyType(whType.TypeKey) {
