@@ -2193,6 +2193,8 @@ const IntegrationsTab = () => {
       </Panel>
     </motion.div>
   );
+};
+
 const ApiTokensTab = ({ copied, setCopied }) => {
   const [apiToken, setApiToken] = useState('');
   const [tokenBusy, setTokenBusy] = useState(false);
