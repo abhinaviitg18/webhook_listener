@@ -40,9 +40,95 @@ Mail-specific variables:
 - `MAIL_DOMAIN`
 - `MAIL_AWS_REGION`
 - `MAIL_INBOUND_BUCKET`
+- `MAIL_OUTBOUND_PROVIDER`
 - `MAIL_AGENTHOOK_BASE_URL`
 - `MAIL_AGENTHOOK_ORIGIN_SECRET`
 - `MAIL_INTERNAL_SHARED_SECRET`
+
+Inbound receiving remains AWS SES based.
+
+Outbound sending is provider-selectable:
+
+- `ses`
+- `resend`
+- `postmark`
+- `smtp`
+- `zeptomail`
+
+Provider env vars:
+
+- SES
+  - `MAIL_AWS_REGION`
+- Resend
+  - `MAIL_RESEND_API_KEY`
+  - `MAIL_RESEND_BASE_URL`
+- Postmark
+  - `MAIL_POSTMARK_SERVER_TOKEN`
+  - `MAIL_POSTMARK_BASE_URL`
+- SMTP
+  - `MAIL_SMTP_HOST`
+  - `MAIL_SMTP_PORT`
+  - `MAIL_SMTP_USERNAME`
+  - `MAIL_SMTP_PASSWORD`
+  - `MAIL_SMTP_USE_TLS`
+- ZeptoMail
+  - `MAIL_ZEPTOMAIL_API_KEY`
+  - `MAIL_ZEPTOMAIL_BASE_URL`
+
+If outbound provider config is missing, the mail API still boots for mailbox listing and inbound processing, but send/reply returns `mail sender not configured`.
+
+## Send and reply API smoke test
+
+List mailboxes:
+
+```bash
+curl -sS \
+  -H "Authorization: Bearer $AGENTHOOK_TOKEN" \
+  http://127.0.0.1:8080/v1/mailboxes
+```
+
+Send a new message:
+
+```bash
+curl -sS -X POST \
+  -H "Authorization: Bearer $AGENTHOOK_TOKEN" \
+  -H "Content-Type: application/json" \
+  http://127.0.0.1:8080/v1/mailboxes/$MAILBOX_ID/send \
+  -d '{
+    "to":["you@example.com"],
+    "subject":"AgentHook send test",
+    "text_body":"Plain text body",
+    "html_body":"<p>Plain text body</p>"
+  }'
+```
+
+Reply to an existing message:
+
+```bash
+curl -sS -X POST \
+  -H "Authorization: Bearer $AGENTHOOK_TOKEN" \
+  -H "Content-Type: application/json" \
+  http://127.0.0.1:8080/v1/messages/$MESSAGE_ID/reply \
+  -d '{
+    "text_body":"Replying from AgentHook"
+  }'
+```
+
+Recommended operator smoke-test order:
+
+1. Verify `GET /v1/mailboxes` returns the expected mailbox.
+2. Send one outbound test email and confirm HTTP `201`.
+3. Confirm the outbound row appears in `GET /v1/mailboxes/{mailbox_id}/messages`.
+4. Confirm the recipient actually receives the email.
+5. Send a real inbound email into the mailbox address.
+6. Confirm SES -> S3 -> mail ingress -> AgentHook still works.
+7. Reply to that inbound message and verify threading in the recipient mailbox.
+
+Outside AgentHook, operators still need:
+
+- a verified sending domain on the chosen provider
+- SPF/DKIM configured for that provider
+- mailbox domain alignment that matches the visible `From` address
 
 ## DNS and Cloudflare
 

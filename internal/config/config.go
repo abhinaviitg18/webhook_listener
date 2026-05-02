@@ -8,8 +8,8 @@ import (
 )
 
 type Config struct {
-	Port string
-	AppPlan string
+	Port              string
+	AppPlan           string
 	AppDeploymentMode string
 
 	ScaleKitBaseURL      string
@@ -57,9 +57,21 @@ type Config struct {
 	MailDomain                string
 	MailAWSRegion             string
 	MailInboundBucket         string
+	MailOutboundProvider      string
 	MailAgentHookBaseURL      string
 	MailAgentHookOriginSecret string
 	MailInternalSharedSecret  string
+	MailResendAPIKey          string
+	MailResendBaseURL         string
+	MailPostmarkServerToken   string
+	MailPostmarkBaseURL       string
+	MailSMTPHost              string
+	MailSMTPPort              int
+	MailSMTPUsername          string
+	MailSMTPPassword          string
+	MailSMTPUseTLS            bool
+	MailZeptoMailAPIKey       string
+	MailZeptoMailBaseURL      string
 
 	UseInMemoryStore          bool
 	VerifyHTCSignature        bool
@@ -86,8 +98,8 @@ func Load() Config {
 	pineconeHost := getenv("PINECONE_INDEX_URL", "")
 
 	return Config{
-		Port: getenv("PORT", "8080"),
-		AppPlan: normalizePlan(getenv("APP_PLAN", "basic")),
+		Port:              getenv("PORT", "8080"),
+		AppPlan:           normalizePlan(getenv("APP_PLAN", "basic")),
 		AppDeploymentMode: normalizeDeploymentModeEnv(getenv("APP_DEPLOYMENT_MODE", "")),
 
 		ScaleKitBaseURL:      getenv("SCALEKIT_BASE_URL", ""),
@@ -135,9 +147,21 @@ func Load() Config {
 		MailDomain:                getenv("MAIL_DOMAIN", "app.agenthook.store"),
 		MailAWSRegion:             getenv("MAIL_AWS_REGION", getenv("AWS_REGION", "us-east-1")),
 		MailInboundBucket:         getenv("MAIL_INBOUND_BUCKET", ""),
+		MailOutboundProvider:      normalizeMailOutboundProvider(getenv("MAIL_OUTBOUND_PROVIDER", "ses")),
 		MailAgentHookBaseURL:      getenv("MAIL_AGENTHOOK_BASE_URL", getenv("PUBLIC_BASE_URL", "https://app.agenthook.store")),
 		MailAgentHookOriginSecret: getenv("MAIL_AGENTHOOK_ORIGIN_SECRET", getenv("LAMBDA_ORIGIN_SHARED_SECRET", "")),
 		MailInternalSharedSecret:  getenv("MAIL_INTERNAL_SHARED_SECRET", ""),
+		MailResendAPIKey:          getenv("MAIL_RESEND_API_KEY", ""),
+		MailResendBaseURL:         getenv("MAIL_RESEND_BASE_URL", "https://api.resend.com"),
+		MailPostmarkServerToken:   getenv("MAIL_POSTMARK_SERVER_TOKEN", ""),
+		MailPostmarkBaseURL:       getenv("MAIL_POSTMARK_BASE_URL", "https://api.postmarkapp.com"),
+		MailSMTPHost:              getenv("MAIL_SMTP_HOST", ""),
+		MailSMTPPort:              getint("MAIL_SMTP_PORT", 587),
+		MailSMTPUsername:          getenv("MAIL_SMTP_USERNAME", ""),
+		MailSMTPPassword:          getenv("MAIL_SMTP_PASSWORD", ""),
+		MailSMTPUseTLS:            getbool("MAIL_SMTP_USE_TLS", true),
+		MailZeptoMailAPIKey:       getenv("MAIL_ZEPTOMAIL_API_KEY", ""),
+		MailZeptoMailBaseURL:      getenv("MAIL_ZEPTOMAIL_BASE_URL", "https://api.zeptomail.com/v1.1"),
 
 		UseInMemoryStore:             getbool("USE_IN_MEMORY_STORE", defaultInMemoryStore),
 		VerifyHTCSignature:           getbool("VERIFY_HTC_SIGNATURE", false),
@@ -174,6 +198,21 @@ func normalizeDeploymentModeEnv(in string) string {
 		return ""
 	}
 	return normalizeDeploymentModeValue(trimmed)
+}
+
+func normalizeMailOutboundProvider(in string) string {
+	switch strings.TrimSpace(strings.ToLower(in)) {
+	case "resend":
+		return "resend"
+	case "postmark":
+		return "postmark"
+	case "smtp":
+		return "smtp"
+	case "zeptomail":
+		return "zeptomail"
+	default:
+		return "ses"
+	}
 }
 
 func (c Config) Validate() error {
