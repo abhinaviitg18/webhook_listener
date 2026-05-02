@@ -1,5 +1,5 @@
 import React from 'react';
-import { Activity, BookOpen, BrainCircuit, Cable, Cpu, KeyRound, Link as LinkIcon } from 'lucide-react';
+import { Activity, BookOpen, BrainCircuit, Cable, Cpu, Key, KeyRound, Link as LinkIcon } from 'lucide-react';
 import { motion } from 'framer-motion';
 
 export const BottomNavBar = ({ activeTab, onTabChange }) => {
@@ -9,6 +9,7 @@ export const BottomNavBar = ({ activeTab, onTabChange }) => {
         { id: 'integrations', label: 'Integrations', icon: Cable },
         { id: 'integration-secrets', label: 'Secrets', icon: KeyRound },
         { id: 'urls', label: 'URLs', icon: LinkIcon },
+        { id: 'api-tokens', label: 'API Tokens', icon: Key },
         { id: 'docs', label: 'Docs', icon: BookOpen },
         { id: 'byok', label: 'BYOK', icon: Cpu },
     ];

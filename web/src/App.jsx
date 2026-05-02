@@ -30,7 +30,7 @@ import {
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from './context/AuthContext';
 
-const VALID_TABS = new Set(['storyboard', 'skills', 'integrations', 'integration-secrets', 'urls', 'docs', 'byok']);
+const VALID_TABS = new Set(['storyboard', 'skills', 'integrations', 'integration-secrets', 'urls', 'api-tokens', 'docs', 'byok']);
 
 const PROVIDER_OPTIONS = [
   'github',
@@ -784,6 +784,32 @@ payload -> preprocess -> deterministic routing -> optional LLM routing -> select
               <li>Add skills and integrations for the specific outcomes you want.</li>
               <li>Send a sample event, then inspect Storyboard and Reclassify if needed.</li>
             </ol>
+
+            <div className="mt-6 pt-4 border-t border-slate-800">
+              <p className="text-[10px] uppercase tracking-[0.22em] text-slate-400 font-label-caps mb-2">Claude Skill / System Prompt</p>
+              <p className="text-sm text-slate-300 mb-3">
+                Download or view the official Claude skill document that explains AgentHook capabilities to an LLM.
+              </p>
+              <div className="flex flex-col sm:flex-row gap-3">
+                <a
+                  href="/agenthook-claude-skill.md"
+                  download="agenthook-claude-skill.md"
+                  className="inline-flex items-center justify-center gap-2 bg-slate-900 border border-slate-700 text-white px-4 py-2 rounded-xl font-semibold hover:bg-slate-800 transition-colors"
+                >
+                  <Save size={16} />
+                  Download Skill (.md)
+                </a>
+                <a
+                  href="/agenthook-claude-skill.md"
+                  target="_blank"
+                  className="inline-flex items-center justify-center gap-2 bg-slate-950/50 border border-slate-800 text-slate-300 px-4 py-2 rounded-xl hover:text-white hover:border-slate-700 transition-colors"
+                >
+                  <BookOpen size={16} />
+                  View Prompt
+                </a>
+              </div>
+            </div>
+
             {!inApp && (
               <button
                 onClick={login}
@@ -1294,6 +1320,14 @@ function App() {
               appProfile={effectiveAppProfile}
               setUser={setUser}
               onRefresh={refreshAll}
+              copied={copied}
+              setCopied={setCopied}
+            />
+          )}
+
+          {activeTab === 'api-tokens' && (
+            <ApiTokensTab
+              key="api-tokens"
               copied={copied}
               setCopied={setCopied}
             />
@@ -2159,6 +2193,108 @@ const IntegrationsTab = () => {
       </Panel>
     </motion.div>
   );
+const ApiTokensTab = ({ copied, setCopied }) => {
+  const [apiToken, setApiToken] = useState('');
+  const [tokenBusy, setTokenBusy] = useState(false);
+  const [apiTokensList, setApiTokensList] = useState([]);
+  const [loadingTokens, setLoadingTokens] = useState(false);
+  const [error, setError] = useState('');
+
+  const fetchTokens = async () => {
+    setLoadingTokens(true);
+    try {
+      const data = await apiRequest('/v1/auth/tokens');
+      setApiTokensList(Array.isArray(data) ? data : []);
+    } catch (err) {
+      console.error('Failed to fetch tokens', err);
+    } finally {
+      setLoadingTokens(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchTokens();
+  }, []);
+
+  const createToken = async () => {
+    setTokenBusy(true);
+    setError('');
+    try {
+      const created = await apiRequest('/v1/auth/tokens', {
+        method: 'POST',
+      });
+      setApiToken(created?.token || '');
+      await fetchTokens();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setTokenBusy(false);
+    }
+  };
+
+  const revokeToken = async (id) => {
+    if (!window.confirm('Revoke this token? Any scripts using it will fail immediately.')) return;
+    try {
+      await apiRequest(`/v1/auth/tokens/${id}`, { method: 'DELETE' });
+      await fetchTokens();
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, x: -20 }}
+      animate={{ opacity: 1, x: 0 }}
+      exit={{ opacity: 0, x: 20 }}
+      className="space-y-4"
+    >
+      <h2 className="px-1 text-white">API Tokens</h2>
+      <Panel
+        title="API Tokens"
+        subtitle="Manage and generate tokens for curl, scripts, or direct API testing."
+        action={<KeyRound size={18} className="text-primary" />}
+      >
+        {error && <InlineNotice tone="error">{error}</InlineNotice>}
+        <button
+          onClick={createToken}
+          disabled={tokenBusy}
+          className="w-full bg-slate-900 border border-slate-800 text-white font-semibold py-2 rounded-lg text-sm active:scale-95 transition-transform disabled:opacity-50"
+        >
+          {tokenBusy ? 'CREATING...' : 'CREATE API TOKEN'}
+        </button>
+        {apiToken && (
+          <div className="flex flex-col gap-2 bg-slate-950/50 px-3 py-2 rounded-lg border border-slate-800">
+            <span className="text-[10px] text-emerald-400 font-label-caps">New token created (copy now, won't be shown again)</span>
+            <div className="flex items-center gap-2">
+              <code className="text-indigo-300 font-code-snippet text-xs truncate break-all">{apiToken}</code>
+              <CopyButton value={apiToken} copiedKey={copied} setCopiedKey={setCopied} copyKey="api-token" />
+            </div>
+          </div>
+        )}
+
+        {apiTokensList.length > 0 && (
+          <div className="space-y-1.5 pt-2">
+            <div className="flex items-center justify-between px-1">
+              <p className="text-[10px] text-slate-500 font-label-caps">Active Tokens ({apiTokensList.length})</p>
+              {loadingTokens && <RefreshCw size={10} className="text-slate-500 animate-spin" />}
+            </div>
+            {apiTokensList.map((t) => (
+              <div key={t.id} className="flex items-center justify-between gap-2 bg-slate-900/40 px-3 py-2 rounded-lg border border-slate-800/50 text-[11px]">
+                <code className="text-slate-400 font-code-snippet truncate">...{t.id.slice(-8)}</code>
+                <div className="flex items-center gap-3">
+                  <span className="text-slate-500">{new Date(t.created_at).toLocaleDateString()}</span>
+                  <button onClick={() => revokeToken(t.id)} className="text-slate-500 hover:text-red-400 transition-colors uppercase font-bold text-[9px]">
+                    Revoke
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </Panel>
+    </motion.div>
+  );
 };
 
 const UrlsTab = ({ listeners, user, appProfile, setUser, onRefresh, copied, setCopied }) => {
@@ -2171,10 +2307,6 @@ const UrlsTab = ({ listeners, user, appProfile, setUser, onRefresh, copied, setC
   const [listenerSecretValue, setListenerSecretValue] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
-  const [apiToken, setApiToken] = useState('');
-  const [tokenBusy, setTokenBusy] = useState(false);
-  const [apiTokensList, setApiTokensList] = useState([]);
-  const [loadingTokens, setLoadingTokens] = useState(false);
   const [secretMap, setSecretMap] = useState({});
   const [secretsHistory, setSecretsHistory] = useState({});
   const [webhookIdentities, setWebhookIdentities] = useState([]);
@@ -2197,17 +2329,6 @@ const UrlsTab = ({ listeners, user, appProfile, setUser, onRefresh, copied, setC
     setDeploymentMode(appProfile?.deployment_mode || 'multitenant');
   }, [appProfile?.deployment_mode]);
 
-  const fetchTokens = async () => {
-    setLoadingTokens(true);
-    try {
-      const data = await apiRequest('/v1/auth/tokens');
-      setApiTokensList(Array.isArray(data) ? data : []);
-    } catch (err) {
-      console.error('Failed to fetch tokens', err);
-    } finally {
-      setLoadingTokens(false);
-    }
-  };
 
   const fetchWebhookIdentities = async () => {
     setLoadingIdentities(true);
@@ -2234,7 +2355,6 @@ const UrlsTab = ({ listeners, user, appProfile, setUser, onRefresh, copied, setC
   };
 
   useEffect(() => {
-    fetchTokens();
     fetchWebhookIdentities();
     if (listeners.length === 0) return;
     setLoadingSecrets(true);
@@ -2346,31 +2466,6 @@ const UrlsTab = ({ listeners, user, appProfile, setUser, onRefresh, copied, setC
     }
   };
 
-  const createToken = async () => {
-    setTokenBusy(true);
-    setError('');
-    try {
-      const created = await apiRequest('/v1/auth/tokens', {
-        method: 'POST',
-      });
-      setApiToken(created?.token || '');
-      await fetchTokens();
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setTokenBusy(false);
-    }
-  };
-
-  const revokeToken = async (id) => {
-    if (!window.confirm('Revoke this token? Any scripts using it will fail immediately.')) return;
-    try {
-      await apiRequest(`/v1/auth/tokens/${id}`, { method: 'DELETE' });
-      await fetchTokens();
-    } catch (err) {
-      setError(err.message);
-    }
-  };
 
   return (
     <motion.div
@@ -2494,48 +2589,7 @@ const UrlsTab = ({ listeners, user, appProfile, setUser, onRefresh, copied, setC
         </div>
       </Panel>
 
-      <Panel
-        title="API Tokens"
-        subtitle="Manage and generate tokens for curl, scripts, or direct API testing."
-        action={<KeyRound size={18} className="text-primary" />}
-      >
-        <button
-          onClick={createToken}
-          disabled={tokenBusy}
-          className="w-full bg-slate-900 border border-slate-800 text-white font-semibold py-2 rounded-lg text-sm active:scale-95 transition-transform disabled:opacity-50"
-        >
-          {tokenBusy ? 'CREATING...' : 'CREATE API TOKEN'}
-        </button>
-        {apiToken && (
-          <div className="flex flex-col gap-2 bg-slate-950/50 px-3 py-2 rounded-lg border border-slate-800">
-            <span className="text-[10px] text-emerald-400 font-label-caps">New token created (copy now, won't be shown again)</span>
-            <div className="flex items-center gap-2">
-              <code className="text-indigo-300 font-code-snippet text-xs truncate break-all">{apiToken}</code>
-              <CopyButton value={apiToken} copiedKey={copied} setCopiedKey={setCopied} copyKey="api-token" />
-            </div>
-          </div>
-        )}
 
-        {apiTokensList.length > 0 && (
-          <div className="space-y-1.5 pt-2">
-            <div className="flex items-center justify-between px-1">
-              <p className="text-[10px] text-slate-500 font-label-caps">Active Tokens ({apiTokensList.length})</p>
-              {loadingTokens && <RefreshCw size={10} className="text-slate-500 animate-spin" />}
-            </div>
-            {apiTokensList.map((t) => (
-              <div key={t.id} className="flex items-center justify-between gap-2 bg-slate-900/40 px-3 py-2 rounded-lg border border-slate-800/50 text-[11px]">
-                <code className="text-slate-400 font-code-snippet truncate">...{t.id.slice(-8)}</code>
-                <div className="flex items-center gap-3">
-                  <span className="text-slate-500">{new Date(t.created_at).toLocaleDateString()}</span>
-                  <button onClick={() => revokeToken(t.id)} className="text-slate-500 hover:text-red-400 transition-colors uppercase font-bold text-[9px]">
-                    Revoke
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </Panel>
 
       <Panel
         title="Configured URLs"
