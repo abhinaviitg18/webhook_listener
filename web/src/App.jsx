@@ -31,7 +31,7 @@ import {
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from './context/AuthContext';
 
-const VALID_TABS = new Set(['storyboard', 'skills', 'integrations', 'integration-secrets', 'urls', 'api-tokens', 'enterprise', 'docs', 'byok']);
+const VALID_TABS = new Set(['home', 'storyboard', 'skills', 'integrations', 'integration-secrets', 'urls', 'api-tokens', 'enterprise', 'docs', 'byok']);
 
 const PROVIDER_OPTIONS = [
   'github',
@@ -908,46 +908,21 @@ payload -> preprocess -> deterministic routing -> optional LLM routing -> select
   );
 }
 
-function MarketingHome({ login, error, appProfile }) {
-  const scrollToExamples = () => {
-    document.getElementById('examples')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  };
-  const scrollToDocs = () => {
-    document.getElementById('docs')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  };
-  const scrollToEnterprise = () => {
-    document.getElementById('enterprise')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  };
-
+function LandingContent({ login, error, appProfile, scrollToDocs, scrollToEnterprise }) {
   return (
-    <div className="min-h-screen bg-surface text-on-surface">
-      <EnterpriseBanner onClick={scrollToEnterprise} />
-      <div className="relative overflow-hidden border-b border-slate-800 bg-[radial-gradient(circle_at_top,_rgba(99,102,241,0.18),_transparent_45%),linear-gradient(180deg,_rgba(15,23,42,0.94),_rgba(2,6,23,1))]">
+    <div className="space-y-20">
+      <div className="relative overflow-hidden border border-slate-800 bg-[radial-gradient(circle_at_top,_rgba(99,102,241,0.18),_transparent_45%),linear-gradient(180deg,_rgba(15,23,42,0.94),_rgba(2,6,23,1))] rounded-[40px] p-8">
         <div className="absolute inset-0 bg-[linear-gradient(120deg,transparent_0%,rgba(59,130,246,0.06)_32%,transparent_70%)]" />
-        <div className="relative max-w-6xl mx-auto px-6 py-8 md:py-10">
-          <div className="flex items-center justify-between gap-4 mb-14">
-            <div>
-              <p className="text-lg font-bold tracking-tight text-white font-h1">AgentHook</p>
-              <p className="text-xs uppercase tracking-[0.22em] text-slate-500">Webhook routing for operators</p>
-            </div>
-            <button
-              onClick={login}
-              className="inline-flex items-center gap-2 border border-slate-700 bg-slate-900/70 px-4 py-2 rounded-xl text-sm font-semibold text-white hover:bg-slate-800 transition-colors"
-            >
-              <LogIn size={16} />
-              Sign in
-            </button>
-          </div>
-
+        <div className="relative">
           <div className="grid gap-10 lg:grid-cols-[1.2fr_0.8fr] lg:items-center">
             <div className="space-y-8">
               <div className="space-y-4">
                 <p className="text-[10px] uppercase tracking-[0.28em] text-indigo-400 font-label-caps">Turn noisy webhooks into useful actions</p>
-                <h1 className="text-4xl md:text-6xl font-h1 text-white leading-tight max-w-3xl">
+                <h1 className="text-4xl md:text-5xl font-h1 text-white leading-tight">
                   Stop paying attention to every event just because your apps can send one.
                 </h1>
-                <p className="text-base md:text-lg text-slate-300 max-w-2xl">
-                  AgentHook receives events from any app, filters out noise like heartbeats and routine status pings, classifies what matters, and forwards the right payload to the right tool.
+                <p className="text-base text-slate-300 max-w-xl">
+                  AgentHook receives events from any app, filters out noise, classifies what matters, and forwards the right payload to the right tool.
                 </p>
               </div>
 
@@ -960,14 +935,14 @@ function MarketingHome({ login, error, appProfile }) {
               <div className="flex flex-col sm:flex-row gap-3">
                 <button
                   onClick={login}
-                  className="inline-flex items-center justify-center gap-2 bg-primary text-on-primary px-6 py-4 rounded-2xl font-bold active:scale-95 transition-transform"
+                  className="inline-flex items-center justify-center gap-2 bg-primary text-on-primary px-6 py-3 rounded-2xl font-bold active:scale-95 transition-transform"
                 >
                   <LogIn size={18} />
-                  Create listener
+                  Get Started
                 </button>
                 <button
                   onClick={scrollToDocs}
-                  className="inline-flex items-center justify-center gap-2 border border-slate-700 bg-slate-950/50 px-6 py-4 rounded-2xl font-semibold text-white hover:bg-slate-900 transition-colors"
+                  className="inline-flex items-center justify-center gap-2 border border-slate-700 bg-slate-950/50 px-6 py-3 rounded-2xl font-semibold text-white hover:bg-slate-900 transition-colors"
                 >
                   View docs
                 </button>
@@ -986,7 +961,7 @@ function MarketingHome({ login, error, appProfile }) {
               <div className="flex items-center justify-between mb-4">
                 <div>
                   <p className="text-white text-sm font-semibold">Operator preview</p>
-                  <p className="text-[11px] text-slate-500">Filter, route, and reclassify from one place</p>
+                  <p className="text-[11px] text-slate-500">Filter, route, and reclassify</p>
                 </div>
                 <span className="rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2 py-1 text-[10px] font-bold text-emerald-300">
                   LIVE FLOW
@@ -995,16 +970,16 @@ function MarketingHome({ login, error, appProfile }) {
               <div className="space-y-3">
                 <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-4">
                   <p className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Incoming</p>
-                  <pre className="mt-2 whitespace-pre-wrap break-words text-[11px] font-code-snippet text-slate-300">{`{"event":"heartbeat","kind":"metrics","service":"openclaw","ok":true}`}</pre>
+                  <pre className="mt-2 whitespace-pre-wrap break-words text-[11px] font-code-snippet text-slate-300">{`{"event":"heartbeat","kind":"metrics","ok":true}`}</pre>
                 </div>
                 <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-4">
                   <p className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Decision</p>
-                  <p className="mt-2 text-sm text-slate-200">Dropped as low-value noise. No downstream run triggered.</p>
+                  <p className="mt-2 text-sm text-slate-200">Dropped as noise. No action.</p>
                 </div>
                 <div className="rounded-2xl border border-indigo-500/20 bg-indigo-500/10 p-4">
-                  <p className="text-[10px] uppercase tracking-[0.2em] text-indigo-300">High-signal example</p>
-                  <pre className="mt-2 whitespace-pre-wrap break-words text-[11px] font-code-snippet text-indigo-100">{`{"event":"lead.created","company":"Acme","message":"Interested in a demo"}`}</pre>
-                  <p className="mt-2 text-sm text-indigo-100">Forwarded to OpenClaw, tagged as lead, retained in storyboard for reclassification later.</p>
+                  <p className="text-[10px] uppercase tracking-[0.2em] text-indigo-300">High-signal</p>
+                  <pre className="mt-2 whitespace-pre-wrap break-words text-[11px] font-code-snippet text-indigo-100">{`{"event":"lead.created","company":"Acme"}`}</pre>
+                  <p className="mt-2 text-sm text-indigo-100">Forwarded and tagged.</p>
                 </div>
               </div>
             </div>
@@ -1012,161 +987,70 @@ function MarketingHome({ login, error, appProfile }) {
         </div>
       </div>
 
-      <main className="max-w-6xl mx-auto px-6 py-16 space-y-20">
-        <LandingSection eyebrow="Why teams need this" title="Most webhook infrastructure stops at delivery.">
-          <p className="text-slate-300 max-w-3xl">
-            The real problem starts after that: deciding what is spam, what is noise, what should be stored, and what should trigger action.
-          </p>
-          <div className="grid gap-3 md:grid-cols-2">
-            {HOMEPAGE_PAIN_POINTS.map((item) => (
-              <div key={item} className="rounded-2xl border border-slate-800 bg-slate-950/40 px-4 py-4 text-sm text-slate-300">
-                {item}
-              </div>
-            ))}
-          </div>
-        </LandingSection>
-
-        <LandingSection eyebrow="What AgentHook does" title="A webhook control layer for founders, ops, and developer teams.">
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-            {HOMEPAGE_FLOW.map((step, index) => (
-              <div key={step.title} className="rounded-3xl border border-slate-800 bg-slate-950/40 p-5 space-y-3">
-                <div className="flex items-center justify-between">
-                  <span className="text-[10px] uppercase tracking-[0.22em] text-slate-500">Step {index + 1}</span>
-                  <span className="text-indigo-400 text-sm font-semibold">0{index + 1}</span>
-                </div>
-                <h3 className="text-white text-lg font-semibold">{step.title}</h3>
-                <p className="text-sm text-slate-300">{step.body}</p>
-              </div>
-            ))}
-          </div>
-          <div className="rounded-3xl border border-slate-800 bg-slate-950/40 p-5">
-            <p className="text-sm text-slate-300">
-              You also get a storyboard of past events, reclassification for historical messages, reusable skills and integrations, and an env-controlled deployment profile. This deployment is currently <span className="text-white font-semibold">Basic</span> and <span className="text-white font-semibold">multitenant</span>.
-            </p>
-          </div>
-        </LandingSection>
-
-        <LandingSection id="examples" eyebrow="Examples of what you can do" title="Use AgentHook in front of any noisy workflow.">
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-            {HOMEPAGE_EXAMPLES.map((example) => (
-              <div key={example.title} className="rounded-3xl border border-slate-800 bg-slate-950/40 p-5 space-y-2">
-                <h3 className="text-white text-lg font-semibold">{example.title}</h3>
-                <p className="text-sm text-slate-300">{example.body}</p>
-              </div>
-            ))}
-          </div>
-        </LandingSection>
-
-        <LandingSection eyebrow="OpenClaw ROI" title="Reduce OpenClaw cost by sending only meaningful events.">
-          <div className="grid gap-6 lg:grid-cols-[1fr_1fr]">
-            <div className="rounded-3xl border border-red-500/10 bg-red-500/5 p-6 space-y-4">
-              <p className="text-[10px] uppercase tracking-[0.22em] text-red-300">Without AgentHook</p>
-              <h3 className="text-white text-xl font-semibold">Every event reaches downstream automation.</h3>
-              <p className="text-sm text-slate-300">
-                If OpenClaw or another downstream workflow engine checks every heartbeat, sync ping, or routine status update, you pay for noise.
-              </p>
-              <ul className="space-y-2 text-sm text-slate-300">
-                <li>Heartbeat and health-check events still consume attention.</li>
-                <li>Routine metrics and retries can trigger unnecessary runs.</li>
-                <li>Teams pay to discover most events are irrelevant.</li>
-              </ul>
+      <LandingSection eyebrow="Why teams need this" title="Most webhook infrastructure stops at delivery.">
+        <p className="text-slate-300 max-w-3xl">
+          The real problem starts after that: deciding what is spam, what is noise, what should be stored, and what should trigger action.
+        </p>
+        <div className="grid gap-3 md:grid-cols-2">
+          {HOMEPAGE_PAIN_POINTS.map((item) => (
+            <div key={item} className="rounded-2xl border border-slate-800 bg-slate-950/40 px-4 py-4 text-sm text-slate-300">
+              {item}
             </div>
-            <div className="rounded-3xl border border-emerald-500/20 bg-emerald-500/10 p-6 space-y-4">
-              <p className="text-[10px] uppercase tracking-[0.22em] text-emerald-300">With AgentHook</p>
-              <h3 className="text-white text-xl font-semibold">Only classified, useful events move forward.</h3>
-              <p className="text-sm text-slate-300">
-                Instead of letting OpenClaw inspect every event just to discover most of them are irrelevant, AgentHook does the cheap filtering first and forwards only the events that deserve automation.
-              </p>
-              <ul className="space-y-2 text-sm text-slate-300">
-                <li>Heartbeats and health checks can be dropped or archived with no downstream action.</li>
-                <li>Only high-signal events like qualified leads, support incidents, failed workflows, or urgent approvals move forward.</li>
-                <li>That means lower processing cost, fewer false alerts, and cleaner operational queues.</li>
-              </ul>
-            </div>
-          </div>
-        </LandingSection>
+          ))}
+        </div>
+      </LandingSection>
 
-        <LandingSection eyebrow="Any app can call AgentHook" title="If your app can make an HTTP request, it can send events here.">
-          <p className="text-slate-300 max-w-3xl">
-            Use a listener URL for inbound webhooks, or use API tokens for direct management and testing. AgentHook accepts JSON payloads and then applies routing, filtering, tagging, and forwarding logic.
-          </p>
-          <div className="grid gap-6 lg:grid-cols-[0.95fr_1.05fr]">
-            <div className="rounded-3xl border border-slate-800 bg-slate-950/40 p-5">
-              <p className="text-[10px] uppercase tracking-[0.2em] text-slate-500">HTTP example</p>
-                  <pre className="mt-3 overflow-auto rounded-2xl border border-slate-800 bg-slate-950 p-4 text-[12px] text-slate-200 font-code-snippet">{`POST /{userkey}.{secret}
-Content-Type: application/json
-
-{
-  "event": "lead.created",
-  "source": "website",
-  "company": "Acme",
-  "message": "Interested in a demo"
-}`}</pre>
-            </div>
-            <div className="rounded-3xl border border-slate-800 bg-slate-950/40 p-5 space-y-4">
-              <p className="text-sm text-slate-300">
-                AgentHook can store it, classify it, tag it, suppress it, or forward it to an integration like OpenClaw or a custom URL.
-              </p>
-              <div className="grid gap-3 sm:grid-cols-2">
-                {['Create listeners', 'Create integrations', 'Create secret refs', 'Reclassify historical messages'].map((item) => (
-                  <div key={item} className="rounded-2xl border border-slate-800 bg-slate-900/60 px-4 py-4 text-sm text-slate-200">
-                    {item}
-                  </div>
-                ))}
+      <LandingSection eyebrow="What AgentHook does" title="A webhook control layer for founders, ops, and teams.">
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          {HOMEPAGE_FLOW.map((step, index) => (
+            <div key={step.title} className="rounded-3xl border border-slate-800 bg-slate-950/40 p-5 space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] uppercase tracking-[0.22em] text-slate-500">Step {index + 1}</span>
+                <span className="text-indigo-400 text-sm font-semibold">0{index + 1}</span>
               </div>
+              <h3 className="text-white text-lg font-semibold">{step.title}</h3>
+              <p className="text-sm text-slate-300">{step.body}</p>
             </div>
-          </div>
-        </LandingSection>
+          ))}
+        </div>
+      </LandingSection>
 
-        <LandingSection id="docs" eyebrow="Docs" title="Readable by humans, explicit enough for agents.">
-          <DocsContent appProfile={appProfile} login={login} onOpenEnterprise={scrollToEnterprise} />
-        </LandingSection>
-
-        <LandingSection id="enterprise" eyebrow="Enterprise" title="Deploy AgentHook on your own cloud, domain, and operational boundary.">
-          <EnterpriseSection onPrimaryAction={scrollToEnterprise} />
-        </LandingSection>
-
-        <LandingSection eyebrow="Why teams use AgentHook" title="Practical automation without scattering glue code everywhere.">
-          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
-            {HOMEPAGE_VALUE_POINTS.map((item) => (
-              <div key={item} className="rounded-2xl border border-slate-800 bg-slate-950/40 px-4 py-4 text-sm text-slate-300">
-                {item}
-              </div>
-            ))}
+      <LandingSection eyebrow="OpenClaw ROI" title="Reduce OpenClaw cost by sending only meaningful events.">
+        <div className="grid gap-6 lg:grid-cols-[1fr_1fr]">
+          <div className="rounded-3xl border border-red-500/10 bg-red-500/5 p-6 space-y-4">
+            <p className="text-[10px] uppercase tracking-[0.22em] text-red-300">Without AgentHook</p>
+            <h3 className="text-white text-xl font-semibold">Every event reaches downstream automation.</h3>
+            <ul className="space-y-2 text-sm text-slate-300">
+              <li>Heartbeat and health-check events consume attention.</li>
+              <li>Routine metrics trigger unnecessary runs.</li>
+              <li>Teams pay to discover events are irrelevant.</li>
+            </ul>
           </div>
-          <div className="rounded-3xl border border-slate-800 bg-slate-950/40 p-5">
-            <p className="text-sm text-slate-300">
-              Teams that do not want another recurring SaaS bill can deploy AgentHook on their own infrastructure, point it at their own domain,
-              and keep the architecture portable across AWS or another cloud from day one.
-            </p>
+          <div className="rounded-3xl border border-emerald-500/20 bg-emerald-500/10 p-6 space-y-4">
+            <p className="text-[10px] uppercase tracking-[0.22em] text-emerald-300">With AgentHook</p>
+            <h3 className="text-white text-xl font-semibold">Only classified, useful events move forward.</h3>
+            <ul className="space-y-2 text-sm text-slate-300">
+              <li>Heartbeats can be dropped with no action.</li>
+              <li>Only high-signal events move forward.</li>
+              <li>Lower processing cost and cleaner operational queues.</li>
+            </ul>
           </div>
-        </LandingSection>
+        </div>
+      </LandingSection>
 
-        <section className="rounded-[32px] border border-indigo-500/20 bg-[linear-gradient(135deg,rgba(79,70,229,0.16),rgba(15,23,42,0.92))] px-6 py-8 md:px-8 md:py-10">
-          <div className="max-w-3xl space-y-4">
-            <p className="text-[10px] uppercase tracking-[0.24em] text-indigo-200 font-label-caps">Start with one noisy webhook</p>
-            <h2 className="text-3xl md:text-4xl font-h1 text-white">Create a listener, send a sample payload, and decide what should be dropped, stored, or forwarded.</h2>
-            <p className="text-slate-200">
-              AgentHook is built to sit in front of the tools you already use, not replace them. You can use this hosted deployment or take the same architecture to your own domain and cloud as a one-time setup.
-            </p>
-            <div className="flex flex-col sm:flex-row gap-3">
-              <button
-                onClick={login}
-                className="inline-flex items-center justify-center gap-2 bg-primary text-on-primary px-6 py-4 rounded-2xl font-bold active:scale-95 transition-transform"
-              >
-                <LogIn size={18} />
-                Create listener
-              </button>
-              <button
-                onClick={scrollToDocs}
-                className="inline-flex items-center justify-center gap-2 border border-indigo-200/20 bg-slate-950/30 px-6 py-4 rounded-2xl font-semibold text-white hover:bg-slate-900/60 transition-colors"
-              >
-                View docs
-              </button>
-            </div>
-          </div>
-        </section>
-      </main>
+      <section className="rounded-[32px] border border-indigo-500/20 bg-[linear-gradient(135deg,rgba(79,70,229,0.16),rgba(15,23,42,0.92))] px-6 py-8 md:px-8 md:py-10">
+        <div className="max-w-3xl space-y-4 text-center mx-auto">
+          <p className="text-[10px] uppercase tracking-[0.24em] text-indigo-200 font-label-caps">Start now</p>
+          <h2 className="text-3xl md:text-4xl font-h1 text-white">Create a listener today.</h2>
+          <button
+            onClick={login}
+            className="inline-flex items-center justify-center gap-2 bg-primary text-on-primary px-8 py-4 rounded-2xl font-bold active:scale-95 transition-transform mt-4"
+          >
+            <LogIn size={18} />
+            Get Started
+          </button>
+        </div>
+      </section>
     </div>
   );
 }
@@ -1174,7 +1058,7 @@ Content-Type: application/json
 function App() {
   const { user, setUser, isAuthenticated, loading, error, login, logout } = useAuth();
   const tabParam = new URLSearchParams(window.location.search).get('tab');
-  const [activeTab, setActiveTab] = useState(VALID_TABS.has(tabParam) ? tabParam : 'storyboard');
+  const [activeTab, setActiveTab] = useState(VALID_TABS.has(tabParam) ? tabParam : (user ? 'storyboard' : 'home'));
   const [appProfile, setAppProfile] = useState(DEFAULT_APP_PROFILE);
   const [copied, setCopied] = useState('');
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
@@ -1230,6 +1114,10 @@ function App() {
     setActiveTab('enterprise');
   };
 
+  const openDocs = () => {
+    setActiveTab('docs');
+  };
+
   const handleTagClick = (tag) => {
     setActiveTag(prev => prev === tag ? null : tag);
   };
@@ -1263,9 +1151,7 @@ function App() {
     );
   }
 
-  if (!user) {
-    return <MarketingHome login={login} error={error} appProfile={effectiveAppProfile} />;
-  }
+  // We no longer early-return MarketingHome. We show the app shell with a Login button if needed.
 
   return (
     <div className="min-h-screen bg-surface text-on-surface">
@@ -1278,8 +1164,25 @@ function App() {
         onTabChange={setActiveTab} 
       />
 
-      <main className="pt-6 px-4 max-w-md mx-auto pb-12">
+      <main className={`pt-6 px-4 ${activeTab === 'home' ? 'max-w-6xl' : 'max-w-md'} mx-auto pb-12`}>
         <AnimatePresence mode="wait">
+          {activeTab === 'home' && (
+            <motion.div
+              key="home"
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+            >
+              <LandingContent 
+                login={login} 
+                error={error} 
+                appProfile={effectiveAppProfile} 
+                scrollToDocs={openDocs}
+                scrollToEnterprise={openEnterprise}
+              />
+            </motion.div>
+          )}
+
           {activeTab === 'storyboard' && (
             <motion.div
               key="storyboard"

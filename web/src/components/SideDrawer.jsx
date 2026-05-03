@@ -1,9 +1,10 @@
 import React from 'react';
-import { Activity, BookOpen, BrainCircuit, Cable, Cpu, Key, KeyRound, Link as LinkIcon, ShieldCheck, X } from 'lucide-react';
+import { Activity, BookOpen, BrainCircuit, Cable, Cpu, Key, KeyRound, Link as LinkIcon, ShieldCheck, X, Home } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 export const SideDrawer = ({ activeTab, onTabChange, isOpen, onClose }) => {
     const tabs = [
+        { id: 'home', label: 'Home', icon: Home },
         { id: 'storyboard', label: 'Storyboard', icon: Activity },
         { id: 'skills', label: 'Skills', icon: BrainCircuit },
         { id: 'integrations', label: 'Integrations', icon: Cable },
