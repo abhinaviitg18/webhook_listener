@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { TopAppBar } from './components/TopAppBar';
-import { BottomNavBar } from './components/BottomNavBar';
+import { SideDrawer } from './components/SideDrawer';
 import { Metrics } from './components/Metrics';
 import { StoryboardCard } from './components/StoryboardCard';
 import {
@@ -1132,6 +1132,7 @@ function App() {
   const [activeTab, setActiveTab] = useState(VALID_TABS.has(tabParam) ? tabParam : 'storyboard');
   const [appProfile, setAppProfile] = useState(DEFAULT_APP_PROFILE);
   const [copied, setCopied] = useState('');
+  const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [events, setEvents] = useState([]);
   const [listeners, setListeners] = useState([]);
   const [fetching, setFetching] = useState(false);
@@ -1222,11 +1223,17 @@ function App() {
   }
 
   return (
-    <div className="min-h-screen pb-24 bg-surface text-on-surface">
+    <div className="min-h-screen bg-surface text-on-surface">
       <EnterpriseBanner onClick={openEnterprise} />
-      <TopAppBar user={user} onLogout={logout} />
+      <TopAppBar user={user} onLogout={logout} onMenuClick={() => setIsDrawerOpen(true)} />
+      <SideDrawer 
+        isOpen={isDrawerOpen} 
+        onClose={() => setIsDrawerOpen(false)} 
+        activeTab={activeTab} 
+        onTabChange={setActiveTab} 
+      />
 
-      <main className="pt-6 px-4 max-w-md mx-auto">
+      <main className="pt-6 px-4 max-w-md mx-auto pb-12">
         <AnimatePresence mode="wait">
           {activeTab === 'storyboard' && (
             <motion.div
@@ -1431,8 +1438,6 @@ function App() {
       >
         <Plus size={32} />
       </button>
-
-      <BottomNavBar activeTab={activeTab} onTabChange={setActiveTab} />
     </div>
   );
 }
