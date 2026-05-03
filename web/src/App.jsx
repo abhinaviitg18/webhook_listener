@@ -55,7 +55,7 @@ const DEFAULT_APP_PROFILE = {
   home_docs_anchor: '/#docs',
 };
 const ENTERPRISE_SETUP_PRICE = import.meta.env.VITE_ENTERPRISE_SETUP_PRICE || '200';
-const ENTERPRISE_CAL_URL = import.meta.env.VITE_ENTERPRISE_CAL_URL || 'https://cal.com/agenthook/enterprise';
+const ENTERPRISE_CAL_URL = import.meta.env.VITE_ENTERPRISE_CAL_URL || 'https://cal.com/abhinava-hiddentalentclub/agenthook-enterprise';
 
 const INTEGRATION_PRESETS = {
   openclaw: {
