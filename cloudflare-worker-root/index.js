@@ -7,7 +7,11 @@ export default {
     const appOriginURL = String(env.APP_ORIGIN_URL || '').replace(/\/+$/, '')
     const appOriginSecret = String(env.APP_ORIGIN_SHARED_SECRET || '')
 
-    if (hostname === 'app.agenthook.store') {
+    const isApiRequest = reqURL.pathname.startsWith('/v1/') || 
+                         reqURL.pathname.startsWith('/api/') || 
+                         reqURL.pathname.startsWith('/auth/')
+
+    if (hostname === 'app.agenthook.store' || isApiRequest) {
       if (!appOriginURL) {
         const passthroughResponse = await fetch(request)
         const out = new Response(passthroughResponse.body, passthroughResponse)
@@ -53,7 +57,14 @@ export default {
     }
 
 
-    const response = await env.ASSETS.fetch(request)
+    let response = await env.ASSETS.fetch(request)
+    
+    // SPA Fallback: If 404 and not a file (no extension), serve index.html
+    if (response.status === 404 && request.method === 'GET' && !reqURL.pathname.includes('.')) {
+      const indexReq = new Request(new URL('/index.html', request.url), request)
+      response = await env.ASSETS.fetch(indexReq)
+    }
+
     const out = new Response(response.body, response)
     out.headers.set('x-agenthook-site-source', 'cloudflare-worker-static-website')
     out.headers.set('cache-control', 'public, max-age=0, must-revalidate')

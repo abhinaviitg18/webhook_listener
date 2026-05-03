@@ -21,6 +21,12 @@ jobs:
         with:
           node-version: "20"
 
+      - name: Build Web App
+        run: |
+          cd web
+          npm install
+          npm run build
+
       - name: Deploy Worker + website assets to Cloudflare
         run: |
           set -euo pipefail
