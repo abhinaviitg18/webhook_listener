@@ -49,8 +49,8 @@
         <section class="hero-section">
           <div class="hero-content">
             <p style="text-transform: uppercase; letter-spacing: 0.2em; font-size: 10px; color: var(--primary); font-weight: 700; margin-bottom: 12px;">The Webhook Filter</p>
-            <h2>Stop paying for noise.</h2>
-            <p>Most webhook infrastructure stops at delivery. AgentHook receives events from any app, filters out heartbeats and routine pings, classifies what matters, and forwards only high-signal payloads to your downstream tools.</p>
+            <h2>Save tokens. Save money.</h2>
+            <p>Running high-frequency agents like <strong>OpenClaw</strong> and <strong>AgentHermes</strong> costs money every time they wake up to check for data. AgentHook sits in front of your stack, dropping noise and heartbeats so your expensive agents only run when there's a real signal.</p>
             <div class="metrics-grid">
               <div class="metric-card">
                 <p>Noise Dropped</p>
@@ -72,7 +72,7 @@
               </div>
               <div style="padding: 12px; background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.2); border-radius: 12px; margin-bottom: 12px;">
                 <p style="font-size: 10px; color: #fca5a5; margin-bottom: 4px;">DECISION</p>
-                <p style="font-size: 13px; color: #fecaca;">Dropped as noise. No action.</p>
+                <p style="font-size: 13px; color: #fecaca;">Dropped as noise. <strong>AgentHermes</strong> remains idle.</p>
               </div>
               <div style="padding: 12px; background: rgba(99, 102, 241, 0.1); border: 1px solid rgba(99, 102, 241, 0.2); border-radius: 12px;">
                 <p style="font-size: 10px; color: #a5b4fc; margin-bottom: 4px;">HIGH SIGNAL</p>
@@ -105,7 +105,7 @@
               <span class="tag" style="background: rgba(148, 163, 184, 0.1); color: var(--text-muted); border-color: var(--border);">Noise Filtered</span>
               <span style="font-size: 12px; color: var(--text-muted);">Today, 10:42 AM</span>
             </div>
-            <p style="font-size: 14px; margin-bottom: 16px; color: var(--text-muted);">A heart-beat event from Stripe was automatically dropped to save downstream compute.</p>
+            <p style="font-size: 14px; margin-bottom: 16px; color: var(--text-muted);">A routine Stripe heartbeat was intercepted. <strong>OpenClaw</strong> token usage: $0.00.</p>
             <div class="payload">{
   "type": "account.application.deauthorized",
   "reason": "routine_refresh"
@@ -115,17 +115,17 @@
 
         <section style="margin-bottom: 64px;">
           <div class="header-row" style="margin-bottom: 24px;">
-            <h3 style="font-size: 24px;">The OpenClaw Multiplier</h3>
+            <h3 style="font-size: 24px;">The Agent Efficiency Multiplier</h3>
             <span class="tag" style="background: rgba(16, 185, 129, 0.1); color: #34d399; border-color: rgba(16, 185, 129, 0.2);">Token Efficiency</span>
           </div>
           <div style="background: linear-gradient(135deg, rgba(16, 185, 129, 0.1), rgba(15, 23, 42, 0.5)); border: 1px solid rgba(16, 185, 129, 0.2); border-radius: 24px; padding: 32px; display: grid; grid-template-columns: 1fr 1fr; gap: 32px;">
             <div>
               <h4 style="color: white; font-size: 18px; margin-bottom: 12px;">Stop expensive heartbeats</h4>
-              <p style="color: var(--text-muted); font-size: 14px;">Running OpenClaw workflows just to check for new data is a token-drain. Every routine "heartbeat" run costs money even when there is zero signal.</p>
+              <p style="color: var(--text-muted); font-size: 14px;">Running <strong>OpenClaw</strong> or <strong>AgentHermes</strong> just to poll for data is a token drain. Every routine "heartbeat" run costs money even when there is zero signal.</p>
             </div>
             <div>
               <h4 style="color: #10b981; font-size: 18px; margin-bottom: 12px;">Process only the signal</h4>
-              <p style="color: var(--text-muted); font-size: 14px;">Let AgentHook handle the noisy inbound stream. OpenClaw only pulls when AgentHook confirms there are classified, high-signal events ready. You save tokens by never processing a heartbeat again.</p>
+              <p style="color: var(--text-muted); font-size: 14px;">AgentHook handles the noisy inbound stream. Your agents only wake up when AgentHook confirms there are classified, high-signal events ready. You save tokens by never processing noise again.</p>
             </div>
           </div>
         </section>
