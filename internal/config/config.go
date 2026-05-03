@@ -22,6 +22,7 @@ type Config struct {
 
 	TiDBDSN string
 
+	PineconeEnabled   bool
 	PineconeAPIKey    string
 	PineconeIndexURL  string
 	PineconeNamespace string
@@ -112,6 +113,7 @@ func Load() Config {
 
 		TiDBDSN: storeDSN,
 
+		PineconeEnabled:   getbool("PINECONE_ENABLED", false),
 		PineconeAPIKey:    getenv("PINECONE_API_KEY", ""),
 		PineconeIndexURL:  pineconeHost,
 		PineconeNamespace: getenv("PINECONE_NAMESPACE", "default"),

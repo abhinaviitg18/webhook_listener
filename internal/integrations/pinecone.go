@@ -13,6 +13,7 @@ import (
 )
 
 type PineconeClient struct {
+	Enabled   bool
 	APIKey    string
 	IndexURL  string
 	Namespace string
@@ -29,8 +30,9 @@ type recordsSearchResp struct {
 	} `json:"result"`
 }
 
-func NewPineconeClient(apiKey, indexURL, namespace string) *PineconeClient {
+func NewPineconeClient(enabled bool, apiKey, indexURL, namespace string) *PineconeClient {
 	return &PineconeClient{
+		Enabled:   enabled,
 		APIKey:    strings.TrimSpace(apiKey),
 		IndexURL:  strings.TrimSpace(indexURL),
 		Namespace: strings.TrimSpace(namespace),
@@ -39,7 +41,7 @@ func NewPineconeClient(apiKey, indexURL, namespace string) *PineconeClient {
 }
 
 func (p *PineconeClient) Query(ctx context.Context, accountID, query string, topK int) ([]domain.PineconeMemory, error) {
-	if p.APIKey == "" || p.IndexURL == "" || strings.TrimSpace(query) == "" {
+	if !p.Enabled || p.APIKey == "" || p.IndexURL == "" || strings.TrimSpace(query) == "" {
 		return []domain.PineconeMemory{}, nil
 	}
 	if topK <= 0 {
@@ -86,7 +88,7 @@ func (p *PineconeClient) Query(ctx context.Context, accountID, query string, top
 }
 
 func (p *PineconeClient) UpsertOrUpdate(ctx context.Context, accountID, typeKey, eventID, canonicalPayload string, prior []domain.PineconeMemory) error {
-	if p.APIKey == "" || p.IndexURL == "" || strings.TrimSpace(canonicalPayload) == "" {
+	if !p.Enabled || p.APIKey == "" || p.IndexURL == "" || strings.TrimSpace(canonicalPayload) == "" {
 		return nil
 	}
 	recordID := "rec-" + strings.ReplaceAll(eventID, "-", "")

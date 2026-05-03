@@ -29,7 +29,7 @@ func BuildHTTPHandler(ctx context.Context, cfg config.Config) (http.Handler, err
 		st = mysqlStore
 	}
 
-	pine := integrations.NewPineconeClient(cfg.PineconeAPIKey, cfg.PineconeIndexURL, cfg.PineconeNamespace)
+	pine := integrations.NewPineconeClient(cfg.PineconeEnabled, cfg.PineconeAPIKey, cfg.PineconeIndexURL, cfg.PineconeNamespace)
 	llm := buildFallbackLLMClient(nil, cfg)
 	tracer := observability.NewLangfuseClient(observability.Config{
 		Enabled:   cfg.LangfuseEnabled,

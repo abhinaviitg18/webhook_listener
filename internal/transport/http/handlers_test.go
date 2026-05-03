@@ -297,7 +297,7 @@ func TestScaleKitLogoutClearsSessionCookie(t *testing.T) {
 
 func TestEndToEndLocalFlow(t *testing.T) {
 	st := store.NewMemoryStore()
-	proc := &service.Processor{Store: st, Pinecone: integrations.NewPineconeClient("", "", "default"), LLM: integrations.NewLLMClient("", "", "", ""), Executor: service.NewActionService(nil)}
+	proc := &service.Processor{Store: st, Pinecone: integrations.NewPineconeClient(false, "", "", "default"), LLM: integrations.NewLLMClient("", "", "", ""), Executor: service.NewActionService(nil)}
 	h := &Handler{Store: st, Processor: proc}
 	r := NewRouter(h, auth.TokenVerifier{Store: st})
 	ts := httptest.NewServer(r)
@@ -373,7 +373,7 @@ func TestEndToEndLocalFlow(t *testing.T) {
 
 func TestCreateAndListForwardTargetsWithMetadata(t *testing.T) {
 	st := store.NewMemoryStore()
-	proc := &service.Processor{Store: st, Pinecone: integrations.NewPineconeClient("", "", "default"), LLM: integrations.NewLLMClient("", "", "", ""), Executor: service.NewActionService(nil)}
+	proc := &service.Processor{Store: st, Pinecone: integrations.NewPineconeClient(false, "", "", "default"), LLM: integrations.NewLLMClient("", "", "", ""), Executor: service.NewActionService(nil)}
 	h := &Handler{Store: st, Processor: proc}
 	r := NewRouter(h, auth.TokenVerifier{Store: st})
 	ts := httptest.NewServer(r)
@@ -479,7 +479,7 @@ func TestCreateAndListForwardTargetsWithMetadata(t *testing.T) {
 
 func TestCreateAndRotateIntegrationSecrets(t *testing.T) {
 	st := store.NewMemoryStore()
-	proc := &service.Processor{Store: st, Pinecone: integrations.NewPineconeClient("", "", "default"), LLM: integrations.NewLLMClient("", "", "", ""), Executor: service.NewActionService(nil)}
+	proc := &service.Processor{Store: st, Pinecone: integrations.NewPineconeClient(false, "", "", "default"), LLM: integrations.NewLLMClient("", "", "", ""), Executor: service.NewActionService(nil)}
 	h := &Handler{Store: st, Processor: proc}
 	r := NewRouter(h, auth.TokenVerifier{Store: st})
 	ts := httptest.NewServer(r)

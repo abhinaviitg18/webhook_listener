@@ -22,7 +22,7 @@ func TestReceiveWebhook_VerifiesHTCSignatureWhenPresent(t *testing.T) {
 	acct, token, _ := st.CreateAccount(t.Context(), "7204909316@agentmail.to")
 	wt, _ := st.CreateWebhookType(t.Context(), acct.ID, "generic-json", "store_mysql", true)
 	_, secretRaw, _ := st.CreateSecret(t.Context(), acct.ID, wt.ID)
-	proc := &service.Processor{Store: st, Pinecone: integrations.NewPineconeClient("", "", "default"), LLM: integrations.NewLLMClient("", "", "", ""), Executor: service.NewActionService(nil)}
+	proc := &service.Processor{Store: st, Pinecone: integrations.NewPineconeClient(false, "", "", "default"), LLM: integrations.NewLLMClient("", "", "", ""), Executor: service.NewActionService(nil)}
 	h := &Handler{Store: st, Processor: proc, VerifyHTCSignature: true}
 	r := NewRouter(h, auth.TokenVerifier{Store: st})
 	ts := httptest.NewServer(r)

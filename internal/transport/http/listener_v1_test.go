@@ -20,7 +20,7 @@ func TestListenerV1CreateIngestAndListEvents(t *testing.T) {
 	st := store.NewMemoryStore()
 	proc := &service.Processor{
 		Store:    st,
-		Pinecone: integrations.NewPineconeClient("", "", ""),
+		Pinecone: integrations.NewPineconeClient(false, "", "", ""),
 		LLM:      integrations.NewLLMClient("", "", "", ""),
 		Executor: service.NewActionService(nil),
 	}
@@ -168,7 +168,7 @@ func TestListenerV1ManualSecretAndAliasUpdate(t *testing.T) {
 	st := store.NewMemoryStore()
 	proc := &service.Processor{
 		Store:    st,
-		Pinecone: integrations.NewPineconeClient("", "", ""),
+		Pinecone: integrations.NewPineconeClient(false, "", "", ""),
 		LLM:      integrations.NewLLMClient("", "", "", ""),
 		Executor: service.NewActionService(nil),
 	}
@@ -255,7 +255,7 @@ func TestListenerV1AllowsDuplicateTypeKeysAndUsesLatestListener(t *testing.T) {
 	st := store.NewMemoryStore()
 	proc := &service.Processor{
 		Store:    st,
-		Pinecone: integrations.NewPineconeClient("", "", ""),
+		Pinecone: integrations.NewPineconeClient(false, "", "", ""),
 		LLM:      integrations.NewLLMClient("", "", "", ""),
 		Executor: service.NewActionService(nil),
 	}
@@ -337,7 +337,7 @@ func TestShortWebhookBlockedIdentityStopsIngress(t *testing.T) {
 	st := store.NewMemoryStore()
 	proc := &service.Processor{
 		Store:    st,
-		Pinecone: integrations.NewPineconeClient("", "", ""),
+		Pinecone: integrations.NewPineconeClient(false, "", "", ""),
 		LLM:      integrations.NewLLMClient("", "", "", ""),
 		Executor: service.NewActionService(nil),
 	}
