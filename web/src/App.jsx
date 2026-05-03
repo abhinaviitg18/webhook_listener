@@ -503,6 +503,43 @@ function enterprisePrefillURL(baseURL, form) {
   return query ? `${baseURL}${baseURL.includes('?') ? '&' : '?'}${query}` : baseURL;
 }
 
+const PlanComparison = () => {
+  const features = [
+    { name: 'Setup Cost', free: '$0', enterprise: '$1,500 (One-time)' },
+    { name: 'Monthly Subscription', free: '$0/mo', enterprise: '$0/mo' },
+    { name: 'Deployment', free: 'Shared Multi-tenant', enterprise: 'Private Single-tenant (AWS/Cloud)' },
+    { name: 'Inbound Webhooks', free: 'Up to 20', enterprise: 'Unlimited' },
+    { name: 'Inbound Emails', free: 'Up to 20', enterprise: 'Unlimited' },
+    { name: 'Monthly Messages', free: 'Up to 3,000', enterprise: 'Unlimited' },
+    { name: 'Outbound Emails', free: 'No (Receive Only)', enterprise: 'Full Support' },
+    { name: 'Domain', free: 'agenthook.store', enterprise: 'Your Own Custom Domain' },
+    { name: 'Data Privacy', free: 'Debugging Access', enterprise: 'Total Isolation' },
+  ];
+
+  return (
+    <div className="overflow-x-auto rounded-3xl border border-slate-800 bg-slate-950/40 p-1">
+      <table className="w-full text-left text-sm">
+        <thead>
+          <tr className="border-b border-slate-800 bg-slate-900/50">
+            <th className="px-4 py-3 font-semibold text-slate-400">Feature</th>
+            <th className="px-4 py-3 font-semibold text-indigo-400">Free Plan</th>
+            <th className="px-4 py-3 font-semibold text-amber-400">Enterprise</th>
+          </tr>
+        </thead>
+        <tbody>
+          {features.map((f, i) => (
+            <tr key={f.name} className={i !== features.length - 1 ? 'border-b border-slate-800/50' : ''}>
+              <td className="px-4 py-3 font-medium text-slate-200">{f.name}</td>
+              <td className="px-4 py-3 text-slate-400">{f.free}</td>
+              <td className="px-4 py-3 text-slate-300 font-medium">{f.enterprise}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+};
+
 function EnterpriseSection({ inApp = false, onPrimaryAction }) {
   const [form, setForm] = useState({
     name: '',
@@ -544,6 +581,14 @@ function EnterpriseSection({ inApp = false, onPrimaryAction }) {
             </div>
           ))}
         </div>
+      </div>
+
+      <div className="space-y-4">
+        <div className="px-2">
+          <p className="text-[10px] uppercase tracking-[0.22em] text-slate-400 font-label-caps">Comparison</p>
+          <h4 className="text-xl text-white font-semibold">Free vs. Enterprise</h4>
+        </div>
+        <PlanComparison />
       </div>
 
       <div className="grid gap-5 lg:grid-cols-[0.9fr_1.1fr]">
