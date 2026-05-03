@@ -223,8 +223,20 @@ Content-Type: application/json
           <button onclick="showHome()" class="nav-item" style="display: inline-block; cursor: pointer;">← Back to Home</button>
         </div>
       </div>
+      </div>
     </main>
   </div>
+
+  <footer style="margin-top: auto; padding: 24px; text-align: center; border-top: 1px solid var(--border); background: rgba(15, 23, 42, 0.9);">
+    <div style="max-width: 1200px; margin: 0 auto; display: flex; justify-content: space-between; align-items: center; color: var(--text-muted); font-size: 12px;">
+      <p>&copy; 2026 AgentHook. All rights reserved.</p>
+      <div style="display: flex; gap: 24px;">
+        <a href="/privacy.md" target="_blank" style="color: var(--text-muted); text-decoration: none; hover: color: white;">Privacy Policy</a>
+        <a href="/?tab=docs" onclick="showDocs(event)" style="color: var(--text-muted); text-decoration: none; hover: color: white;">Documentation</a>
+        <a href="mailto:support@agenthook.store" style="color: var(--text-muted); text-decoration: none; hover: color: white;">Support</a>
+      </div>
+    </div>
+  </footer>
 
   <script>
     function showHome() {

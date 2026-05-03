@@ -38,5 +38,13 @@ We use essential session cookies to keep you logged in and manage your user expe
 ## 5. Changes to This Policy
 We may update this policy from time to time. We will notify you of any significant changes by posting the new policy on our website or through in-app notifications.
 
-## 6. Contact Us
+## 7. Prohibited Activities
+By using AgentHook, you agree that our services, including but not limited to webhook listeners and email addresses, **cannot be used for the following purposes**:
+- Distribution or storage of pornography or adult-oriented content.
+- Facilitating illegal activities or distributing illegal content.
+- Harassment, spamming, or any activity that violates the rights of others.
+
+Violation of these terms will result in immediate account termination without notice.
+
+## 8. Contact Us
 If you have any questions about this Privacy Policy, please contact us at support@agenthook.store.
