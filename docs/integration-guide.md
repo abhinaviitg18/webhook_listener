@@ -51,16 +51,17 @@ This guide explains how to integrate **AgentHook** with **AgentHermes** (for loc
 
 ## 2. OpenClaw Integration
 
-[OpenClaw](https://openclaw.example.com) is an automation platform. AgentHook acts as a high-signal filter for OpenClaw, reducing token costs by discarding "heartbeat" noise and routine status updates.
+[OpenClaw](https://openclaw.example.com) is an automation platform. AgentHook serves as a high-signal filter for OpenClaw, significantly reducing token costs through two primary patterns:
 
 ### Integration Patterns
 
-AgentHook typically integrates with OpenClaw via the **Forward Signal** pattern:
-1. Webhook arrives at AgentHook.
-2. Skill classifies and summarizes the event.
-3. High-signal summary is forwarded to OpenClaw via HTTP.
+1. **Deterministic Pull (Recommended):**
+   OpenClaw can hit AgentHook's deterministic API endpoints (like `GET /api/events/by-time`) to fetch only pre-classified, high-signal events. This prevents OpenClaw from waking up and consuming tokens when there is only "noise" or "heartbeats" in the stream.
 
-### Setup Steps
+2. **Trigger-Based Push:**
+   AgentHook can proactively `push` summarized events to OpenClaw's intake URL as they arrive and pass classification filters.
+
+### Setup Steps (Pull Model)
 
 1. **Store OpenClaw API Key:**
    Create an integration secret in AgentHook so your skills can use it:
