@@ -11,3 +11,7 @@ artifacts/
 output/
 cloudflare-pages/.wrangler/
 cloudflare-worker-root/.wrangler/
+# Hermes Agent
+scripts/hermes.py
+scripts/README_HERMES.md
+.hermes/

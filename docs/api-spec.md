@@ -1,5 +1,7 @@
 # agenthook.store API Spec (Current Build)
 
+See also: [Integration Guide (AgentHermes & OpenClaw)](file:///Users/abhinavakashyabh/Desktop/webhook_listener/docs/integration-guide.md)
+
 ## Auth model
 - Registration returns account-scoped bearer token.
 - Admin endpoints require `Authorization: Bearer <token>`.
@@ -170,6 +172,16 @@ Pipeline:
 `GET /api/events?limit=50`
 
 Returns recent account-scoped webhook events and action statuses.
+
+### List events by tag
+`GET /api/events/by-tag?tag=<tag_name>&limit=50`
+
+### List events by time window
+`GET /api/events/by-time?window=15m&limit=100`
+
+Returns events from the last N minutes, hours, or days.
+- `window`: duration string like `5m`, `1h`, `2d`.
+- `limit`: max results to return.
 
 ## 9) Service endpoints
 - `GET /healthz`

@@ -1,6 +1,9 @@
 package domain
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
 type Store interface {
 	CreateAccount(ctx context.Context, email string) (Account, string, error)
@@ -46,6 +49,7 @@ type Store interface {
 	GetEvent(ctx context.Context, accountID, eventID string) (WebhookEvent, error)
 	FindEventBySourceEventID(ctx context.Context, accountID, sourceEventID string) (WebhookEvent, error)
 	ListEventsByTag(ctx context.Context, accountID, tag string, limit int) ([]WebhookEvent, error)
+	ListEventsByTime(ctx context.Context, accountID string, since time.Time, limit int) ([]WebhookEvent, error)
 	UpdateEventTags(ctx context.Context, eventID, tagsJSON string) error
 
 	CreateTypeSignature(ctx context.Context, sig WebhookTypeSignature) (WebhookTypeSignature, error)

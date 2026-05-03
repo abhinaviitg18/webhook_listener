@@ -1096,6 +1096,47 @@ func (s *MySQLStore) ListEventsByTag(ctx context.Context, accountID, tag string,
 	return out, nil
 }
 
+func (s *MySQLStore) ListEventsByTime(ctx context.Context, accountID string, since time.Time, limit int) ([]domain.WebhookEvent, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	var (
+		rows *sql.Rows
+		err  error
+	)
+	for _, variant := range eventSelectVariants() {
+		query := buildEventSelectQuery(`WHERE account_id=? AND created_at >= ? ORDER BY created_at DESC LIMIT ?`, variant.includeRaw, variant.includeProcessed, variant.includeTags)
+		rows, err = s.db.QueryContext(ctx, query, accountID, since, limit)
+		if err == nil || !isUnknownColumnErr(err) {
+			break
+		}
+	}
+	if err != nil && isUnknownColumnErr(err) {
+		if schemaErr := s.ensureWebhookEventSchema(ctx); schemaErr == nil {
+			for _, variant := range eventSelectVariants() {
+				query := buildEventSelectQuery(`WHERE account_id=? AND created_at >= ? ORDER BY created_at DESC LIMIT ?`, variant.includeRaw, variant.includeProcessed, variant.includeTags)
+				rows, err = s.db.QueryContext(ctx, query, accountID, since, limit)
+				if err == nil || !isUnknownColumnErr(err) {
+					break
+				}
+			}
+		}
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []domain.WebhookEvent
+	for rows.Next() {
+		var e domain.WebhookEvent
+		if err := rows.Scan(&e.ID, &e.AccountID, &e.TypeID, &e.SecretID, &e.RequestID, &e.SourceEventID, &e.TypeKey, &e.RawPayloadJSON, &e.PayloadJSON, &e.ProcessedText, &e.ActionSelected, &e.TagsJSON, &e.Status, &e.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, nil
+}
+
 func (s *MySQLStore) UpdateEventTags(ctx context.Context, eventID, tagsJSON string) error {
 	_, err := s.db.ExecContext(ctx, `UPDATE webhook_events SET tags_json=? WHERE id=?`, tagsJSON, eventID)
 	if err != nil && isUnknownColumnErr(err) {

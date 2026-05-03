@@ -76,6 +76,7 @@ func NewRouter(h *Handler, verifier auth.RequestVerifier) http.Handler {
 		ar.Delete("/api/integration-secrets/{secretID}", h.DeleteIntegrationSecret)
 		ar.Get("/api/events", h.ListEvents)
 		ar.Get("/api/events/by-tag", h.ListEventsByTag)
+		ar.Get("/api/events/by-time", h.ListEventsByTime)
 		ar.Post("/api/events/{eventID}/re-run", h.ReprocessEvent)
 		ar.Get("/api/events/{eventID}", h.GetEvent)
 		ar.Post("/api/resolver/signatures", h.CreateSignature)
@@ -1101,6 +1102,45 @@ func (h *Handler) ListEventsByTag(w http.ResponseWriter, r *http.Request) {
 		limit = 50
 	}
 	events, err := h.Store.ListEventsByTag(r.Context(), acct.ID, tag, limit)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, events)
+}
+
+func (h *Handler) ListEventsByTime(w http.ResponseWriter, r *http.Request) {
+	acct, ok := auth.AccountFromContext(r.Context())
+	if !ok {
+		writeErr(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	window := strings.TrimSpace(r.URL.Query().Get("window"))
+	if window == "" {
+		window = "1h" // default to 1 hour
+	}
+	dur, err := time.ParseDuration(window)
+	if err != nil {
+		// support simple 'd' for days as well if ParseDuration doesn't (it doesn't natively)
+		if strings.HasSuffix(window, "d") {
+			days, derr := strconv.Atoi(strings.TrimSuffix(window, "d"))
+			if derr == nil {
+				dur = time.Hour * 24 * time.Duration(days)
+				err = nil
+			}
+		}
+	}
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid window duration (e.g. 5m, 1h, 2d)")
+		return
+	}
+
+	since := time.Now().Add(-dur)
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	if limit <= 0 || limit > 500 {
+		limit = 100
+	}
+	events, err := h.Store.ListEventsByTime(r.Context(), acct.ID, since, limit)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return

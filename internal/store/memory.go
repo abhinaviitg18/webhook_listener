@@ -675,7 +675,9 @@ func (s *MemoryStore) CreateEvent(_ context.Context, e domain.WebhookEvent) (dom
 		}
 	}
 	e.ID = uuid.NewString()
-	e.CreatedAt = time.Now().UTC()
+	if e.CreatedAt.IsZero() {
+		e.CreatedAt = time.Now().UTC()
+	}
 	s.events[e.ID] = e
 	if e.SourceEventID != "" {
 		s.eventBySource[e.AccountID+"::"+e.SourceEventID] = e.ID
@@ -757,6 +759,22 @@ func (s *MemoryStore) ListEventsByTag(_ context.Context, accountID, tag string, 
 	var out []domain.WebhookEvent
 	for _, e := range s.events {
 		if e.AccountID == accountID && strings.Contains(e.TagsJSON, `"`+tag+`"`) {
+			out = append(out, e)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.After(out[j].CreatedAt) })
+	if limit > 0 && len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
+}
+
+func (s *MemoryStore) ListEventsByTime(_ context.Context, accountID string, since time.Time, limit int) ([]domain.WebhookEvent, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var out []domain.WebhookEvent
+	for _, e := range s.events {
+		if e.AccountID == accountID && (e.CreatedAt.After(since) || e.CreatedAt.Equal(since)) {
 			out = append(out, e)
 		}
 	}
