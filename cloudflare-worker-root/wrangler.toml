@@ -14,5 +14,5 @@ SCALEKIT_BASE_URL = "https://hookweb.scalekit.com"
 APP_REDIRECT_BASE = "https://app.agenthook.store"
 
 [assets]
-directory = "../web/dist"
+directory = "../website"
 binding = "ASSETS"
