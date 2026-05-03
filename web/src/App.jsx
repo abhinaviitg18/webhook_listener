@@ -26,6 +26,7 @@ import {
   ArrowUpRight,
   Save,
   Trash2,
+  ShieldCheck,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from './context/AuthContext';
@@ -806,6 +807,23 @@ payload -> preprocess -> deterministic routing -> optional LLM routing -> select
                 >
                   <BookOpen size={16} />
                   View Prompt
+                </a>
+              </div>
+            </div>
+
+            <div className="mt-6 pt-4 border-t border-slate-800">
+              <p className="text-[10px] uppercase tracking-[0.22em] text-slate-400 font-label-caps mb-2">Legal & Privacy</p>
+              <p className="text-sm text-slate-300 mb-3">
+                Review how we handle your data, especially for users on the Free Plan.
+              </p>
+              <div className="flex flex-col sm:flex-row gap-3">
+                <a
+                  href="/privacy.md"
+                  target="_blank"
+                  className="inline-flex items-center justify-center gap-2 bg-slate-950/50 border border-slate-800 text-slate-300 px-4 py-2 rounded-xl hover:text-white hover:border-slate-700 transition-colors"
+                >
+                  <ShieldCheck size={16} />
+                  Privacy Policy
                 </a>
               </div>
             </div>
