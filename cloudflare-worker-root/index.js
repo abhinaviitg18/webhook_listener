@@ -11,18 +11,6 @@ export default {
                          reqURL.pathname.startsWith('/api/') || 
                          reqURL.pathname.startsWith('/auth/')
 
-    if (reqURL.pathname === '/auth/scalekit/login') {
-      const loginURL = new URL(`${scalekitBase}/a/auth/login`)
-      loginURL.searchParams.set('redirect_uri', `${appRedirectBase}/auth/scalekit/callback`)
-      return Response.redirect(loginURL.toString(), 302)
-    }
-
-    if (reqURL.pathname === '/auth/scalekit/signup') {
-      const signupURL = new URL(`${scalekitBase}/a/auth/signup`)
-      signupURL.searchParams.set('redirect_uri', `${appRedirectBase}/auth/scalekit/callback`)
-      return Response.redirect(signupURL.toString(), 302)
-    }
-
     if (hostname === 'app.agenthook.store' || isApiRequest) {
       if (!appOriginURL) {
         const passthroughResponse = await fetch(request)
