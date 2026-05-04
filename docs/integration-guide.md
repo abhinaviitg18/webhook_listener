@@ -27,6 +27,10 @@ This guide explains how to integrate **AgentHook** with **AgentHermes** (for loc
    OPENROUTER_API_KEY=sk-or-v1-...
    AGENTHOOK_TOKEN=your_agenthook_token
    CODEX_HOME=/path/to/your/project
+   # Switch to Groq/Cerebras if OpenRouter credits are low:
+   # OPENAI_API_KEY=gsk_...
+   # HERMES_INFERENCE_PROVIDER=custom
+   # HERMES_INFERENCE_BASE_URL=https://api.groq.com/openai/v1
    ```
 
 3. **Install Codex CLI:**
@@ -38,7 +42,7 @@ This guide explains how to integrate **AgentHook** with **AgentHermes** (for loc
 4. **Enable Heartbeat Polling:**
    Schedule Hermes to fetch webhooks every 5 minutes:
    ```bash
-   hermes cron add "*/5 * * * *" "Fetch latest webhooks from https://app.agenthook.store/api/events/by-time?window=5m and analyze them for any needed code changes using Codex." --name "webhook-monitor" --workdir "/path/to/your/project"
+   hermes cron add "*/5 * * * *" "Fetch latest webhooks from https://app.agenthook.store/api/events/by-time?window=5m using the AGENTHOOK_TOKEN in the Authorization: Bearer header and analyze them for any needed code changes using Codex. After analysis, send an email to abhinaviitg18@gmail.com via agentmail.to (API: https://api.agentmail.to/v0, using AGENTMAIL_API_KEY) containing: 1) the number of webhooks received, 2) a summary of the events, and 3) what needs to be done for them. If no webhooks were received, respond with [SILENT] and do not send an email." --name "webhook-monitor" --workdir "/path/to/your/project"
    ```
 
 5. **Start the Background Service:**
@@ -63,32 +67,28 @@ This guide explains how to integrate **AgentHook** with **AgentHermes** (for loc
 
 ### Setup Steps (Pull Model)
 
-1. **Store OpenClaw API Key:**
-   Create an integration secret in AgentHook so your skills can use it:
+1. **Obtain API Key:**
+   Get your `AGENTHOOK_TOKEN` from the dashboard.
+
+2. **Configure OpenClaw Poll:**
+   Set up a recurring job to fetch events:
    ```bash
-   # Using AgentHook CLI or UI
-   Secret Key: openclaw_api_key
-   Purpose: OpenClaw Bearer Token
-   Secret Value: sk_oc_...
+   curl -H "Authorization: Bearer $AGENTHOOK_TOKEN" \
+     "https://app.agenthook.store/api/events/by-time?window=10m"
    ```
 
-2. **Create Forward Target:**
-   Define OpenClaw as a destination:
-   ```bash
-   Target Key: openclaw_primary
-   Target Type: http
-   URL: https://api.openclaw.example/v1/intake
-   Auth: Bearer (referenced via secret_ref: openclaw_api_key)
-   ```
+3. **Process Events:**
+   Iterate through the returned events and trigger downstream workflows.
 
-3. **Configure Filtering Skill:**
-   Add a Skill to your Webhook Type to handle the logic. 
-   
-   **Example Skill Prompt:**
-   > "If the payload is a heartbeat or routine status update, set action to `no_action`. If it's a high-priority lead or critical error, summarize the core details and use `forward_http` to `openclaw_primary`."
+---
 
-### Cost Optimization ROI
-By using AgentHook as a pre-filter:
-- **Save Tokens:** Never process a "heartbeat" in OpenClaw again.
-- **Lower Latency:** OpenClaw only wakes up when there is actual work.
-- **Structured Data:** OpenClaw receives clean, summarized JSON instead of raw, messy payloads.
+## Cost Optimization
+
+Using AgentHook as a pre-filter for "heartbeat" agents (like Hermes or OpenClaw) saves significant costs:
+
+| Strategy | Token Consumption | Estimated Cost |
+| :--- | :--- | :--- |
+| **Direct Stream** | High (Every Event) | $$$ |
+| **AgentHook Filter** | Low (Filtered Only) | $ |
+
+*Note: Pre-filtering ensures LLMs only process high-intent signals.*
