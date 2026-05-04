@@ -128,8 +128,18 @@ func isTextLikeKey(key string) bool {
 		return false
 	}
 	for _, hint := range []string{"subject", "text", "body", "content", "message", "snippet", "preview", "summary", "description", "plain", "html", "title", "name", "from", "to", "cc", "bcc", "sender"} {
-		if k == hint || strings.Contains(k, hint) {
+		if k == hint {
 			return true
+		}
+		// For very short hints, require boundary matches to avoid false positives (e.g. 'to' in 'collaborators_url')
+		if len(hint) <= 4 {
+			if strings.Contains(k, "_"+hint) || strings.Contains(k, hint+"_") || strings.Contains(k, "-"+hint) || strings.Contains(k, hint+"-") {
+				return true
+			}
+		} else {
+			if strings.Contains(k, hint) {
+				return true
+			}
 		}
 	}
 	return false
