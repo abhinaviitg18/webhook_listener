@@ -12,6 +12,7 @@ routes = [
 [vars]
 SCALEKIT_BASE_URL = "https://hookweb.scalekit.com"
 APP_REDIRECT_BASE = "https://app.agenthook.store"
+APP_ORIGIN_URL = "https://fde2jcfxfaop7naqbnies6tyie0mhxmc.lambda-url.us-east-1.on.aws"
 
 [assets]
 directory = "../website"

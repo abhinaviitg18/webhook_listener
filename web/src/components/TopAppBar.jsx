@@ -35,7 +35,7 @@ export const TopAppBar = ({ user, onLogout, onMenuClick }) => {
           </>
         ) : (
           <button
-            onClick={() => window.location.href = '/v1/auth/login'}
+            onClick={() => window.location.href = '/auth/scalekit/login'}
             className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-xl font-medium transition-all active:scale-95 shadow-lg shadow-indigo-500/20"
           >
             <LogIn size={18} />
