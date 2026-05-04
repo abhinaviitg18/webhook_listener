@@ -210,7 +210,7 @@ func (h *Handler) ScaleKitCallback(w http.ResponseWriter, r *http.Request) {
 	q := target.Query()
 
 	// 2. Exchange ScaleKit auth code server-side and mint a real app token.
-	if localToken, err := h.exchangeScaleKitCodeToLocalToken(r.Context(), code); err == nil && localToken != "" {
+	if localToken, err := h.exchangeScaleKitCodeToLocalToken(r, code); err == nil && localToken != "" {
 		h.writeSessionCookie(w, localToken, 3600*24*30)
 		http.Redirect(w, r, target.String(), http.StatusFound)
 		return
@@ -530,13 +530,14 @@ func parseAliasAndSecret(raw string) (string, string, bool) {
 	return normalizePublicAlias(trimmed[:idx]), normalizeWebhookSecret(trimmed[idx+1:]), true
 }
 
-func (h *Handler) exchangeScaleKitCodeToLocalToken(ctx context.Context, code string) (string, error) {
+func (h *Handler) exchangeScaleKitCodeToLocalToken(r *http.Request, code string) (string, error) {
 	if !h.isScaleKitConfigured() {
 		return "", errors.New("scalekit not configured")
 	}
 
+	ctx := r.Context()
 	base := strings.TrimRight(h.scalekitBase(), "/")
-	redirectURI := "https://app.agenthook.store/auth/scalekit/callback"
+	redirectURI := h.scalekitCallbackURL(r)
 	client := &http.Client{
 		Timeout: 8 * time.Second,
 		Transport: &http.Transport{
