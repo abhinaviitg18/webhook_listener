@@ -27,11 +27,12 @@ import {
   Save,
   Trash2,
   ShieldCheck,
+  Activity,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from './context/AuthContext';
 
-const VALID_TABS = new Set(['home', 'storyboard', 'skills', 'integrations', 'integration-secrets', 'urls', 'api-tokens', 'enterprise', 'docs', 'byok']);
+const VALID_TABS = new Set(['home', 'heartbeat', 'storyboard', 'skills', 'integrations', 'integration-secrets', 'urls', 'api-tokens', 'enterprise', 'docs', 'byok']);
 
 const PROVIDER_OPTIONS = [
   'github',
@@ -908,7 +909,11 @@ payload -> preprocess -> deterministic routing -> optional LLM routing -> select
   );
 }
 
-function LandingContent({ login, error, appProfile, scrollToDocs, scrollToEnterprise }) {
+function LandingContent({ user, login, error, appProfile, scrollToDocs, scrollToEnterprise, copied, setCopied }) {
+  if (user) {
+    return <HomeDashboard user={user} copied={copied} setCopied={setCopied} />;
+  }
+
   return (
     <div className="space-y-20">
       <div className="relative overflow-hidden border border-slate-800 bg-[radial-gradient(circle_at_top,_rgba(99,102,241,0.18),_transparent_45%),linear-gradient(180deg,_rgba(15,23,42,0.94),_rgba(2,6,23,1))] rounded-[40px] p-8">
@@ -917,9 +922,9 @@ function LandingContent({ login, error, appProfile, scrollToDocs, scrollToEnterp
           <div className="grid gap-10 lg:grid-cols-[1.2fr_0.8fr] lg:items-center">
             <div className="space-y-8">
               <div className="space-y-4">
-                <p className="text-[10px] uppercase tracking-[0.28em] text-indigo-400 font-label-caps">Turn noisy webhooks into useful actions</p>
+                <p className="text-[10px] uppercase tracking-[0.28em] text-indigo-400 font-label-caps">The Webhook Control Layer</p>
                 <h1 className="text-4xl md:text-5xl font-h1 text-white leading-tight">
-                  Stop paying attention to every event just because your apps can send one.
+                  Stop paying attention to every event.
                 </h1>
                 <p className="text-base text-slate-300 max-w-xl">
                   AgentHook receives events from any app, filters out noise, classifies what matters, and forwards the right payload to the right tool.
@@ -947,45 +952,121 @@ function LandingContent({ login, error, appProfile, scrollToDocs, scrollToEnterp
                   View docs
                 </button>
               </div>
-
-              <div className="grid gap-3 sm:grid-cols-3">
-                {HOMEPAGE_SUPPORT_POINTS.map((item) => (
-                  <div key={item} className="rounded-2xl border border-slate-800 bg-slate-950/40 px-4 py-4 text-sm text-slate-300">
-                    {item}
-                  </div>
-                ))}
-              </div>
             </div>
 
             <div className="rounded-[28px] border border-slate-800 bg-slate-950/70 p-5 shadow-2xl shadow-indigo-950/20">
               <div className="flex items-center justify-between mb-4">
                 <div>
-                  <p className="text-white text-sm font-semibold">Operator preview</p>
-                  <p className="text-[11px] text-slate-500">Filter, route, and reclassify</p>
+                  <p className="text-white text-sm font-semibold">Ready to scale?</p>
+                  <p className="text-[11px] text-slate-500">Autonomous monitors await.</p>
                 </div>
                 <span className="rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2 py-1 text-[10px] font-bold text-emerald-300">
-                  LIVE FLOW
+                  AUTO-READY
                 </span>
               </div>
               <div className="space-y-3">
-                <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-4">
-                  <p className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Incoming</p>
-                  <pre className="mt-2 whitespace-pre-wrap break-words text-[11px] font-code-snippet text-slate-300">{`{"event":"heartbeat","kind":"metrics","ok":true}`}</pre>
-                </div>
-                <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-4">
-                  <p className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Decision</p>
-                  <p className="mt-2 text-sm text-slate-200">Dropped as noise. No action.</p>
-                </div>
-                <div className="rounded-2xl border border-indigo-500/20 bg-indigo-500/10 p-4">
-                  <p className="text-[10px] uppercase tracking-[0.2em] text-indigo-300">High-signal</p>
-                  <pre className="mt-2 whitespace-pre-wrap break-words text-[11px] font-code-snippet text-indigo-100">{`{"event":"lead.created","company":"Acme"}`}</pre>
-                  <p className="mt-2 text-sm text-indigo-100">Forwarded and tagged.</p>
+                 <div className="rounded-2xl border border-indigo-500/20 bg-indigo-500/10 p-4">
+                  <p className="text-[10px] uppercase tracking-[0.2em] text-indigo-300">Set up Heartbeat</p>
+                  <p className="mt-2 text-sm text-indigo-100">Configure AgentHermes to handle the noise in the background.</p>
                 </div>
               </div>
             </div>
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+function HomeDashboard({ user, copied, setCopied }) {
+  const [apiToken, setApiToken] = useState('');
+  const [tokenBusy, setTokenBusy] = useState(false);
+  const [apiTokensList, setApiTokensList] = useState([]);
+  const [loadingTokens, setLoadingTokens] = useState(false);
+  const [error, setError] = useState('');
+
+  const fetchTokens = async () => {
+    setLoadingTokens(true);
+    try {
+      const data = await apiRequest('/v1/auth/tokens');
+      setApiTokensList(Array.isArray(data) ? data : []);
+    } catch (err) {
+      console.error('Failed to fetch tokens', err);
+    } finally {
+      setLoadingTokens(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchTokens();
+  }, []);
+
+  const createToken = async () => {
+    setTokenBusy(true);
+    setError('');
+    try {
+      const created = await apiRequest('/v1/auth/tokens', {
+        method: 'POST',
+      });
+      setApiToken(created?.token || '');
+      await fetchTokens();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setTokenBusy(false);
+    }
+  };
+
+  return (
+    <div className="space-y-8 max-w-5xl mx-auto">
+      <div className="space-y-2">
+        <p className="text-[10px] uppercase tracking-[0.22em] text-indigo-400 font-label-caps">Developer Console</p>
+        <h1 className="text-3xl font-h1 text-white">Welcome back, {user?.public_alias || 'Developer'}</h1>
+        <p className="text-slate-400 text-sm">Get your webhook infrastructure running autonomously.</p>
+      </div>
+
+      <div className="grid gap-6 lg:grid-cols-[0.8fr_1.2fr]">
+        <div className="space-y-4">
+          <div className="flex items-center justify-between px-1">
+            <h3 className="text-white font-semibold">1. Create API Token</h3>
+          </div>
+          <div className="rounded-3xl border border-slate-800 bg-slate-950/40 p-5 space-y-4">
+            <p className="text-sm text-slate-300">
+              Generate an <code className="text-indigo-300">AGENTHOOK_TOKEN</code> to authenticate your heartbeat agent or CLI.
+            </p>
+            {error && <InlineNotice tone="error">{error}</InlineNotice>}
+            <button
+              onClick={createToken}
+              disabled={tokenBusy}
+              className="w-full bg-primary text-on-primary font-bold py-3 rounded-2xl active:scale-95 transition-transform disabled:opacity-50"
+            >
+              {tokenBusy ? 'CREATING...' : 'CREATE TOKEN'}
+            </button>
+            {apiToken && (
+              <div className="flex flex-col gap-2 bg-emerald-500/10 px-3 py-3 rounded-xl border border-emerald-500/20">
+                <span className="text-[10px] text-emerald-400 font-label-caps">New token created (copy now)</span>
+                <div className="flex items-center gap-2">
+                  <code className="text-indigo-300 font-code-snippet text-xs truncate break-all">{apiToken}</code>
+                  <CopyButton value={apiToken} copiedKey={copied} setCopiedKey={setCopied} copyKey="home-api-token" />
+                </div>
+              </div>
+            )}
+            {apiTokensList.length > 0 && (
+               <p className="text-[10px] text-slate-500 font-label-caps px-1">You have {apiTokensList.length} active token(s).</p>
+            )}
+          </div>
+        </div>
+
+        <div className="space-y-4">
+          <div className="flex items-center justify-between px-1">
+            <h3 className="text-white font-semibold">2. Setup Heartbeat</h3>
+          </div>
+          <HeartbeatTab />
+        </div>
+      </div>
+    </div>
+  );
+}
 
       <LandingSection eyebrow="Why teams need this" title="Most webhook infrastructure stops at delivery.">
         <p className="text-slate-300 max-w-3xl">
@@ -1118,6 +1199,10 @@ function App() {
     setActiveTab('docs');
   };
 
+  const openHeartbeat = () => {
+    setActiveTab('heartbeat');
+  };
+
   const handleTagClick = (tag) => {
     setActiveTag(prev => prev === tag ? null : tag);
   };
@@ -1174,13 +1259,20 @@ function App() {
               exit={{ opacity: 0, y: -10 }}
             >
               <LandingContent 
+                user={user}
                 login={login} 
                 error={error} 
                 appProfile={effectiveAppProfile} 
                 scrollToDocs={openDocs}
                 scrollToEnterprise={openEnterprise}
+                copied={copied}
+                setCopied={setCopied}
               />
             </motion.div>
+          )}
+
+          {activeTab === 'heartbeat' && (
+            <HeartbeatTab />
           )}
 
           {activeTab === 'storyboard' && (
@@ -1211,6 +1303,17 @@ function App() {
                       copyKey="storyboard-ingress"
                     />
                   </div>
+                </div>
+
+                <div className="bg-emerald-500/5 border border-emerald-500/20 rounded-xl p-4 cursor-pointer hover:bg-emerald-500/10 transition-colors" onClick={openHeartbeat}>
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-emerald-400 font-label-caps text-[10px]">AUTONOMOUS OPERATIONS</span>
+                    <Activity size={14} className="text-emerald-400" />
+                  </div>
+                  <h4 className="text-white text-sm font-semibold mb-1">Set up your 5-min Heartbeat</h4>
+                  <p className="text-xs text-slate-400">
+                    Let AgentHermes autonomously monitor webhooks and email you only when meaningful actions are found.
+                  </p>
                 </div>
               </section>
 
@@ -3658,5 +3761,109 @@ const StatusBadge = ({ status }) => {
     </div>
   );
 };
+
+function HeartbeatTab() {
+  const setupCommand = `curl -sSL https://app.agenthook.store/setup_hermes_heartbeat.sh | bash`;
+  
+  return (
+    <motion.div
+      key="heartbeat"
+      initial={{ opacity: 0, x: -20 }}
+      animate={{ opacity: 1, x: 0 }}
+      exit={{ opacity: 0, x: 20 }}
+      className="space-y-6"
+    >
+      <div className="flex items-center justify-between px-1">
+        <h2 className="text-white">Autonomous Heartbeat</h2>
+        <span className="rounded-full border border-indigo-500/20 bg-indigo-500/10 px-3 py-1 text-[10px] font-bold text-indigo-300 uppercase tracking-wider">
+          Hermes Powered
+        </span>
+      </div>
+
+      <div className="rounded-3xl border border-slate-800 bg-slate-950/40 p-5 space-y-4">
+        <div className="space-y-2">
+          <p className="text-[10px] uppercase tracking-[0.22em] text-indigo-400 font-label-caps">The Concept</p>
+          <p className="text-sm text-slate-300">
+            Configure <span className="text-white font-semibold">AgentHermes</span> to act as your autonomous operations agent. 
+            It will wake up every 5 minutes, fetch your latest webhooks, analyze them for meaningful signals, and email you a summary 
+            only when action is needed.
+          </p>
+        </div>
+
+        <div className="grid gap-4 md:grid-cols-2">
+          <div className="rounded-2xl border border-slate-800 bg-slate-900/40 p-4 space-y-2">
+            <h4 className="text-white text-sm font-semibold">Self-Learning</h4>
+            <p className="text-xs text-slate-400 leading-relaxed">
+              Encountered a new webhook? Hermes uses Codex to generate a deterministic Python processor on the fly, 
+              saving it to your local <code className="text-indigo-300">processors/</code> library for future use.
+            </p>
+          </div>
+          <div className="rounded-2xl border border-slate-800 bg-slate-900/40 p-4 space-y-2">
+            <h4 className="text-white text-sm font-semibold">Zero Noise</h4>
+            <p className="text-xs text-slate-400 leading-relaxed">
+              If the store is empty or the events are heartbeats, Hermes remains completely silent. You only get an 
+              email when there is a summary worth reading.
+            </p>
+          </div>
+        </div>
+
+        <div className="pt-4 border-t border-slate-800 space-y-4">
+          <p className="text-[10px] uppercase tracking-[0.22em] text-slate-400 font-label-caps">One-Click Setup</p>
+          <p className="text-sm text-slate-300">
+            Run this command in your terminal to download and configure the heartbeat agent automatically.
+          </p>
+          <div className="flex items-center gap-2 bg-slate-950/50 px-3 py-3 rounded-xl border border-slate-800">
+            <code className="text-indigo-300 font-code-snippet text-xs truncate flex-1">{setupCommand}</code>
+            <button
+              onClick={() => {
+                navigator.clipboard.writeText(setupCommand);
+              }}
+              className="p-2 text-slate-400 hover:text-white transition-colors"
+            >
+              <Copy size={16} />
+            </button>
+          </div>
+          
+          <div className="flex flex-col sm:flex-row gap-3 pt-2">
+            <a
+              href="/setup_hermes_heartbeat.sh"
+              download="setup_hermes_heartbeat.sh"
+              className="inline-flex items-center justify-center gap-2 bg-primary text-on-primary px-6 py-3 rounded-2xl font-bold active:scale-95 transition-transform"
+            >
+              <Save size={18} />
+              Download Script (.sh)
+            </a>
+            <a
+              href="https://hermes-agent.nousresearch.com/"
+              target="_blank"
+              className="inline-flex items-center justify-center gap-2 border border-slate-700 bg-slate-950/50 px-6 py-3 rounded-2xl font-semibold text-white hover:bg-slate-900 transition-colors"
+            >
+              <ArrowUpRight size={18} />
+              About AgentHermes
+            </a>
+          </div>
+        </div>
+      </div>
+      
+      <div className="rounded-3xl border border-slate-800 bg-slate-950/40 p-5 space-y-3">
+        <p className="text-[10px] uppercase tracking-[0.22em] text-slate-400 font-label-caps">Prerequisites</p>
+        <ul className="space-y-2 text-sm text-slate-300">
+          <li className="flex items-start gap-2">
+            <span className="mt-1.5 w-1.5 h-1.5 rounded-full bg-indigo-500 shrink-0" />
+            <span>Node.js installed (v18+)</span>
+          </li>
+          <li className="flex items-start gap-2">
+            <span className="mt-1.5 w-1.5 h-1.5 rounded-full bg-indigo-500 shrink-0" />
+            <span>AgentHermes installed: <code className="text-indigo-300">npm install -g @nousresearch/hermes-agent</code></span>
+          </li>
+          <li className="flex items-start gap-2">
+            <span className="mt-1.5 w-1.5 h-1.5 rounded-full bg-indigo-500 shrink-0" />
+            <span>Your AGENTHOOK_TOKEN and AGENTMAIL_API_KEY ready</span>
+          </li>
+        </ul>
+      </div>
+    </motion.div>
+  );
+}
 
 export default App;

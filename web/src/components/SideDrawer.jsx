@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 export const SideDrawer = ({ activeTab, onTabChange, isOpen, onClose }) => {
     const tabs = [
         { id: 'home', label: 'Home', icon: Home },
+        { id: 'heartbeat', label: 'Heartbeat', icon: Activity },
         { id: 'storyboard', label: 'Storyboard', icon: Activity },
         { id: 'skills', label: 'Skills', icon: BrainCircuit },
         { id: 'integrations', label: 'Integrations', icon: Cable },
