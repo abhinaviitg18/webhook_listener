@@ -924,7 +924,7 @@ function LandingContent({ user, login, error, appProfile, scrollToDocs, scrollTo
               <div className="space-y-4">
                 <p className="text-[10px] uppercase tracking-[0.28em] text-indigo-400 font-label-caps">The Webhook Control Layer</p>
                 <h1 className="text-4xl md:text-5xl font-h1 text-white leading-tight">
-                  Stop paying attention to every event.
+                  For Autonomous AI Agents.
                 </h1>
                 <p className="text-base text-slate-300 max-w-xl">
                   AgentHook receives events from any app, filters out noise, classifies what matters, and forwards the right payload to the right tool.
