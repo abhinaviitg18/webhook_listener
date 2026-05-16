@@ -12,6 +12,7 @@ import (
 
 	"agenthook.store/internal/auth"
 	"agenthook.store/internal/integrations"
+	"agenthook.store/internal/security"
 	"agenthook.store/internal/service"
 	"agenthook.store/internal/store"
 )
@@ -292,6 +293,100 @@ func TestScaleKitLogoutClearsSessionCookie(t *testing.T) {
 	}
 	if !cleared {
 		t.Fatalf("expected htc_token cookie to be cleared")
+	}
+}
+
+func TestSingleTenantLoginIssuesLocalSession(t *testing.T) {
+	st := store.NewMemoryStore()
+	h := &Handler{
+		Store:                        st,
+		AppPlan:                      "enterprise",
+		AppDeploymentMode:            "single_tenant",
+		PublicBaseURL:                "https://partner.example.com",
+		MailDomain:                   "mail.partner.example.com",
+		SingleTenantOwnerEmail:       "ops@partner.example.com",
+		SingleTenantOwnerAlias:       "partner-ops",
+		SingleTenantSetupTokenSHA256: security.HashValue("setup-secret"),
+		AllowPublicRegistration:      false,
+	}
+	req := httptest.NewRequest(http.MethodPost, "/auth/single-tenant/login", strings.NewReader(`{"setup_token":"setup-secret"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+
+	h.SingleTenantLogin(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	var token string
+	for _, c := range rr.Result().Cookies() {
+		if c.Name == "htc_token" {
+			token = c.Value
+		}
+	}
+	if token == "" {
+		t.Fatalf("expected htc_token cookie")
+	}
+	acct, err := st.GetAccountByToken(context.Background(), token)
+	if err != nil {
+		t.Fatalf("token should resolve account: %v", err)
+	}
+	if acct.OwnerEmail != "ops@partner.example.com" {
+		t.Fatalf("unexpected owner email: %s", acct.OwnerEmail)
+	}
+	if acct.PublicAlias != "partner-ops" {
+		t.Fatalf("unexpected alias: %s", acct.PublicAlias)
+	}
+	var body map[string]interface{}
+	if err := json.NewDecoder(rr.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	profile := body["app_profile"].(map[string]interface{})
+	if profile["auth_mode"] != "single_tenant_setup_token" {
+		t.Fatalf("unexpected auth mode: %v", profile["auth_mode"])
+	}
+	if profile["public_base_url"] != "https://partner.example.com" {
+		t.Fatalf("unexpected public_base_url: %v", profile["public_base_url"])
+	}
+}
+
+func TestSingleTenantLoginRejectsInvalidSetupToken(t *testing.T) {
+	h := &Handler{
+		Store:                        store.NewMemoryStore(),
+		AppDeploymentMode:            "single_tenant",
+		SingleTenantOwnerEmail:       "ops@partner.example.com",
+		SingleTenantSetupTokenSHA256: security.HashValue("setup-secret"),
+	}
+	req := httptest.NewRequest(http.MethodPost, "/auth/single-tenant/login", strings.NewReader(`{"setup_token":"wrong"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+
+	h.SingleTenantLogin(rr, req)
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("expected status 401, got %d", rr.Code)
+	}
+}
+
+func TestRegisterEmailBlockedInSingleTenantByDefault(t *testing.T) {
+	h := &Handler{Store: store.NewMemoryStore(), AppDeploymentMode: "single_tenant"}
+	req := httptest.NewRequest(http.MethodPost, "/api/register/email", strings.NewReader(`{"email":"ops@example.com"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+
+	h.RegisterEmail(rr, req)
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("expected status 403, got %d", rr.Code)
+	}
+}
+
+func TestRegisterEmailStillWorksInMultitenant(t *testing.T) {
+	h := &Handler{Store: store.NewMemoryStore()}
+	req := httptest.NewRequest(http.MethodPost, "/api/register/email", strings.NewReader(`{"email":"ops@example.com"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+
+	h.RegisterEmail(rr, req)
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("expected status 201, got %d: %s", rr.Code, rr.Body.String())
 	}
 }
 

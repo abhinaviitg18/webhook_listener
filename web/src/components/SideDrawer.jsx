@@ -2,7 +2,8 @@ import React from 'react';
 import { Activity, BookOpen, BrainCircuit, Cable, Cpu, Key, KeyRound, Link as LinkIcon, ShieldCheck, X, Home } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
-export const SideDrawer = ({ activeTab, onTabChange, isOpen, onClose }) => {
+export const SideDrawer = ({ activeTab, onTabChange, isOpen, onClose, appProfile }) => {
+    const isSingleTenant = appProfile?.deployment_mode === 'single_tenant';
     const tabs = [
         { id: 'home', label: 'Home', icon: Home },
         { id: 'heartbeat', label: 'Heartbeat', icon: Activity },
@@ -15,7 +16,7 @@ export const SideDrawer = ({ activeTab, onTabChange, isOpen, onClose }) => {
         { id: 'enterprise', label: 'Enterprise', icon: ShieldCheck },
         { id: 'docs', label: 'Docs', icon: BookOpen },
         { id: 'byok', label: 'BYOK', icon: Cpu },
-    ];
+    ].filter((tab) => !(isSingleTenant && tab.id === 'enterprise'));
 
     return (
         <AnimatePresence>
@@ -76,7 +77,16 @@ export const SideDrawer = ({ activeTab, onTabChange, isOpen, onClose }) => {
                         </div>
 
                         {/* Drawer Footer */}
-                        <div className="p-6 border-t border-slate-800">
+                        <div className="p-6 border-t border-slate-800 space-y-4">
+                            <a 
+                                href="http://localhost:8787" 
+                                target="_blank" 
+                                rel="noopener noreferrer"
+                                className="flex items-center justify-center gap-2 w-full py-3 rounded-xl bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 hover:bg-indigo-500/20 transition-all text-xs font-bold font-label-caps"
+                            >
+                                <BrainCircuit size={16} />
+                                Open Hermes UI
+                            </a>
                             <p className="text-[10px] uppercase tracking-widest text-slate-500 font-label-caps text-center">
                                 AgentHook v1.0
                             </p>

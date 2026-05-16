@@ -106,3 +106,35 @@ func TestLoadLangfuseOverrides(t *testing.T) {
 		t.Fatalf("expected Langfuse keys to load from env")
 	}
 }
+
+func TestLoadSingleTenantConfig(t *testing.T) {
+	t.Setenv("APP_DEPLOYMENT_MODE", "single_tenant")
+	t.Setenv("SINGLE_TENANT_OWNER_EMAIL", "ops@example.com")
+	t.Setenv("SINGLE_TENANT_OWNER_ALIAS", "ops")
+	t.Setenv("SINGLE_TENANT_SETUP_TOKEN_SHA256", "abc123")
+	t.Setenv("ALLOW_PUBLIC_REGISTRATION", "true")
+
+	cfg := Load()
+	if cfg.AppDeploymentMode != "single_tenant" {
+		t.Fatalf("expected single_tenant mode, got %q", cfg.AppDeploymentMode)
+	}
+	if cfg.SingleTenantOwnerEmail != "ops@example.com" || cfg.SingleTenantOwnerAlias != "ops" {
+		t.Fatalf("unexpected owner config: %#v", cfg)
+	}
+	if cfg.SingleTenantSetupTokenSHA256 != "abc123" {
+		t.Fatalf("unexpected setup token hash: %q", cfg.SingleTenantSetupTokenSHA256)
+	}
+	if !cfg.AllowPublicRegistration {
+		t.Fatalf("expected public registration override")
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("expected valid single-tenant config: %v", err)
+	}
+}
+
+func TestValidateSingleTenantRequiresOwnerAndSetupToken(t *testing.T) {
+	cfg := Config{Port: "8080", AppDeploymentMode: "single_tenant", UseInMemoryStore: true}
+	if err := cfg.Validate(); err == nil {
+		t.Fatalf("expected missing single-tenant owner/setup token to fail")
+	}
+}

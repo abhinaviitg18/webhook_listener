@@ -1,4 +1,4 @@
-name: Deploy AWS Lambda
+name: Deploy AWS Lambda and Railway
 
 on:
   workflow_dispatch:
@@ -6,8 +6,39 @@ on:
     branches: [ "master" ]
 
 jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Build frontend
+        run: |
+          set -euo pipefail
+          cd web
+          npm ci
+          npm run build
+          mkdir -p ../internal/ui/dist
+          cp -r dist/* ../internal/ui/dist/
+
+      - name: Run tests
+        run: |
+          set -euo pipefail
+          go test ./cmd/... ./internal/...
+
   deploy:
     runs-on: ubuntu-latest
+    needs: test
     permissions:
       contents: read
     env:
@@ -40,3 +71,71 @@ jobs:
         run: |
           set -euo pipefail
           bash scripts/aws/lambda_deploy.sh
+
+  deploy-railway:
+    runs-on: ubuntu-latest
+    needs: test
+    permissions:
+      contents: read
+    env:
+      RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+      RAILWAY_PROJECT: ${{ vars.RAILWAY_PROJECT }}
+      RAILWAY_ENVIRONMENT: ${{ vars.RAILWAY_ENVIRONMENT }}
+      RAILWAY_SERVICE: ${{ vars.RAILWAY_SERVICE }}
+      APP_PLAN: ${{ vars.APP_PLAN }}
+      APP_DEPLOYMENT_MODE: ${{ vars.APP_DEPLOYMENT_MODE }}
+      APP_SESSION_SECRET: ${{ secrets.APP_SESSION_SECRET }}
+      AUTOPROMOTE_ENABLED: ${{ vars.AUTOPROMOTE_ENABLED }}
+      AUTOPROMOTE_MIN_CONFIDENCE: ${{ vars.AUTOPROMOTE_MIN_CONFIDENCE }}
+      AUTOPROMOTE_MIN_SUCCESS_RATE: ${{ vars.AUTOPROMOTE_MIN_SUCCESS_RATE }}
+      AUTOPROMOTE_SHADOW_TO_ACTIVE: ${{ vars.AUTOPROMOTE_SHADOW_TO_ACTIVE }}
+      AUTOPROMOTE_VALIDATED_TO_SHADOW: ${{ vars.AUTOPROMOTE_VALIDATED_TO_SHADOW }}
+      CEREBRAS_API_KEY: ${{ secrets.CEREBRAS_API_KEY }}
+      CEREBRAS_BASE_URL: ${{ vars.CEREBRAS_BASE_URL }}
+      CEREBRAS_MODEL: ${{ vars.CEREBRAS_MODEL }}
+      COMMERCE_MYSQL_DSN: ${{ secrets.COMMERCE_MYSQL_DSN }}
+      DETERMINISTIC_ONLY_TYPE_KEYS: ${{ vars.DETERMINISTIC_ONLY_TYPE_KEYS }}
+      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+      GROQ_BASE_URL: ${{ vars.GROQ_BASE_URL }}
+      GROQ_MODEL: ${{ vars.GROQ_MODEL }}
+      LANGFUSE_ENABLED: ${{ vars.LANGFUSE_ENABLED }}
+      LANGFUSE_HOST: ${{ vars.LANGFUSE_HOST }}
+      LANGFUSE_PUBLIC_KEY: ${{ secrets.LANGFUSE_PUBLIC_KEY }}
+      LANGFUSE_SECRET_KEY: ${{ secrets.LANGFUSE_SECRET_KEY }}
+      LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+      LLM_BASE_URL: ${{ vars.LLM_BASE_URL }}
+      LLM_MODEL: ${{ vars.LLM_MODEL }}
+      LLM_PROVIDER: ${{ vars.LLM_PROVIDER }}
+      MAIL_DOMAIN: ${{ vars.MAIL_DOMAIN }}
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+      OPENROUTER_BASE_URL: ${{ vars.OPENROUTER_BASE_URL }}
+      OPENROUTER_MODEL: ${{ vars.OPENROUTER_MODEL }}
+      PINECONE_API_KEY: ${{ secrets.PINECONE_API_KEY }}
+      PINECONE_ENABLED: ${{ vars.PINECONE_ENABLED }}
+      PINECONE_INDEX_URL: ${{ vars.PINECONE_INDEX_URL }}
+      PINECONE_NAMESPACE: ${{ vars.PINECONE_NAMESPACE }}
+      PUBLIC_BASE_URL: ${{ vars.PUBLIC_BASE_URL }}
+      SCALEKIT_API_KEY: ${{ secrets.SCALEKIT_API_KEY }}
+      SCALEKIT_BASE_URL: ${{ vars.SCALEKIT_BASE_URL }}
+      SCALEKIT_CLIENT_ID: ${{ secrets.SCALEKIT_CLIENT_ID }}
+      SCALEKIT_CLIENT_SECRET: ${{ secrets.SCALEKIT_CLIENT_SECRET }}
+      SCALEKIT_REDIRECT_URI: ${{ vars.SCALEKIT_REDIRECT_URI }}
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      USE_IN_MEMORY_STORE: ${{ vars.USE_IN_MEMORY_STORE }}
+      VERIFY_HTC_SIGNATURE: ${{ vars.VERIFY_HTC_SIGNATURE }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install Railway CLI
+        run: npm install -g @railway/cli@latest
+
+      - name: Deploy Railway
+        run: |
+          set -euo pipefail
+          bash scripts/railway/deploy.sh

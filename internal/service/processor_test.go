@@ -149,6 +149,26 @@ func TestProcessor_PlainTextActionWins(t *testing.T) {
 	}
 }
 
+func TestProcessor_PlainTextActionWithoutFallbackSkipsMasterPromptLLM(t *testing.T) {
+	st := store.NewMemoryStore()
+	acct, _, _ := st.CreateAccount(context.Background(), "7204909316@agentmail.to")
+	wt, _ := st.CreateWebhookType(context.Background(), acct.ID, "generic-json", "store_mysql", false)
+	sec, _, _ := st.CreateSecret(context.Background(), acct.ID, wt.ID)
+	_, _ = st.UpsertMasterPromptPolicy(context.Background(), acct.ID, "Summarize all inbound webhooks", "qa")
+	llm := &countingLLM{action: "forward_http"}
+	p := &Processor{Store: st, Pinecone: fakePinecone{}, LLM: llm, Executor: &fakeExec{}}
+	_, d, err := p.ProcessWebhook(context.Background(), acct, wt, sec, "r-plain-no-fallback", `{"message":"x"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if llm.called != 0 {
+		t.Fatalf("expected deterministic listener to skip llm, got %d calls", llm.called)
+	}
+	if d.ActionName != "store_mysql" {
+		t.Fatalf("expected store_mysql action, got %s", d.ActionName)
+	}
+}
+
 func TestProcessor_LLMFallback(t *testing.T) {
 	st := store.NewMemoryStore()
 	acct, _, _ := st.CreateAccount(context.Background(), "7204909316@agentmail.to")

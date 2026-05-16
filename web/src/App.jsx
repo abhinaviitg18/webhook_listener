@@ -53,6 +53,9 @@ const INTEGRATION_AUTH_TYPES = ['none', 'bearer_header', 'custom_header', 'query
 const DEFAULT_APP_PROFILE = {
   plan: 'basic',
   deployment_mode: 'multitenant',
+  auth_mode: 'scalekit',
+  public_base_url: 'https://app.agenthook.store',
+  mail_domain: 'app.agenthook.store',
   docs_path: '/app?tab=docs',
   home_docs_anchor: '/#docs',
 };
@@ -391,14 +394,22 @@ function inferTypeKey(listener) {
   return listener.type_key || '';
 }
 
-function listenerIngressTemplate(listener, publicAlias) {
-  if (!listener) return `https://app.agenthook.store/${publicAlias}.[secret]`;
-  return listener.webhook_url_template || `https://app.agenthook.store/${publicAlias}.[secret]`;
+function appBaseURL(appProfile) {
+  return (appProfile?.public_base_url || 'https://app.agenthook.store').replace(/\/+$/, '');
 }
 
-function listenerWebhookIDTemplate(listener, publicAlias) {
-  if (!listener) return `${publicAlias}.[secret]@app.agenthook.store`;
-  return listener.webhook_id_template || `${publicAlias}.[secret]@app.agenthook.store`;
+function appMailDomain(appProfile) {
+  return appProfile?.mail_domain || 'app.agenthook.store';
+}
+
+function listenerIngressTemplate(listener, publicAlias, baseURL = 'https://app.agenthook.store') {
+  if (!listener) return `${baseURL}/${publicAlias}.[secret]`;
+  return listener.webhook_url_template || `${baseURL}/${publicAlias}.[secret]`;
+}
+
+function listenerWebhookIDTemplate(listener, publicAlias, mailDomain = 'app.agenthook.store') {
+  if (!listener) return `${publicAlias}.[secret]@${mailDomain}`;
+  return listener.webhook_id_template || `${publicAlias}.[secret]@${mailDomain}`;
 }
 
 function Panel({ title, subtitle, action, children }) {
@@ -694,12 +705,18 @@ function normalizeAppProfile(profile) {
     ...(profile || {}),
     plan: profile?.plan === 'enterprise' ? 'enterprise' : 'basic',
     deployment_mode: profile?.deployment_mode === 'single_tenant' ? 'single_tenant' : 'multitenant',
+    auth_mode: profile?.auth_mode || (profile?.deployment_mode === 'single_tenant' ? 'single_tenant_setup_token' : 'scalekit'),
+    public_base_url: (profile?.public_base_url || DEFAULT_APP_PROFILE.public_base_url).replace(/\/+$/, ''),
+    mail_domain: profile?.mail_domain || DEFAULT_APP_PROFILE.mail_domain,
   };
 }
 
 function DocsContent({ appProfile, login, inApp = false, onOpenEnterprise }) {
   const planLabel = appProfile.plan === 'enterprise' ? 'Enterprise' : 'Basic';
   const deploymentLabel = appProfile.deployment_mode === 'single_tenant' ? 'Single-tenant' : 'Multitenant';
+  const publicBaseURL = appBaseURL(appProfile);
+  const mailDomain = appMailDomain(appProfile);
+  const isSingleTenant = appProfile.deployment_mode === 'single_tenant';
 
   return (
     <div className="space-y-6">
@@ -715,12 +732,12 @@ function DocsContent({ appProfile, login, inApp = false, onOpenEnterprise }) {
           </div>
         </div>
         <p className="text-sm text-slate-300">
-          This deployment runs the current product in the <span className="text-white font-semibold">Basic</span> plan and
-          uses <span className="text-white font-semibold">multitenant</span> routing. Enterprise-only behavior and
-          single-tenant deployment decisions are controlled by environment variables at deploy time, not by per-listener UI choices here.
+          This deployment runs the current product in the <span className="text-white font-semibold">{planLabel}</span> plan and
+          uses <span className="text-white font-semibold">{deploymentLabel}</span> routing. Deployment behavior is controlled
+          by environment variables at deploy time, not by per-listener UI choices here.
         </p>
         <p className="text-sm text-slate-300">
-          You can also deploy the full architecture on your own AWS account or any cloud you prefer, bind it to the domain you want,
+          You can also deploy the full architecture on your own AWS account, Railway project, or any cloud you prefer, bind it to the domain you want,
           and run it comfortably as your own stack. That deployment path is intended as a <span className="text-white font-semibold">one-time setup plan</span>,
           not a recurring platform charge.
         </p>
@@ -735,7 +752,9 @@ function DocsContent({ appProfile, login, inApp = false, onOpenEnterprise }) {
           <pre className="overflow-auto rounded-2xl border border-slate-800 bg-slate-950 p-4 text-[12px] text-slate-200 font-code-snippet whitespace-pre-wrap">{`AGENTHOOK_DEPLOYMENT
 - plan: ${appProfile.plan}
 - deployment_mode: ${appProfile.deployment_mode}
-- public_base_url: https://app.agenthook.store
+- public_base_url: ${publicBaseURL}
+- mail_domain: ${mailDomain}
+- auth_mode: ${appProfile.auth_mode}
 
 INGRESS_MODES
 1. HTTP webhook
@@ -743,7 +762,7 @@ INGRESS_MODES
    body: JSON payload
 
 2. Email ingress
-   {public_alias}.{secret}@app.agenthook.store
+   {public_alias}.{secret}@${mailDomain}
    path: SES -> S3 -> mail ingress Lambda -> AgentHook event
 
 PRIMARY OBJECTS
@@ -764,7 +783,7 @@ BASIC PLAN CAPABILITIES
 CURRENT DEPLOYMENT RULES
 - deployment mode is fixed by env for this deployment
 - current mode: ${appProfile.deployment_mode}
-- current UI should be treated as multitenant only
+- current UI follows deployment mode from /api/app-profile
 - enterprise behavior is enabled only when APP_PLAN=enterprise
 
 OPERATOR API BASICS
@@ -795,8 +814,8 @@ payload -> preprocess -> deterministic routing -> optional LLM routing -> select
               recurring software fee.
             </p>
             <div className="space-y-2 text-sm text-slate-300">
-              <p><span className="text-white font-semibold">Webhook magic:</span> every active secret gives you a short URL like <code className="text-indigo-300">https://app.agenthook.store/abhinaviitg18.demo</code>.</p>
-              <p><span className="text-white font-semibold">Email magic:</span> the same identity also works as <code className="text-indigo-300">abhinaviitg18.demo@app.agenthook.store</code>.</p>
+              <p><span className="text-white font-semibold">Webhook magic:</span> every active secret gives you a short URL like <code className="text-indigo-300">{publicBaseURL}/abhinaviitg18.demo</code>.</p>
+              <p><span className="text-white font-semibold">Email magic:</span> the same identity also works as <code className="text-indigo-300">abhinaviitg18.demo@{mailDomain}</code>.</p>
               <p><span className="text-white font-semibold">In-app magic:</span> Storyboard shows raw or processed content, Skills decide routing, Integrations control side effects, and Reclassify lets you replay past events after improving rules.</p>
             </div>
           </div>
@@ -892,7 +911,7 @@ payload -> preprocess -> deterministic routing -> optional LLM routing -> select
                 Open the public docs section
               </a>
             )}
-            {onOpenEnterprise && (
+            {!isSingleTenant && onOpenEnterprise && (
               <button
                 type="button"
                 onClick={onOpenEnterprise}
@@ -909,9 +928,70 @@ payload -> preprocess -> deterministic routing -> optional LLM routing -> select
   );
 }
 
+function SingleTenantLogin({ login, error, appProfile }) {
+  const [setupToken, setSetupToken] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [localError, setLocalError] = useState('');
+
+  const submit = async (event) => {
+    event.preventDefault();
+    setBusy(true);
+    setLocalError('');
+    try {
+      await login(setupToken);
+      setSetupToken('');
+    } catch (err) {
+      setLocalError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="max-w-xl mx-auto pt-12">
+      <form onSubmit={submit} className="rounded-3xl border border-slate-800 bg-slate-950/50 p-6 space-y-5">
+        <div className="space-y-2">
+          <p className="text-[10px] uppercase tracking-[0.22em] text-emerald-400 font-label-caps">Single-tenant deployment</p>
+          <h1 className="text-3xl font-h1 text-white">Unlock AgentHook</h1>
+          <p className="text-sm text-slate-300">
+            Enter the setup token configured for this Railway service to open the private operator console.
+          </p>
+        </div>
+        <div className="rounded-2xl border border-slate-800 bg-slate-900/50 px-3 py-2 text-xs text-slate-400">
+          Public base URL: <code className="text-indigo-300 break-all">{appBaseURL(appProfile)}</code>
+        </div>
+        {(error || localError) && <InlineNotice tone="error">{localError || error}</InlineNotice>}
+        <FormField label="Setup Token">
+          <TextInput
+            type="password"
+            value={setupToken}
+            onChange={(e) => setSetupToken(e.target.value)}
+            placeholder="Enter setup token"
+            autoComplete="current-password"
+            autoFocus
+          />
+        </FormField>
+        <button
+          type="submit"
+          disabled={busy || !setupToken.trim()}
+          className="w-full inline-flex items-center justify-center gap-2 bg-primary text-on-primary px-5 py-3 rounded-2xl font-bold active:scale-95 transition-transform disabled:opacity-50"
+        >
+          <LogIn size={18} />
+          {busy ? 'UNLOCKING...' : 'UNLOCK CONSOLE'}
+        </button>
+      </form>
+    </div>
+  );
+}
+
 function LandingContent({ user, login, error, appProfile, scrollToDocs, scrollToEnterprise, copied, setCopied }) {
+  const isSingleTenant = appProfile?.deployment_mode === 'single_tenant';
   if (user) {
-    return <HomeDashboard user={user} copied={copied} setCopied={setCopied} />;
+    return <HomeDashboard user={user} copied={copied} setCopied={setCopied} appProfile={appProfile} />;
+  }
+
+  if (isSingleTenant) {
+    return <SingleTenantLogin login={login} error={error} appProfile={appProfile} />;
   }
 
   return (
@@ -978,7 +1058,7 @@ function LandingContent({ user, login, error, appProfile, scrollToDocs, scrollTo
   );
 }
 
-function HomeDashboard({ user, copied, setCopied }) {
+function HomeDashboard({ user, copied, setCopied, appProfile }) {
   const [apiToken, setApiToken] = useState('');
   const [tokenBusy, setTokenBusy] = useState(false);
   const [apiTokensList, setApiTokensList] = useState([]);
@@ -1061,7 +1141,7 @@ function HomeDashboard({ user, copied, setCopied }) {
           <div className="flex items-center justify-between px-1">
             <h3 className="text-white font-semibold">2. Setup Heartbeat</h3>
           </div>
-          <HeartbeatTab />
+          <HeartbeatTab appProfile={appProfile} />
         </div>
       </div>
     </div>
@@ -1069,10 +1149,9 @@ function HomeDashboard({ user, copied, setCopied }) {
 }
 
 function App() {
-  const { user, setUser, isAuthenticated, loading, error, login, logout } = useAuth();
+  const { user, setUser, isAuthenticated, loading, error, login, logout, appProfile } = useAuth();
   const tabParam = new URLSearchParams(window.location.search).get('tab');
   const [activeTab, setActiveTab] = useState(VALID_TABS.has(tabParam) ? tabParam : (user ? 'storyboard' : 'home'));
-  const [appProfile, setAppProfile] = useState(DEFAULT_APP_PROFILE);
   const [copied, setCopied] = useState('');
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [events, setEvents] = useState([]);
@@ -1083,9 +1162,11 @@ function App() {
 
   const publicAlias = user?.public_alias || user?.slug || '[userkey]';
   const effectiveAppProfile = normalizeAppProfile(user?.app_profile || appProfile);
+  const isSingleTenant = effectiveAppProfile.deployment_mode === 'single_tenant';
+  const publicBaseURL = appBaseURL(effectiveAppProfile);
   const ingressTemplate = listeners.length > 0
-    ? listenerIngressTemplate(listeners[0], publicAlias)
-    : `https://app.agenthook.store/${publicAlias}.[secret]`;
+    ? listenerIngressTemplate(listeners[0], publicAlias, publicBaseURL)
+    : `${publicBaseURL}/${publicAlias}.[secret]`;
 
   const fetchListeners = async () => {
     const data = await apiRequest('/v1/listeners');
@@ -1106,18 +1187,18 @@ function App() {
   };
 
   useEffect(() => {
-    apiRequest('/api/app-profile')
-      .then((data) => setAppProfile(normalizeAppProfile(data)))
-      .catch((err) => console.error('Failed to fetch app profile', err));
-  }, []);
-
-  useEffect(() => {
     if (!isAuthenticated) return;
     fetchListeners().catch((err) => console.error('Failed to fetch listeners', err));
     if (activeTab === 'storyboard') {
       fetchEvents(activeTag).catch((err) => console.error('Failed to fetch events', err));
     }
   }, [isAuthenticated, activeTab, activeTag]);
+
+  useEffect(() => {
+    if (isSingleTenant && activeTab === 'enterprise') {
+      setActiveTab('home');
+    }
+  }, [isSingleTenant, activeTab]);
 
   const refreshAll = async () => {
     await Promise.allSettled([fetchListeners(), fetchEvents(activeTag)]);
@@ -1172,13 +1253,14 @@ function App() {
 
   return (
     <div className="min-h-screen bg-surface text-on-surface">
-      <EnterpriseBanner onClick={openEnterprise} />
-      <TopAppBar user={user} onLogout={logout} onMenuClick={() => setIsDrawerOpen(true)} />
+      {!isSingleTenant && <EnterpriseBanner onClick={openEnterprise} />}
+      <TopAppBar user={user} onLogout={logout} onMenuClick={() => setIsDrawerOpen(true)} appProfile={effectiveAppProfile} onLogin={login} />
       <SideDrawer 
         isOpen={isDrawerOpen} 
         onClose={() => setIsDrawerOpen(false)} 
         activeTab={activeTab} 
         onTabChange={setActiveTab} 
+        appProfile={effectiveAppProfile}
       />
 
       <main className={`pt-6 px-4 ${activeTab === 'home' ? 'max-w-6xl' : 'max-w-md'} mx-auto pb-12`}>
@@ -1204,7 +1286,7 @@ function App() {
           )}
 
           {activeTab === 'heartbeat' && (
-            <HeartbeatTab />
+            <HeartbeatTab appProfile={effectiveAppProfile} />
           )}
 
           {activeTab === 'storyboard' && (
@@ -1351,7 +1433,7 @@ function App() {
             </motion.div>
           )}
 
-          {activeTab === 'enterprise' && (
+          {!isSingleTenant && activeTab === 'enterprise' && (
             <motion.div
               key="enterprise"
               initial={{ opacity: 0, x: -20 }}
@@ -2335,6 +2417,8 @@ const UrlsTab = ({ listeners, user, appProfile, setUser, onRefresh, copied, setC
 
   const accountSlug = user?.slug || '[account]';
   const publicAlias = user?.public_alias || user?.slug || '[userkey]';
+  const publicBaseURL = appBaseURL(appProfile);
+  const mailDomain = appMailDomain(appProfile);
 
   useEffect(() => {
     setPublicAliasDraft(user?.public_alias || user?.slug || '');
@@ -2505,8 +2589,8 @@ const UrlsTab = ({ listeners, user, appProfile, setUser, onRefresh, copied, setC
             />
           </FormField>
           <div className="rounded-xl border border-slate-800 bg-slate-950/50 px-3 py-2 text-xs text-slate-300">
-            <div>Canonical URL: <code className="text-indigo-300 break-all">https://app.agenthook.store/{publicAlias}.[secret]</code></div>
-            <div className="mt-1">Inbox address: <code className="text-slate-200 break-all">{publicAlias}.[secret]@app.agenthook.store</code></div>
+            <div>Canonical URL: <code className="text-indigo-300 break-all">{publicBaseURL}/{publicAlias}.[secret]</code></div>
+            <div className="mt-1">Inbox address: <code className="text-slate-200 break-all">{publicAlias}.[secret]@{mailDomain}</code></div>
             <div className="mt-1 text-slate-500">Changing your userkey changes the canonical inbox address for future secrets too.</div>
           </div>
           {aliasNotice && <InlineNotice tone="success">{aliasNotice}</InlineNotice>}
@@ -2523,7 +2607,7 @@ const UrlsTab = ({ listeners, user, appProfile, setUser, onRefresh, copied, setC
 
       <Panel
         title="Create Listener"
-        subtitle="Provision a new ingress scenario directly from the UI, then bind it to a generated or custom secret. This deployment keeps listener mode env-backed and multitenant."
+        subtitle="Provision a new ingress scenario directly from the UI, then bind it to a generated or custom secret. Listener deployment mode is controlled by this service's environment."
         action={<Link2 size={18} className="text-primary" />}
       >
         <div className="grid grid-cols-1 gap-3">
@@ -2626,8 +2710,8 @@ const UrlsTab = ({ listeners, user, appProfile, setUser, onRefresh, copied, setC
             const createdSecret = secretMap[key];
             const history = secretsHistory[key] || [];
             const latestBackendSecret = history[0];
-            const mintedURL = createdSecret?.webhook_url || latestBackendSecret?.webhook_url || listenerIngressTemplate(listener, publicAlias);
-            const mintedWebhookID = createdSecret?.webhook_id || latestBackendSecret?.webhook_id || listenerWebhookIDTemplate(listener, publicAlias);
+            const mintedURL = createdSecret?.webhook_url || latestBackendSecret?.webhook_url || listenerIngressTemplate(listener, publicAlias, publicBaseURL);
+            const mintedWebhookID = createdSecret?.webhook_id || latestBackendSecret?.webhook_id || listenerWebhookIDTemplate(listener, publicAlias, mailDomain);
             const draft = secretComposer[key] || { mode: 'auto', secret_value: '' };
 
             return (
@@ -2696,7 +2780,7 @@ const UrlsTab = ({ listeners, user, appProfile, setUser, onRefresh, copied, setC
                     <div className="mt-2 space-y-2 text-[11px]">
                       <div>
                         <div className="text-slate-500 mb-1">Provider-aware ingest URL</div>
-                        <code className="text-slate-300 break-all">{createdSecret?.ingest_webhook_url || latestBackendSecret?.ingest_webhook_url || listener.ingest_webhook_url_template || `https://app.agenthook.store/ingest/${accountSlug}/${listener.provider}/${listener.listener_id}/[secret]`}</code>
+                        <code className="text-slate-300 break-all">{createdSecret?.ingest_webhook_url || latestBackendSecret?.ingest_webhook_url || listener.ingest_webhook_url_template || `${publicBaseURL}/ingest/${accountSlug}/${listener.provider}/${listener.listener_id}/[secret]`}</code>
                       </div>
                       <div>
                         <div className="text-slate-500 mb-1">Legacy type-key URL</div>
@@ -3694,8 +3778,8 @@ const StatusBadge = ({ status }) => {
   );
 };
 
-function HeartbeatTab() {
-  const setupCommand = `curl -sSL https://app.agenthook.store/setup_hermes_heartbeat.sh | bash`;
+function HeartbeatTab({ appProfile = DEFAULT_APP_PROFILE }) {
+  const setupCommand = `curl -sSL ${appBaseURL(appProfile)}/setup_hermes_heartbeat.sh | bash`;
   
   return (
     <motion.div

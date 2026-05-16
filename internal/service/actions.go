@@ -580,6 +580,7 @@ func (p *Processor) processWithPolicy(ctx context.Context, account domain.Accoun
 		decision.ActionName = "no_action"
 		decision.Reason = "deterministic spam gate"
 	}
+	explicitPlainTextAction := strings.TrimSpace(whType.PlainTextAction)
 	if matched && strings.TrimSpace(skill.ForcedAction) != "" {
 		decision.ActionName = strings.TrimSpace(skill.ForcedAction)
 		decision.Reason = "skill:" + skill.SkillKey
@@ -588,8 +589,8 @@ func (p *Processor) processWithPolicy(ctx context.Context, account domain.Accoun
 			"memory_write_mode":  normalizeMemoryMode(skill.MemoryWriteMode),
 			"skill_match_tokens": skill.MatchContains,
 		}
-	} else if strings.TrimSpace(whType.PlainTextAction) != "" {
-		decision.ActionName = strings.TrimSpace(whType.PlainTextAction)
+	} else if explicitPlainTextAction != "" {
+		decision.ActionName = explicitPlainTextAction
 		decision.Reason = "type plain text action"
 	}
 	if route.CandidateAction != "" && decision.ActionName == "store_mysql" {
@@ -600,10 +601,12 @@ func (p *Processor) processWithPolicy(ctx context.Context, account domain.Accoun
 
 	activePolicy := policyCtx
 	activePolicy.Skills = selectedSkills
-	needsLLM := (whType.UseLLMFallback && decision.ActionName == "store_mysql") ||
+	hasSkillPrompt := matched && strings.TrimSpace(skill.SkillPrompt) != ""
+	hasLockedPlainTextAction := explicitPlainTextAction != "" && !whType.UseLLMFallback && !hasSkillPrompt
+	needsLLM := !hasLockedPlainTextAction && ((whType.UseLLMFallback && decision.ActionName == "store_mysql") ||
 		activePolicy.MasterPrompt != "" ||
-		(matched && skill.SkillPrompt != "") ||
-		(route.CandidateAction != "" && !(matched && strings.TrimSpace(skill.ForcedAction) != ""))
+		hasSkillPrompt ||
+		(route.CandidateAction != "" && !(matched && strings.TrimSpace(skill.ForcedAction) != "")))
 	log.Printf("reprocess.llm_decision event_id=%s type_key=%s needs_llm=%t deterministic_only=%t use_llm_fallback=%t matched_skill_prompt=%t master_prompt=%t initial_action=%s", event.ID, whType.TypeKey, needsLLM, p.IsDeterministicOnlyType(whType.TypeKey), whType.UseLLMFallback, matched && strings.TrimSpace(skill.SkillPrompt) != "", policyCtx.MasterPrompt != "", decision.ActionName)
 	var llmTrace observability.LLMDecisionTrace
 	if needsLLM && !p.IsDeterministicOnlyType(whType.TypeKey) {

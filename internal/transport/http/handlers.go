@@ -23,23 +23,28 @@ import (
 
 	"agenthook.store/internal/auth"
 	"agenthook.store/internal/domain"
+	"agenthook.store/internal/security"
 	"agenthook.store/internal/service"
 	"agenthook.store/internal/ui"
 )
 
 type Handler struct {
-	Store                domain.Store
-	Processor            *service.Processor
-	VerifyHTCSignature   bool
-	AppPlan              string
-	AppDeploymentMode    string
-	MailDomain           string
-	ScaleKitBaseURL      string
-	ScaleKitClientID     string
-	ScaleKitClientSecret string
-	ScaleKitRedirectURI  string
-	AppSessionSecret     string
-	PublicBaseURL        string
+	Store                        domain.Store
+	Processor                    *service.Processor
+	VerifyHTCSignature           bool
+	AppPlan                      string
+	AppDeploymentMode            string
+	MailDomain                   string
+	ScaleKitBaseURL              string
+	ScaleKitClientID             string
+	ScaleKitClientSecret         string
+	ScaleKitRedirectURI          string
+	AppSessionSecret             string
+	PublicBaseURL                string
+	SingleTenantOwnerEmail       string
+	SingleTenantOwnerAlias       string
+	SingleTenantSetupTokenSHA256 string
+	AllowPublicRegistration      bool
 }
 
 func NewRouter(h *Handler, verifier auth.RequestVerifier) http.Handler {
@@ -55,6 +60,7 @@ func NewRouter(h *Handler, verifier auth.RequestVerifier) http.Handler {
 	r.Get("/auth/scalekit/login", h.ScaleKitLoginRedirect)
 	r.Get("/auth/scalekit/signup", h.ScaleKitSignupRedirect)
 	r.Get("/auth/scalekit/callback", h.ScaleKitCallback)
+	r.Post("/auth/single-tenant/login", h.SingleTenantLogin)
 	r.Get("/auth/logout", h.ScaleKitLogout)
 
 	r.Group(func(ar chi.Router) {
@@ -121,6 +127,10 @@ func NewRouter(h *Handler, verifier auth.RequestVerifier) http.Handler {
 }
 
 func (h *Handler) RegisterEmail(w http.ResponseWriter, r *http.Request) {
+	if h.isSingleTenantMode() && !h.AllowPublicRegistration {
+		writeErr(w, http.StatusForbidden, "public registration is disabled for this deployment")
+		return
+	}
 	var body struct {
 		Email string `json:"email"`
 	}
@@ -273,9 +283,72 @@ func (h *Handler) appProfilePayload() map[string]any {
 	return map[string]any{
 		"plan":             plan,
 		"deployment_mode":  deploymentMode,
+		"auth_mode":        h.authMode(),
+		"public_base_url":  h.publicBaseURL(),
+		"mail_domain":      h.mailDomain(),
 		"docs_path":        "/app?tab=docs",
 		"home_docs_anchor": "/#docs",
 	}
+}
+
+func (h *Handler) authMode() string {
+	if h.isSingleTenantMode() {
+		return "single_tenant_setup_token"
+	}
+	return "scalekit"
+}
+
+func (h *Handler) isSingleTenantMode() bool {
+	return strings.TrimSpace(strings.ToLower(h.AppDeploymentMode)) == "single_tenant"
+}
+
+func (h *Handler) mailDomain() string {
+	if v := strings.TrimSpace(strings.ToLower(h.MailDomain)); v != "" {
+		return v
+	}
+	return "app.agenthook.store"
+}
+
+func (h *Handler) SingleTenantLogin(w http.ResponseWriter, r *http.Request) {
+	if !h.isSingleTenantMode() {
+		writeErr(w, http.StatusNotFound, "single-tenant login is not enabled")
+		return
+	}
+	var body struct {
+		SetupToken string `json:"setup_token"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid json")
+		return
+	}
+	expectedHash := strings.TrimSpace(strings.ToLower(h.SingleTenantSetupTokenSHA256))
+	if expectedHash == "" || !hmac.Equal([]byte(security.HashValue(strings.TrimSpace(body.SetupToken))), []byte(expectedHash)) {
+		writeErr(w, http.StatusUnauthorized, "invalid setup token")
+		return
+	}
+	ownerEmail := strings.TrimSpace(strings.ToLower(h.SingleTenantOwnerEmail))
+	if ownerEmail == "" || !strings.Contains(ownerEmail, "@") {
+		writeErr(w, http.StatusInternalServerError, "single-tenant owner email is not configured")
+		return
+	}
+	acct, token, err := h.Store.CreateAccount(r.Context(), ownerEmail)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if alias := normalizePublicAlias(h.SingleTenantOwnerAlias); alias != "" && acct.PublicAlias != alias {
+		updated, err := h.Store.UpdateAccountPublicAlias(r.Context(), acct.ID, alias)
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		acct = updated
+	}
+	h.writeSessionCookie(w, token, 3600*24*30)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"account":     acct,
+		"app_profile": h.appProfilePayload(),
+	})
 }
 
 func (h *Handler) UpdateAccountProfile(w http.ResponseWriter, r *http.Request) {
@@ -497,8 +570,8 @@ func canonicalWebhookURL(baseURL, publicAlias, secret string) string {
 	return strings.TrimRight(baseURL, "/") + "/" + publicAlias + "." + secret
 }
 
-func canonicalWebhookID(publicAlias, secret string) string {
-	return publicAlias + "." + secret + "@app.agenthook.store"
+func canonicalWebhookID(publicAlias, secret, mailDomain string) string {
+	return publicAlias + "." + secret + "@" + mailDomain
 }
 
 func ingestWebhookURL(baseURL, accountSlug, provider, listenerID, secret string) string {
@@ -513,8 +586,8 @@ func canonicalWebhookTemplate(baseURL, publicAlias string) string {
 	return strings.TrimRight(baseURL, "/") + "/" + publicAlias + ".[secret]"
 }
 
-func canonicalWebhookIDTemplate(publicAlias string) string {
-	return publicAlias + ".[secret]@app.agenthook.store"
+func canonicalWebhookIDTemplate(publicAlias, mailDomain string) string {
+	return publicAlias + ".[secret]@" + mailDomain
 }
 
 func ingestWebhookTemplate(baseURL, accountSlug, provider, listenerID string) string {
@@ -1470,6 +1543,7 @@ func (h *Handler) CreateListener(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	baseUrl := h.publicBaseURL()
+	mailDomain := h.mailDomain()
 	writeJSON(w, http.StatusCreated, map[string]any{
 		"listener_id":        listenerID,
 		"provider":           provider,
@@ -1478,7 +1552,7 @@ func (h *Handler) CreateListener(w http.ResponseWriter, r *http.Request) {
 		"secret_id":          secret.ID,
 		"secret_value":       raw,
 		"webhook_url":        canonicalWebhookURL(baseUrl, acct.PublicAlias, raw),
-		"webhook_id":         canonicalWebhookID(acct.PublicAlias, raw),
+		"webhook_id":         canonicalWebhookID(acct.PublicAlias, raw, mailDomain),
 		"ingest_webhook_url": ingestWebhookURL(baseUrl, acct.Slug, provider, listenerID, raw),
 		"legacy_webhook_url": legacyWebhookURL(baseUrl, acct.Slug, whType.TypeKey, raw),
 		"legacy_webhook":     legacyWebhookURL(baseUrl, acct.Slug, whType.TypeKey, raw),
@@ -1504,6 +1578,7 @@ func (h *Handler) ListListeners(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		baseUrl := h.publicBaseURL()
+		mailDomain := h.mailDomain()
 		resp = append(resp, map[string]any{
 			"listener_id":                 ref.ListenerID,
 			"provider":                    ref.Provider,
@@ -1514,7 +1589,7 @@ func (h *Handler) ListListeners(w http.ResponseWriter, r *http.Request) {
 			"created_at":                  item.CreatedAt,
 			"public_alias":                acct.PublicAlias,
 			"webhook_url_template":        canonicalWebhookTemplate(baseUrl, acct.PublicAlias),
-			"webhook_id_template":         canonicalWebhookIDTemplate(acct.PublicAlias),
+			"webhook_id_template":         canonicalWebhookIDTemplate(acct.PublicAlias, mailDomain),
 			"ingest_webhook_url_template": ingestWebhookTemplate(baseUrl, acct.Slug, ref.Provider, ref.ListenerID),
 			"legacy_webhook_url":          legacyWebhookURL(baseUrl, acct.Slug, item.TypeKey, "[secret]"),
 			"listener_display_name":       ref.Provider + " · " + ref.ListenerID,
@@ -1576,11 +1651,12 @@ func (h *Handler) CreateListenerSecret(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	baseUrl := h.publicBaseURL()
+	mailDomain := h.mailDomain()
 	writeJSON(w, http.StatusCreated, map[string]any{
 		"secret_id":          secret.ID,
 		"secret_value":       raw,
 		"webhook_url":        canonicalWebhookURL(baseUrl, acct.PublicAlias, raw),
-		"webhook_id":         canonicalWebhookID(acct.PublicAlias, raw),
+		"webhook_id":         canonicalWebhookID(acct.PublicAlias, raw, mailDomain),
 		"ingest_webhook_url": ingestWebhookURL(baseUrl, acct.Slug, provider, listenerID, raw),
 		"legacy_webhook_url": legacyWebhookURL(baseUrl, acct.Slug, whType.TypeKey, raw),
 		"listener_id":        listenerID,
@@ -1612,6 +1688,7 @@ func (h *Handler) ListListenerSecrets(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	baseUrl := h.publicBaseURL()
+	mailDomain := h.mailDomain()
 	resp := make([]map[string]any, 0, len(secrets))
 	for _, sec := range secrets {
 		resp = append(resp, map[string]any{
@@ -1620,7 +1697,7 @@ func (h *Handler) ListListenerSecrets(w http.ResponseWriter, r *http.Request) {
 			"created_at":         sec.CreatedAt,
 			"secret_value":       sec.SecretValue,
 			"webhook_url":        canonicalWebhookURL(baseUrl, acct.PublicAlias, sec.SecretValue),
-			"webhook_id":         canonicalWebhookID(acct.PublicAlias, sec.SecretValue),
+			"webhook_id":         canonicalWebhookID(acct.PublicAlias, sec.SecretValue, mailDomain),
 			"ingest_webhook_url": ingestWebhookURL(baseUrl, acct.Slug, provider, listenerID, sec.SecretValue),
 			"legacy_webhook_url": legacyWebhookURL(baseUrl, acct.Slug, whType.TypeKey, sec.SecretValue),
 		})

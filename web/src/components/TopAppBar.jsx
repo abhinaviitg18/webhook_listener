@@ -1,7 +1,8 @@
 import React from 'react';
 import { LogOut, LogIn, Menu, Zap } from 'lucide-react';
 
-export const TopAppBar = ({ user, onLogout, onMenuClick }) => {
+export const TopAppBar = ({ user, onLogout, onMenuClick, appProfile, onLogin }) => {
+  const isSingleTenant = appProfile?.deployment_mode === 'single_tenant';
   return (
     <header className="sticky top-0 w-full z-50 flex items-center justify-between px-4 h-16 bg-slate-950/80 backdrop-blur-lg border-b border-slate-800">
       <div className="flex items-center gap-3">
@@ -33,9 +34,13 @@ export const TopAppBar = ({ user, onLogout, onMenuClick }) => {
               {(user?.owner_email || 'A').slice(0, 1).toUpperCase()}
             </div>
           </>
+        ) : isSingleTenant ? (
+          <span className="rounded-full border border-slate-700 bg-slate-900/80 px-3 py-1 text-[10px] uppercase tracking-[0.18em] text-slate-400">
+            Single tenant
+          </span>
         ) : (
           <button
-            onClick={() => window.location.href = '/auth/scalekit/login'}
+            onClick={onLogin}
             className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-xl font-medium transition-all active:scale-95 shadow-lg shadow-indigo-500/20"
           >
             <LogIn size={18} />

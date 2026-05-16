@@ -20,6 +20,11 @@ type Config struct {
 	AppSessionSecret     string
 	PublicBaseURL        string
 
+	SingleTenantOwnerEmail       string
+	SingleTenantOwnerAlias       string
+	SingleTenantSetupTokenSHA256 string
+	AllowPublicRegistration      bool
+
 	TiDBDSN string
 
 	PineconeEnabled   bool
@@ -110,6 +115,11 @@ func Load() Config {
 		ScaleKitRedirectURI:  getenv("SCALEKIT_REDIRECT_URI", ""),
 		AppSessionSecret:     getenv("APP_SESSION_SECRET", getenv("SCALEKIT_CLIENT_SECRET", "")),
 		PublicBaseURL:        getenv("PUBLIC_BASE_URL", "https://app.agenthook.store"),
+
+		SingleTenantOwnerEmail:       getenv("SINGLE_TENANT_OWNER_EMAIL", ""),
+		SingleTenantOwnerAlias:       getenv("SINGLE_TENANT_OWNER_ALIAS", ""),
+		SingleTenantSetupTokenSHA256: getenv("SINGLE_TENANT_SETUP_TOKEN_SHA256", ""),
+		AllowPublicRegistration:      getbool("ALLOW_PUBLIC_REGISTRATION", false),
 
 		TiDBDSN: storeDSN,
 
@@ -223,6 +233,14 @@ func (c Config) Validate() error {
 	}
 	if !c.UseInMemoryStore && strings.TrimSpace(c.TiDBDSN) == "" {
 		return fmt.Errorf("TIDB_DSN is required when USE_IN_MEMORY_STORE=false")
+	}
+	if c.AppDeploymentMode == "single_tenant" {
+		if strings.TrimSpace(c.SingleTenantOwnerEmail) == "" {
+			return fmt.Errorf("SINGLE_TENANT_OWNER_EMAIL is required when APP_DEPLOYMENT_MODE=single_tenant")
+		}
+		if strings.TrimSpace(c.SingleTenantSetupTokenSHA256) == "" {
+			return fmt.Errorf("SINGLE_TENANT_SETUP_TOKEN_SHA256 is required when APP_DEPLOYMENT_MODE=single_tenant")
+		}
 	}
 	return nil
 }
