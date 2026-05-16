@@ -4,6 +4,15 @@ This mode runs AgentHook as a private operator console for one partner-owned Rai
 
 ## Required Railway Variables
 
+The production template should include a Railway MySQL service named `MySQL` and set:
+
+```env
+COMMERCE_MYSQL_DSN=${{ MySQL.MYSQL_URL }}
+USE_IN_MEMORY_STORE=false
+```
+
+AgentHook runs embedded schema migrations at startup before serving traffic. A fresh Railway MySQL database does not require any manual SQL setup.
+
 ```env
 APP_DEPLOYMENT_MODE=single_tenant
 APP_PLAN=enterprise
@@ -12,10 +21,15 @@ SINGLE_TENANT_OWNER_EMAIL=ops@partner-domain.com
 SINGLE_TENANT_OWNER_ALIAS=partner
 SINGLE_TENANT_SETUP_TOKEN_SHA256=<sha256-of-setup-token>
 ALLOW_PUBLIC_REGISTRATION=false
-COMMERCE_MYSQL_DSN=<mysql-or-tidb-dsn>
 ```
 
 `PUBLIC_BASE_URL` should be the partner custom domain for production. The Railway-generated domain is fine for temporary smoke tests.
+
+## Database Options
+
+The default partner template should create Railway MySQL automatically. Advanced users can bring an existing MySQL-compatible database by overriding `COMMERCE_MYSQL_DSN` with their own DSN after deployment.
+
+`USE_IN_MEMORY_STORE=true` is only for local development and temporary demos. It avoids database cost, but data is lost on restart or redeploy.
 
 ## First Login
 

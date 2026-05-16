@@ -22,6 +22,9 @@ func BuildHTTPHandler(ctx context.Context, cfg config.Config) (http.Handler, err
 	if cfg.UseInMemoryStore {
 		st = store.NewMemoryStore()
 	} else {
+		if err := store.ApplyMigrations(ctx, cfg.TiDBDSN); err != nil {
+			return nil, err
+		}
 		mysqlStore, err := store.NewMySQLStore(cfg.TiDBDSN)
 		if err != nil {
 			return nil, err
