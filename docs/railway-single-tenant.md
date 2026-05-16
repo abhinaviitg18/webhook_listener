@@ -12,6 +12,7 @@ USE_IN_MEMORY_STORE=false
 ```
 
 AgentHook runs embedded schema migrations at startup before serving traffic. A fresh Railway MySQL database does not require any manual SQL setup.
+Railway's `mysql://...` URL is accepted directly and normalized internally for the Go MySQL driver.
 
 ```env
 APP_DEPLOYMENT_MODE=single_tenant

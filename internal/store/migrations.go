@@ -22,7 +22,7 @@ var (
 // ApplyMigrations opens the configured MySQL-compatible store and applies all
 // embedded schema migrations before the HTTP runtime starts accepting traffic.
 func ApplyMigrations(ctx context.Context, dsn string) error {
-	db, err := sql.Open("mysql", dsn)
+	db, err := sql.Open("mysql", NormalizeMySQLDSN(dsn))
 	if err != nil {
 		return err
 	}

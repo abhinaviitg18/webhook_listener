@@ -9,7 +9,6 @@ import (
 	"sync"
 	"time"
 
-	_ "github.com/go-sql-driver/mysql"
 	"github.com/google/uuid"
 
 	"agenthook.store/internal/domain"
@@ -41,7 +40,7 @@ type eventSelectVariant struct {
 }
 
 func NewMySQLStore(dsn string) (*MySQLStore, error) {
-	db, err := sql.Open("mysql", dsn)
+	db, err := sql.Open("mysql", NormalizeMySQLDSN(dsn))
 	if err != nil {
 		return nil, err
 	}
