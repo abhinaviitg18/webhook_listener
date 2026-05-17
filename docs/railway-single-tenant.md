@@ -19,11 +19,13 @@ The only value the template installer should need to enter is:
 SINGLE_TENANT_OWNER_EMAIL=ops@partner-domain.com
 ```
 
-The template should also preconfigure this generated secret without asking the installer to type it:
+The template should also preconfigure the admin secret without asking the installer to type it:
 
 ```env
-SINGLE_TENANT_ADMIN_SECRET=${{ secret(32, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789") }}
+SINGLE_TENANT_ADMIN_SECRET=${{ MySQL.MYSQL_ROOT_PASSWORD }}
 ```
+
+Railway preserves the generated MySQL root password in templates, so the default template reuses that generated secret as the initial AgentHook admin secret. Operators can rotate `SINGLE_TENANT_ADMIN_SECRET` to a separate value after deployment if they want to decouple app login from the database root password.
 
 When `SINGLE_TENANT_OWNER_EMAIL` is set, AgentHook infers single-tenant mode, defaults the plan to Enterprise, disables public registration, uses Railway MySQL, and derives the public base URL from the current request host unless `PUBLIC_BASE_URL` is explicitly set.
 
