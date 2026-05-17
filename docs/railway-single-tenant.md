@@ -8,23 +8,20 @@ The production template should include a Railway MySQL service named `MySQL` and
 
 ```env
 COMMERCE_MYSQL_DSN=${{ MySQL.MYSQL_URL }}
-USE_IN_MEMORY_STORE=false
 ```
 
 AgentHook runs embedded schema migrations at startup before serving traffic. A fresh Railway MySQL database does not require any manual SQL setup.
 Railway's `mysql://...` URL is accepted directly and normalized internally for the Go MySQL driver.
 
+The only value the template installer should need to enter is:
+
 ```env
-APP_DEPLOYMENT_MODE=single_tenant
-APP_PLAN=enterprise
-PUBLIC_BASE_URL=https://agenthook.partner-domain.com
 SINGLE_TENANT_OWNER_EMAIL=ops@partner-domain.com
-SINGLE_TENANT_OWNER_ALIAS=partner
-SINGLE_TENANT_SETUP_TOKEN_SHA256=<sha256-of-setup-token>
-ALLOW_PUBLIC_REGISTRATION=false
 ```
 
-`PUBLIC_BASE_URL` should be the partner custom domain for production. The Railway-generated domain is fine for temporary smoke tests.
+When `SINGLE_TENANT_OWNER_EMAIL` is set, AgentHook infers single-tenant mode, defaults the plan to Enterprise, disables public registration, uses Railway MySQL, and derives the public base URL from the current request host unless `PUBLIC_BASE_URL` is explicitly set.
+
+`PUBLIC_BASE_URL` may still be set after deployment for a partner custom domain. The Railway-generated domain is fine for temporary smoke tests.
 
 ## Database Options
 
@@ -34,14 +31,15 @@ The default partner template should create Railway MySQL automatically. Advanced
 
 ## First Login
 
-1. Open `PUBLIC_BASE_URL`.
-2. Enter the setup token whose SHA-256 hash is stored in `SINGLE_TENANT_SETUP_TOKEN_SHA256`.
-3. AgentHook creates or reuses `SINGLE_TENANT_OWNER_EMAIL`, then sets the existing `htc_token` session cookie.
-4. Create an `AGENTHOOK_TOKEN` from the home console for CLIs, scripts, and agents.
+1. Open the `agenthook` service logs in Railway after the first deploy.
+2. Copy the one-time `claim_code` value printed by AgentHook.
+3. Open the service URL and enter the claim code.
+4. AgentHook creates or reuses `SINGLE_TENANT_OWNER_EMAIL`, consumes the claim, then sets the existing `htc_token` session cookie.
+5. Create an `AGENTHOOK_TOKEN` from the home console for CLIs, scripts, and agents.
 
-## Rotating The Setup Token
+## Legacy Setup Token
 
-Generate a new token, hash it, update `SINGLE_TENANT_SETUP_TOKEN_SHA256`, and redeploy:
+`SINGLE_TENANT_SETUP_TOKEN_SHA256` is still supported for older installs. If it is set, the app uses setup-token login instead of the one-time claim flow.
 
 ```bash
 printf '%s' 'new-setup-token' | shasum -a 256

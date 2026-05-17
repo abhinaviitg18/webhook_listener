@@ -2,9 +2,11 @@ package app
 
 import (
 	"context"
+	"log"
 	"net/http"
 	"slices"
 	"strings"
+	"time"
 
 	"agenthook.store/internal/auth"
 	"agenthook.store/internal/config"
@@ -30,6 +32,9 @@ func BuildHTTPHandler(ctx context.Context, cfg config.Config) (http.Handler, err
 			return nil, err
 		}
 		st = mysqlStore
+	}
+	if err := ensureSingleTenantBootstrapClaim(ctx, st, cfg); err != nil {
+		return nil, err
 	}
 
 	pine := integrations.NewPineconeClient(cfg.PineconeEnabled, cfg.PineconeAPIKey, cfg.PineconeIndexURL, cfg.PineconeNamespace)
@@ -103,6 +108,40 @@ func BuildHTTPHandler(ctx context.Context, cfg config.Config) (http.Handler, err
 	}
 
 	return httpapi.NewRouter(handler, verifier), nil
+}
+
+func ensureSingleTenantBootstrapClaim(ctx context.Context, st domain.Store, cfg config.Config) error {
+	if strings.TrimSpace(strings.ToLower(cfg.AppDeploymentMode)) != "single_tenant" {
+		return nil
+	}
+	ownerEmail := strings.TrimSpace(strings.ToLower(cfg.SingleTenantOwnerEmail))
+	if ownerEmail == "" {
+		return nil
+	}
+	if _, err := st.GetAccountBySlug(ctx, ownerSlug(ownerEmail)); err == nil {
+		return nil
+	}
+	claim, code, created, err := st.EnsureSingleTenantClaim(ctx, ownerEmail, 24*time.Hour)
+	if err != nil {
+		return err
+	}
+	if !created {
+		log.Printf("single_tenant.claim_active owner=%s expires_at=%s message=%q", ownerEmail, claim.ExpiresAt.Format(time.RFC3339), "an unconsumed owner claim already exists; use the claim code printed when it was created or wait for expiry")
+		return nil
+	}
+	if base := strings.TrimRight(strings.TrimSpace(cfg.PublicBaseURL), "/"); base != "" {
+		log.Printf("single_tenant.claim_created owner=%s expires_at=%s claim_url=%s claim_code=%s", ownerEmail, claim.ExpiresAt.Format(time.RFC3339), base+"/?claim_code="+code, code)
+		return nil
+	}
+	log.Printf("single_tenant.claim_created owner=%s expires_at=%s claim_code=%s message=%q", ownerEmail, claim.ExpiresAt.Format(time.RFC3339), code, "open your Railway service URL and enter this one-time claim code")
+	return nil
+}
+
+func ownerSlug(email string) string {
+	if at := strings.IndexByte(email, '@'); at > 0 {
+		return email[:at]
+	}
+	return email
 }
 
 func buildFallbackLLMClient(byokCfgs []domain.BYOKProviderConfig, cfg config.Config) domain.LLMClient {

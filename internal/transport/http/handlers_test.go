@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	"agenthook.store/internal/auth"
 	"agenthook.store/internal/integrations"
@@ -363,6 +364,133 @@ func TestSingleTenantLoginRejectsInvalidSetupToken(t *testing.T) {
 	h.SingleTenantLogin(rr, req)
 	if rr.Code != http.StatusUnauthorized {
 		t.Fatalf("expected status 401, got %d", rr.Code)
+	}
+}
+
+func TestSingleTenantSetupTokenLoginDisabledWhenHashMissing(t *testing.T) {
+	h := &Handler{
+		Store:                  store.NewMemoryStore(),
+		AppDeploymentMode:      "single_tenant",
+		SingleTenantOwnerEmail: "ops@partner.example.com",
+	}
+	req := httptest.NewRequest(http.MethodPost, "/auth/single-tenant/login", strings.NewReader(`{"setup_token":"anything"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+
+	h.SingleTenantLogin(rr, req)
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("expected status 404, got %d", rr.Code)
+	}
+}
+
+func TestSingleTenantClaimIssuesLocalSession(t *testing.T) {
+	st := store.NewMemoryStore()
+	_, claimCode, created, err := st.EnsureSingleTenantClaim(context.Background(), "ops@partner.example.com", 24*time.Hour)
+	if err != nil {
+		t.Fatalf("ensure claim: %v", err)
+	}
+	if !created || claimCode == "" {
+		t.Fatalf("expected new claim code")
+	}
+	h := &Handler{
+		Store:                   st,
+		AppPlan:                 "enterprise",
+		AppDeploymentMode:       "single_tenant",
+		PublicBaseURL:           "https://partner.example.com",
+		MailDomain:              "mail.partner.example.com",
+		SingleTenantOwnerEmail:  "ops@partner.example.com",
+		AllowPublicRegistration: false,
+	}
+	req := httptest.NewRequest(http.MethodPost, "/auth/single-tenant/claim", strings.NewReader(`{"claim_code":"`+claimCode+`"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+
+	h.SingleTenantClaim(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	var token string
+	for _, c := range rr.Result().Cookies() {
+		if c.Name == "htc_token" {
+			token = c.Value
+		}
+	}
+	if token == "" {
+		t.Fatalf("expected htc_token cookie")
+	}
+	acct, err := st.GetAccountByToken(context.Background(), token)
+	if err != nil {
+		t.Fatalf("token should resolve account: %v", err)
+	}
+	if acct.OwnerEmail != "ops@partner.example.com" {
+		t.Fatalf("unexpected owner email: %s", acct.OwnerEmail)
+	}
+	if acct.PublicAlias != "ops" {
+		t.Fatalf("expected alias derived from email local part, got %q", acct.PublicAlias)
+	}
+	var body map[string]interface{}
+	if err := json.NewDecoder(rr.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	profile := body["app_profile"].(map[string]interface{})
+	if profile["auth_mode"] != "single_tenant_claim" {
+		t.Fatalf("unexpected auth mode: %v", profile["auth_mode"])
+	}
+}
+
+func TestSingleTenantClaimRejectsReuseInvalidExpiredAndWrongOwner(t *testing.T) {
+	ctx := context.Background()
+	st := store.NewMemoryStore()
+	_, claimCode, _, err := st.EnsureSingleTenantClaim(ctx, "ops@partner.example.com", time.Hour)
+	if err != nil {
+		t.Fatalf("ensure claim: %v", err)
+	}
+	h := &Handler{Store: st, AppDeploymentMode: "single_tenant", SingleTenantOwnerEmail: "ops@partner.example.com"}
+	body := `{"claim_code":"` + claimCode + `"}`
+	req := httptest.NewRequest(http.MethodPost, "/auth/single-tenant/claim", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	h.SingleTenantClaim(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected first claim to pass, got %d: %s", rr.Code, rr.Body.String())
+	}
+	req = httptest.NewRequest(http.MethodPost, "/auth/single-tenant/claim", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rr = httptest.NewRecorder()
+	h.SingleTenantClaim(rr, req)
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("expected reused claim 401, got %d", rr.Code)
+	}
+	req = httptest.NewRequest(http.MethodPost, "/auth/single-tenant/claim", strings.NewReader(`{"claim_code":"wrong"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rr = httptest.NewRecorder()
+	h.SingleTenantClaim(rr, req)
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("expected invalid claim 401, got %d", rr.Code)
+	}
+	_, expiredCode, _, err := st.EnsureSingleTenantClaim(ctx, "expired@partner.example.com", -time.Hour)
+	if err != nil {
+		t.Fatalf("ensure expired claim: %v", err)
+	}
+	h.SingleTenantOwnerEmail = "expired@partner.example.com"
+	req = httptest.NewRequest(http.MethodPost, "/auth/single-tenant/claim", strings.NewReader(`{"claim_code":"`+expiredCode+`"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rr = httptest.NewRecorder()
+	h.SingleTenantClaim(rr, req)
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("expected expired claim 401, got %d", rr.Code)
+	}
+	_, wrongOwnerCode, _, err := st.EnsureSingleTenantClaim(ctx, "first@partner.example.com", time.Hour)
+	if err != nil {
+		t.Fatalf("ensure wrong-owner claim: %v", err)
+	}
+	h.SingleTenantOwnerEmail = "second@partner.example.com"
+	req = httptest.NewRequest(http.MethodPost, "/auth/single-tenant/claim", strings.NewReader(`{"claim_code":"`+wrongOwnerCode+`"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rr = httptest.NewRecorder()
+	h.SingleTenantClaim(rr, req)
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("expected wrong-owner claim 401, got %d", rr.Code)
 	}
 }
 

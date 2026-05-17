@@ -83,17 +83,18 @@ export function AuthProvider({ children }) {
         };
     }, []);
 
-    const login = async (setupToken = '') => {
-        if (appProfile.auth_mode === 'single_tenant_setup_token') {
+    const login = async (credential = '') => {
+        if (appProfile.auth_mode === 'single_tenant_claim' || appProfile.auth_mode === 'single_tenant_setup_token') {
             setError(null);
-            const response = await fetch('/auth/single-tenant/login', {
+            const isClaim = appProfile.auth_mode === 'single_tenant_claim';
+            const response = await fetch(isClaim ? '/auth/single-tenant/claim' : '/auth/single-tenant/login', {
                 method: 'POST',
                 credentials: 'include',
                 headers: {
                     'Accept': 'application/json',
                     'Content-Type': 'application/json',
                 },
-                body: JSON.stringify({ setup_token: setupToken }),
+                body: JSON.stringify(isClaim ? { claim_code: credential } : { setup_token: credential }),
             });
             const text = await response.text();
             const data = text ? JSON.parse(text) : {};

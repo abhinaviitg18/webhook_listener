@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"crypto/hmac"
 	"database/sql"
 	"errors"
 	"log"
@@ -180,6 +181,90 @@ func (s *MySQLStore) CreateAccount(ctx context.Context, email string) (domain.Ac
 		return domain.Account{}, "", ierr
 	}
 	return domain.Account{ID: id, Slug: slug, PublicAlias: slug, OwnerEmail: email, TokenHash: hash, CreatedAt: time.Now().UTC()}, token, nil
+}
+
+func (s *MySQLStore) EnsureSingleTenantClaim(ctx context.Context, ownerEmail string, ttl time.Duration) (domain.SingleTenantClaim, string, bool, error) {
+	now := time.Now().UTC()
+	var existing domain.SingleTenantClaim
+	err := s.db.QueryRowContext(ctx, `
+SELECT id, owner_email, claim_hash, created_at, expires_at
+FROM single_tenant_claims
+WHERE owner_email=? AND consumed_at IS NULL AND expires_at > UTC_TIMESTAMP()
+ORDER BY created_at DESC
+LIMIT 1`, ownerEmail).Scan(&existing.ID, &existing.OwnerEmail, &existing.ClaimHash, &existing.CreatedAt, &existing.ExpiresAt)
+	if err == nil {
+		return existing, "", false, nil
+	}
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return domain.SingleTenantClaim{}, "", false, err
+	}
+
+	code, err := security.NewToken(24)
+	if err != nil {
+		return domain.SingleTenantClaim{}, "", false, err
+	}
+	claim := domain.SingleTenantClaim{
+		ID:         uuid.NewString(),
+		OwnerEmail: ownerEmail,
+		ClaimHash:  security.HashValue(code),
+		CreatedAt:  now,
+		ExpiresAt:  now.Add(ttl),
+	}
+	_, err = s.db.ExecContext(ctx, `
+INSERT INTO single_tenant_claims(id, owner_email, claim_hash, created_at, expires_at)
+VALUES(?,?,?,?,?)`, claim.ID, claim.OwnerEmail, claim.ClaimHash, claim.CreatedAt, claim.ExpiresAt)
+	if err != nil {
+		return domain.SingleTenantClaim{}, "", false, err
+	}
+	return claim, code, true, nil
+}
+
+func (s *MySQLStore) ConsumeSingleTenantClaim(ctx context.Context, claimCode string) (domain.SingleTenantClaim, error) {
+	claimHash := security.HashValue(strings.TrimSpace(claimCode))
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return domain.SingleTenantClaim{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var claim domain.SingleTenantClaim
+	var consumedAt sql.NullTime
+	var consumedAccountID sql.NullString
+	err = tx.QueryRowContext(ctx, `
+SELECT id, owner_email, claim_hash, created_at, expires_at, consumed_at, consumed_account_id
+FROM single_tenant_claims
+WHERE claim_hash=?
+LIMIT 1
+FOR UPDATE`, claimHash).Scan(
+		&claim.ID,
+		&claim.OwnerEmail,
+		&claim.ClaimHash,
+		&claim.CreatedAt,
+		&claim.ExpiresAt,
+		&consumedAt,
+		&consumedAccountID,
+	)
+	if err != nil {
+		return domain.SingleTenantClaim{}, errors.New("claim not found")
+	}
+	if !hmac.Equal([]byte(claim.ClaimHash), []byte(claimHash)) {
+		return domain.SingleTenantClaim{}, errors.New("claim not found")
+	}
+	if consumedAt.Valid || !claim.ExpiresAt.After(time.Now().UTC()) {
+		return domain.SingleTenantClaim{}, errors.New("claim expired or already consumed")
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE single_tenant_claims SET consumed_at=UTC_TIMESTAMP() WHERE id=?`, claim.ID); err != nil {
+		return domain.SingleTenantClaim{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return domain.SingleTenantClaim{}, err
+	}
+	return claim, nil
+}
+
+func (s *MySQLStore) RecordSingleTenantClaimAccount(ctx context.Context, claimID, accountID string) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE single_tenant_claims SET consumed_account_id=? WHERE id=?`, accountID, claimID)
+	return err
 }
 
 func (s *MySQLStore) GetAccountBySlug(ctx context.Context, slug string) (domain.Account, error) {

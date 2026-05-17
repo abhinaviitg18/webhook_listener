@@ -705,7 +705,7 @@ function normalizeAppProfile(profile) {
     ...(profile || {}),
     plan: profile?.plan === 'enterprise' ? 'enterprise' : 'basic',
     deployment_mode: profile?.deployment_mode === 'single_tenant' ? 'single_tenant' : 'multitenant',
-    auth_mode: profile?.auth_mode || (profile?.deployment_mode === 'single_tenant' ? 'single_tenant_setup_token' : 'scalekit'),
+    auth_mode: profile?.auth_mode || (profile?.deployment_mode === 'single_tenant' ? 'single_tenant_claim' : 'scalekit'),
     public_base_url: (profile?.public_base_url || DEFAULT_APP_PROFILE.public_base_url).replace(/\/+$/, ''),
     mail_domain: profile?.mail_domain || DEFAULT_APP_PROFILE.mail_domain,
   };
@@ -929,17 +929,19 @@ payload -> preprocess -> deterministic routing -> optional LLM routing -> select
 }
 
 function SingleTenantLogin({ login, error, appProfile }) {
-  const [setupToken, setSetupToken] = useState('');
+  const [claimCode, setClaimCode] = useState(() => new URLSearchParams(window.location.search).get('claim_code') || '');
   const [busy, setBusy] = useState(false);
   const [localError, setLocalError] = useState('');
+  const usesLegacySetupToken = appProfile?.auth_mode === 'single_tenant_setup_token';
+  const credentialLabel = usesLegacySetupToken ? 'Setup Token' : 'One-time Claim Code';
 
   const submit = async (event) => {
     event.preventDefault();
     setBusy(true);
     setLocalError('');
     try {
-      await login(setupToken);
-      setSetupToken('');
+      await login(claimCode);
+      setClaimCode('');
     } catch (err) {
       setLocalError(err.message);
     } finally {
@@ -954,26 +956,33 @@ function SingleTenantLogin({ login, error, appProfile }) {
           <p className="text-[10px] uppercase tracking-[0.22em] text-emerald-400 font-label-caps">Single-tenant deployment</p>
           <h1 className="text-3xl font-h1 text-white">Unlock AgentHook</h1>
           <p className="text-sm text-slate-300">
-            Enter the setup token configured for this Railway service to open the private operator console.
+            {usesLegacySetupToken
+              ? 'Enter the setup token configured for this Railway service to open the private operator console.'
+              : 'Enter the one-time owner claim code printed in the Railway service logs after first deploy.'}
           </p>
         </div>
         <div className="rounded-2xl border border-slate-800 bg-slate-900/50 px-3 py-2 text-xs text-slate-400">
           Public base URL: <code className="text-indigo-300 break-all">{appBaseURL(appProfile)}</code>
         </div>
+        {!usesLegacySetupToken && (
+          <InlineNotice tone="info">
+            In Railway, open the <strong>agenthook</strong> service logs and copy the value after <code>claim_code=</code>. The code can be used once and expires automatically.
+          </InlineNotice>
+        )}
         {(error || localError) && <InlineNotice tone="error">{localError || error}</InlineNotice>}
-        <FormField label="Setup Token">
+        <FormField label={credentialLabel}>
           <TextInput
             type="password"
-            value={setupToken}
-            onChange={(e) => setSetupToken(e.target.value)}
-            placeholder="Enter setup token"
+            value={claimCode}
+            onChange={(e) => setClaimCode(e.target.value)}
+            placeholder={usesLegacySetupToken ? 'Enter setup token' : 'Enter claim code from Railway logs'}
             autoComplete="current-password"
             autoFocus
           />
         </FormField>
         <button
           type="submit"
-          disabled={busy || !setupToken.trim()}
+          disabled={busy || !claimCode.trim()}
           className="w-full inline-flex items-center justify-center gap-2 bg-primary text-on-primary px-5 py-3 rounded-2xl font-bold active:scale-95 transition-transform disabled:opacity-50"
         >
           <LogIn size={18} />

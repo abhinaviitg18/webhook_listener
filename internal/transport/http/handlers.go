@@ -61,6 +61,7 @@ func NewRouter(h *Handler, verifier auth.RequestVerifier) http.Handler {
 	r.Get("/auth/scalekit/signup", h.ScaleKitSignupRedirect)
 	r.Get("/auth/scalekit/callback", h.ScaleKitCallback)
 	r.Post("/auth/single-tenant/login", h.SingleTenantLogin)
+	r.Post("/auth/single-tenant/claim", h.SingleTenantClaim)
 	r.Get("/auth/logout", h.ScaleKitLogout)
 
 	r.Group(func(ar chi.Router) {
@@ -245,7 +246,7 @@ func (h *Handler) scalekitCallbackURL(r *http.Request) string {
 	if v := strings.TrimSpace(h.ScaleKitRedirectURI); v != "" {
 		return v
 	}
-	if base := strings.TrimRight(strings.TrimSpace(h.PublicBaseURL), "/"); base != "" {
+	if base := h.publicBaseURLForRequest(r); base != "" {
 		return base + "/auth/scalekit/callback"
 	}
 	return "https://app.agenthook.store/auth/scalekit/callback"
@@ -263,15 +264,15 @@ func (h *Handler) UserInfo(w http.ResponseWriter, r *http.Request) {
 		"public_alias": acct.PublicAlias,
 		"owner_email":  acct.OwnerEmail,
 		"created_at":   acct.CreatedAt,
-		"app_profile":  h.appProfilePayload(),
+		"app_profile":  h.appProfilePayload(r),
 	})
 }
 
-func (h *Handler) AppProfile(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, h.appProfilePayload())
+func (h *Handler) AppProfile(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, h.appProfilePayload(r))
 }
 
-func (h *Handler) appProfilePayload() map[string]any {
+func (h *Handler) appProfilePayload(r *http.Request) map[string]any {
 	plan := strings.TrimSpace(strings.ToLower(h.AppPlan))
 	if plan == "" {
 		plan = "basic"
@@ -284,7 +285,7 @@ func (h *Handler) appProfilePayload() map[string]any {
 		"plan":             plan,
 		"deployment_mode":  deploymentMode,
 		"auth_mode":        h.authMode(),
-		"public_base_url":  h.publicBaseURL(),
+		"public_base_url":  h.publicBaseURLForRequest(r),
 		"mail_domain":      h.mailDomain(),
 		"docs_path":        "/app?tab=docs",
 		"home_docs_anchor": "/#docs",
@@ -293,6 +294,9 @@ func (h *Handler) appProfilePayload() map[string]any {
 
 func (h *Handler) authMode() string {
 	if h.isSingleTenantMode() {
+		if strings.TrimSpace(h.SingleTenantSetupTokenSHA256) == "" {
+			return "single_tenant_claim"
+		}
 		return "single_tenant_setup_token"
 	}
 	return "scalekit"
@@ -312,6 +316,10 @@ func (h *Handler) mailDomain() string {
 func (h *Handler) SingleTenantLogin(w http.ResponseWriter, r *http.Request) {
 	if !h.isSingleTenantMode() {
 		writeErr(w, http.StatusNotFound, "single-tenant login is not enabled")
+		return
+	}
+	if strings.TrimSpace(h.SingleTenantSetupTokenSHA256) == "" {
+		writeErr(w, http.StatusNotFound, "setup-token login is not configured")
 		return
 	}
 	var body struct {
@@ -336,7 +344,7 @@ func (h *Handler) SingleTenantLogin(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if alias := normalizePublicAlias(h.SingleTenantOwnerAlias); alias != "" && acct.PublicAlias != alias {
+	if alias := h.singleTenantOwnerAlias(); alias != "" && acct.PublicAlias != alias {
 		updated, err := h.Store.UpdateAccountPublicAlias(r.Context(), acct.ID, alias)
 		if err != nil {
 			writeErr(w, http.StatusInternalServerError, err.Error())
@@ -347,7 +355,57 @@ func (h *Handler) SingleTenantLogin(w http.ResponseWriter, r *http.Request) {
 	h.writeSessionCookie(w, token, 3600*24*30)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"account":     acct,
-		"app_profile": h.appProfilePayload(),
+		"app_profile": h.appProfilePayload(r),
+	})
+}
+
+func (h *Handler) SingleTenantClaim(w http.ResponseWriter, r *http.Request) {
+	if !h.isSingleTenantMode() {
+		writeErr(w, http.StatusNotFound, "single-tenant claim is not enabled")
+		return
+	}
+	var body struct {
+		ClaimCode string `json:"claim_code"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid json")
+		return
+	}
+	claim, err := h.Store.ConsumeSingleTenantClaim(r.Context(), strings.TrimSpace(body.ClaimCode))
+	if err != nil {
+		writeErr(w, http.StatusUnauthorized, "invalid or expired claim code")
+		return
+	}
+	ownerEmail := strings.TrimSpace(strings.ToLower(h.SingleTenantOwnerEmail))
+	if ownerEmail == "" || !strings.Contains(ownerEmail, "@") {
+		writeErr(w, http.StatusInternalServerError, "single-tenant owner email is not configured")
+		return
+	}
+	if !strings.EqualFold(strings.TrimSpace(claim.OwnerEmail), ownerEmail) {
+		writeErr(w, http.StatusUnauthorized, "claim code does not match this owner")
+		return
+	}
+	acct, token, err := h.Store.CreateAccount(r.Context(), ownerEmail)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if alias := h.singleTenantOwnerAlias(); alias != "" && acct.PublicAlias != alias {
+		updated, err := h.Store.UpdateAccountPublicAlias(r.Context(), acct.ID, alias)
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		acct = updated
+	}
+	if err := h.Store.RecordSingleTenantClaimAccount(r.Context(), claim.ID, acct.ID); err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	h.writeSessionCookie(w, token, 3600*24*30)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"account":     acct,
+		"app_profile": h.appProfilePayload(r),
 	})
 }
 
@@ -383,6 +441,17 @@ func (h *Handler) UpdateAccountProfile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, updated)
+}
+
+func (h *Handler) singleTenantOwnerAlias() string {
+	if alias := normalizePublicAlias(h.SingleTenantOwnerAlias); alias != "" {
+		return alias
+	}
+	email := strings.TrimSpace(strings.ToLower(h.SingleTenantOwnerEmail))
+	if at := strings.IndexByte(email, '@'); at > 0 {
+		return normalizePublicAlias(email[:at])
+	}
+	return ""
 }
 
 func (h *Handler) scalekitBase() string {
@@ -545,7 +614,7 @@ func (h *Handler) sanitizeReturnTo(raw string) string {
 }
 
 func (h *Handler) appRedirectURL(r *http.Request, returnTo string) url.URL {
-	base, err := url.Parse(h.publicBaseURL())
+	base, err := url.Parse(h.publicBaseURLForRequest(r))
 	if err != nil || base.Scheme == "" || base.Host == "" {
 		base = &url.URL{Scheme: "https", Host: "app.agenthook.store"}
 	}
@@ -562,6 +631,32 @@ func (h *Handler) appRedirectURL(r *http.Request, returnTo string) url.URL {
 func (h *Handler) publicBaseURL() string {
 	if v := strings.TrimRight(strings.TrimSpace(h.PublicBaseURL), "/"); v != "" {
 		return v
+	}
+	return "https://app.agenthook.store"
+}
+
+func (h *Handler) publicBaseURLForRequest(r *http.Request) string {
+	if v := strings.TrimRight(strings.TrimSpace(h.PublicBaseURL), "/"); v != "" {
+		return v
+	}
+	if !h.isSingleTenantMode() {
+		return "https://app.agenthook.store"
+	}
+	if r != nil {
+		host := strings.TrimSpace(r.Header.Get("X-Forwarded-Host"))
+		if host == "" {
+			host = strings.TrimSpace(r.Host)
+		}
+		if host != "" {
+			proto := strings.TrimSpace(r.Header.Get("X-Forwarded-Proto"))
+			if proto == "" {
+				proto = "https"
+				if r.TLS == nil && strings.HasPrefix(host, "localhost") {
+					proto = "http"
+				}
+			}
+			return proto + "://" + strings.TrimRight(host, "/")
+		}
 	}
 	return "https://app.agenthook.store"
 }

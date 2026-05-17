@@ -96,6 +96,15 @@ func Load() Config {
 		storeDSN = getenv("TIDB_DSN", "")
 	}
 	defaultInMemoryStore := strings.TrimSpace(storeDSN) == ""
+	ownerEmail := getenv("SINGLE_TENANT_OWNER_EMAIL", "")
+	deploymentMode := normalizeDeploymentModeEnv(getenv("APP_DEPLOYMENT_MODE", ""))
+	if deploymentMode == "" && ownerEmail != "" {
+		deploymentMode = "single_tenant"
+	}
+	defaultPlan := "basic"
+	if deploymentMode == "single_tenant" {
+		defaultPlan = "enterprise"
+	}
 
 	llmKey := getenv("LLM_API_KEY", "")
 	if llmKey == "" {
@@ -105,8 +114,8 @@ func Load() Config {
 
 	return Config{
 		Port:              getenv("PORT", "8080"),
-		AppPlan:           normalizePlan(getenv("APP_PLAN", "basic")),
-		AppDeploymentMode: normalizeDeploymentModeEnv(getenv("APP_DEPLOYMENT_MODE", "")),
+		AppPlan:           normalizePlan(getenv("APP_PLAN", defaultPlan)),
+		AppDeploymentMode: deploymentMode,
 
 		ScaleKitBaseURL:      getenv("SCALEKIT_BASE_URL", ""),
 		ScaleKitAPIKey:       getenv("SCALEKIT_API_KEY", ""),
@@ -114,9 +123,9 @@ func Load() Config {
 		ScaleKitClientSecret: getenv("SCALEKIT_CLIENT_SECRET", ""),
 		ScaleKitRedirectURI:  getenv("SCALEKIT_REDIRECT_URI", ""),
 		AppSessionSecret:     getenv("APP_SESSION_SECRET", getenv("SCALEKIT_CLIENT_SECRET", "")),
-		PublicBaseURL:        getenv("PUBLIC_BASE_URL", "https://app.agenthook.store"),
+		PublicBaseURL:        getenv("PUBLIC_BASE_URL", railwayPublicBaseURL()),
 
-		SingleTenantOwnerEmail:       getenv("SINGLE_TENANT_OWNER_EMAIL", ""),
+		SingleTenantOwnerEmail:       ownerEmail,
 		SingleTenantOwnerAlias:       getenv("SINGLE_TENANT_OWNER_ALIAS", ""),
 		SingleTenantSetupTokenSHA256: getenv("SINGLE_TENANT_SETUP_TOKEN_SHA256", ""),
 		AllowPublicRegistration:      getbool("ALLOW_PUBLIC_REGISTRATION", false),
@@ -160,7 +169,7 @@ func Load() Config {
 		MailAWSRegion:             getenv("MAIL_AWS_REGION", getenv("AWS_REGION", "us-east-1")),
 		MailInboundBucket:         getenv("MAIL_INBOUND_BUCKET", ""),
 		MailOutboundProvider:      normalizeMailOutboundProvider(getenv("MAIL_OUTBOUND_PROVIDER", "ses")),
-		MailAgentHookBaseURL:      getenv("MAIL_AGENTHOOK_BASE_URL", getenv("PUBLIC_BASE_URL", "https://app.agenthook.store")),
+		MailAgentHookBaseURL:      getenv("MAIL_AGENTHOOK_BASE_URL", getenv("PUBLIC_BASE_URL", railwayPublicBaseURL())),
 		MailAgentHookOriginSecret: getenv("MAIL_AGENTHOOK_ORIGIN_SECRET", getenv("LAMBDA_ORIGIN_SHARED_SECRET", "")),
 		MailInternalSharedSecret:  getenv("MAIL_INTERNAL_SHARED_SECRET", ""),
 		MailResendAPIKey:          getenv("MAIL_RESEND_API_KEY", ""),
@@ -238,11 +247,22 @@ func (c Config) Validate() error {
 		if strings.TrimSpace(c.SingleTenantOwnerEmail) == "" {
 			return fmt.Errorf("SINGLE_TENANT_OWNER_EMAIL is required when APP_DEPLOYMENT_MODE=single_tenant")
 		}
-		if strings.TrimSpace(c.SingleTenantSetupTokenSHA256) == "" {
-			return fmt.Errorf("SINGLE_TENANT_SETUP_TOKEN_SHA256 is required when APP_DEPLOYMENT_MODE=single_tenant")
-		}
 	}
 	return nil
+}
+
+func railwayPublicBaseURL() string {
+	for _, key := range []string{"RAILWAY_SERVICE_AGENTHOOK_URL", "RAILWAY_STATIC_URL", "RAILWAY_PUBLIC_DOMAIN"} {
+		v := strings.TrimSpace(os.Getenv(key))
+		if v == "" {
+			continue
+		}
+		if strings.HasPrefix(v, "http://") || strings.HasPrefix(v, "https://") {
+			return strings.TrimRight(v, "/")
+		}
+		return "https://" + strings.TrimRight(v, "/")
+	}
+	return ""
 }
 
 func getenv(k, fallback string) string {

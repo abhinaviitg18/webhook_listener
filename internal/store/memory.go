@@ -22,6 +22,8 @@ type MemoryStore struct {
 	accountsBySlug  map[string]string
 	accountsByAlias map[string]string
 	tokens          map[string]string
+	claimsByID      map[string]domain.SingleTenantClaim
+	claimByHash     map[string]string
 
 	typesByID         map[string]domain.WebhookType
 	typesByAccountKey map[string]string
@@ -52,6 +54,8 @@ func NewMemoryStore() *MemoryStore {
 		accountsBySlug:      map[string]string{},
 		accountsByAlias:     map[string]string{},
 		tokens:              map[string]string{},
+		claimsByID:          map[string]domain.SingleTenantClaim{},
+		claimByHash:         map[string]string{},
 		typesByID:           map[string]domain.WebhookType{},
 		typesByAccountKey:   map[string]string{},
 		secretsByID:         map[string]domain.WebhookSecret{},
@@ -69,6 +73,60 @@ func NewMemoryStore() *MemoryStore {
 		skills:              map[string]domain.WebhookSkill{},
 		autoStates:          map[string]domain.AutoPromoteState{},
 	}
+}
+
+func (s *MemoryStore) EnsureSingleTenantClaim(_ context.Context, ownerEmail string, ttl time.Duration) (domain.SingleTenantClaim, string, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := time.Now().UTC()
+	for _, claim := range s.claimsByID {
+		if claim.OwnerEmail == ownerEmail && claim.ConsumedAt == nil && claim.ExpiresAt.After(now) {
+			return claim, "", false, nil
+		}
+	}
+	code, err := security.NewToken(24)
+	if err != nil {
+		return domain.SingleTenantClaim{}, "", false, err
+	}
+	claim := domain.SingleTenantClaim{
+		ID:         uuid.NewString(),
+		OwnerEmail: ownerEmail,
+		ClaimHash:  security.HashValue(code),
+		CreatedAt:  now,
+		ExpiresAt:  now.Add(ttl),
+	}
+	s.claimsByID[claim.ID] = claim
+	s.claimByHash[claim.ClaimHash] = claim.ID
+	return claim, code, true, nil
+}
+
+func (s *MemoryStore) ConsumeSingleTenantClaim(_ context.Context, claimCode string) (domain.SingleTenantClaim, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	id, ok := s.claimByHash[security.HashValue(strings.TrimSpace(claimCode))]
+	if !ok {
+		return domain.SingleTenantClaim{}, errors.New("claim not found")
+	}
+	claim := s.claimsByID[id]
+	now := time.Now().UTC()
+	if claim.ConsumedAt != nil || !claim.ExpiresAt.After(now) {
+		return domain.SingleTenantClaim{}, errors.New("claim expired or already consumed")
+	}
+	claim.ConsumedAt = &now
+	s.claimsByID[id] = claim
+	return claim, nil
+}
+
+func (s *MemoryStore) RecordSingleTenantClaimAccount(_ context.Context, claimID, accountID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	claim, ok := s.claimsByID[claimID]
+	if !ok {
+		return errors.New("claim not found")
+	}
+	claim.ConsumedAccountID = accountID
+	s.claimsByID[claimID] = claim
+	return nil
 }
 
 func (s *MemoryStore) CreateAccount(_ context.Context, email string) (domain.Account, string, error) {

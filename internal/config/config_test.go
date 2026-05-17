@@ -132,9 +132,27 @@ func TestLoadSingleTenantConfig(t *testing.T) {
 	}
 }
 
-func TestValidateSingleTenantRequiresOwnerAndSetupToken(t *testing.T) {
+func TestValidateSingleTenantRequiresOwnerOnly(t *testing.T) {
 	cfg := Config{Port: "8080", AppDeploymentMode: "single_tenant", UseInMemoryStore: true}
 	if err := cfg.Validate(); err == nil {
-		t.Fatalf("expected missing single-tenant owner/setup token to fail")
+		t.Fatalf("expected missing single-tenant owner to fail")
+	}
+	cfg.SingleTenantOwnerEmail = "ops@example.com"
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("expected setup token to be optional: %v", err)
+	}
+}
+
+func TestLoadInfersSingleTenantFromOwnerEmail(t *testing.T) {
+	t.Setenv("APP_DEPLOYMENT_MODE", "")
+	t.Setenv("APP_PLAN", "")
+	t.Setenv("SINGLE_TENANT_OWNER_EMAIL", "ops@example.com")
+
+	cfg := Load()
+	if cfg.AppDeploymentMode != "single_tenant" {
+		t.Fatalf("expected owner email to infer single_tenant mode, got %q", cfg.AppDeploymentMode)
+	}
+	if cfg.AppPlan != "enterprise" {
+		t.Fatalf("expected inferred single tenant to default enterprise plan, got %q", cfg.AppPlan)
 	}
 }

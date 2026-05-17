@@ -12,6 +12,9 @@ type Store interface {
 	GetAccountByToken(ctx context.Context, token string) (Account, error)
 	GetAccount(ctx context.Context, id string) (Account, error)
 	UpdateAccountPublicAlias(ctx context.Context, accountID, publicAlias string) (Account, error)
+	EnsureSingleTenantClaim(ctx context.Context, ownerEmail string, ttl time.Duration) (SingleTenantClaim, string, bool, error)
+	ConsumeSingleTenantClaim(ctx context.Context, claimCode string) (SingleTenantClaim, error)
+	RecordSingleTenantClaimAccount(ctx context.Context, claimID, accountID string) error
 
 	ListAccountTokens(ctx context.Context, accountID string) ([]AccountToken, error)
 	RevokeAccountToken(ctx context.Context, accountID, tokenID string) error
@@ -75,6 +78,16 @@ type Store interface {
 	GetBYOKConfig(ctx context.Context, accountID, provider string) (BYOKProviderConfig, error)
 	GetDefaultBYOKConfig(ctx context.Context, accountID string) (BYOKProviderConfig, error)
 	ListBYOKConfigs(ctx context.Context, accountID string) ([]BYOKProviderConfig, error)
+}
+
+type SingleTenantClaim struct {
+	ID                string
+	OwnerEmail        string
+	ClaimHash         string
+	CreatedAt         time.Time
+	ExpiresAt         time.Time
+	ConsumedAt        *time.Time
+	ConsumedAccountID string
 }
 
 type PineconeClient interface {
