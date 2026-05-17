@@ -84,9 +84,10 @@ export function AuthProvider({ children }) {
     }, []);
 
     const login = async (credential = '') => {
-        if (appProfile.auth_mode === 'single_tenant_claim' || appProfile.auth_mode === 'single_tenant_setup_token') {
+        if (appProfile.auth_mode === 'single_tenant_admin_secret' || appProfile.auth_mode === 'single_tenant_claim' || appProfile.auth_mode === 'single_tenant_setup_token') {
             setError(null);
             const isClaim = appProfile.auth_mode === 'single_tenant_claim';
+            const isAdminSecret = appProfile.auth_mode === 'single_tenant_admin_secret';
             const response = await fetch(isClaim ? '/auth/single-tenant/claim' : '/auth/single-tenant/login', {
                 method: 'POST',
                 credentials: 'include',
@@ -94,7 +95,7 @@ export function AuthProvider({ children }) {
                     'Accept': 'application/json',
                     'Content-Type': 'application/json',
                 },
-                body: JSON.stringify(isClaim ? { claim_code: credential } : { setup_token: credential }),
+                body: JSON.stringify(isClaim ? { claim_code: credential } : isAdminSecret ? { admin_secret: credential } : { setup_token: credential }),
             });
             const text = await response.text();
             const data = text ? JSON.parse(text) : {};

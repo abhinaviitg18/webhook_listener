@@ -297,20 +297,20 @@ func TestScaleKitLogoutClearsSessionCookie(t *testing.T) {
 	}
 }
 
-func TestSingleTenantLoginIssuesLocalSession(t *testing.T) {
+func TestSingleTenantAdminSecretLoginIssuesLocalSession(t *testing.T) {
 	st := store.NewMemoryStore()
 	h := &Handler{
-		Store:                        st,
-		AppPlan:                      "enterprise",
-		AppDeploymentMode:            "single_tenant",
-		PublicBaseURL:                "https://partner.example.com",
-		MailDomain:                   "mail.partner.example.com",
-		SingleTenantOwnerEmail:       "ops@partner.example.com",
-		SingleTenantOwnerAlias:       "partner-ops",
-		SingleTenantSetupTokenSHA256: security.HashValue("setup-secret"),
-		AllowPublicRegistration:      false,
+		Store:                   st,
+		AppPlan:                 "enterprise",
+		AppDeploymentMode:       "single_tenant",
+		PublicBaseURL:           "https://partner.example.com",
+		MailDomain:              "mail.partner.example.com",
+		SingleTenantOwnerEmail:  "ops@partner.example.com",
+		SingleTenantOwnerAlias:  "partner-ops",
+		SingleTenantAdminSecret: "admin-secret",
+		AllowPublicRegistration: false,
 	}
-	req := httptest.NewRequest(http.MethodPost, "/auth/single-tenant/login", strings.NewReader(`{"setup_token":"setup-secret"}`))
+	req := httptest.NewRequest(http.MethodPost, "/auth/single-tenant/login", strings.NewReader(`{"admin_secret":"admin-secret"}`))
 	req.Header.Set("Content-Type", "application/json")
 	rr := httptest.NewRecorder()
 
@@ -342,11 +342,89 @@ func TestSingleTenantLoginIssuesLocalSession(t *testing.T) {
 		t.Fatalf("decode response: %v", err)
 	}
 	profile := body["app_profile"].(map[string]interface{})
-	if profile["auth_mode"] != "single_tenant_setup_token" {
+	if profile["auth_mode"] != "single_tenant_admin_secret" {
 		t.Fatalf("unexpected auth mode: %v", profile["auth_mode"])
 	}
 	if profile["public_base_url"] != "https://partner.example.com" {
 		t.Fatalf("unexpected public_base_url: %v", profile["public_base_url"])
+	}
+}
+
+func TestSingleTenantAdminSecretLoginCanBeReused(t *testing.T) {
+	st := store.NewMemoryStore()
+	h := &Handler{
+		Store:                   st,
+		AppDeploymentMode:       "single_tenant",
+		SingleTenantOwnerEmail:  "ops@partner.example.com",
+		SingleTenantAdminSecret: "admin-secret",
+	}
+	for i := 0; i < 2; i++ {
+		req := httptest.NewRequest(http.MethodPost, "/auth/single-tenant/login", strings.NewReader(`{"admin_secret":"admin-secret"}`))
+		req.Header.Set("Content-Type", "application/json")
+		rr := httptest.NewRecorder()
+		h.SingleTenantLogin(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("attempt %d expected status 200, got %d: %s", i+1, rr.Code, rr.Body.String())
+		}
+	}
+}
+
+func TestSingleTenantAdminSecretRotation(t *testing.T) {
+	h := &Handler{
+		Store:                   store.NewMemoryStore(),
+		AppDeploymentMode:       "single_tenant",
+		SingleTenantOwnerEmail:  "ops@partner.example.com",
+		SingleTenantAdminSecret: "new-secret",
+	}
+	req := httptest.NewRequest(http.MethodPost, "/auth/single-tenant/login", strings.NewReader(`{"admin_secret":"old-secret"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	h.SingleTenantLogin(rr, req)
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("expected old secret to be rejected, got %d", rr.Code)
+	}
+	req = httptest.NewRequest(http.MethodPost, "/auth/single-tenant/login", strings.NewReader(`{"admin_secret":"new-secret"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rr = httptest.NewRecorder()
+	h.SingleTenantLogin(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected new secret to pass, got %d: %s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestSingleTenantAdminSecretRejectsInvalidOrEmptySecret(t *testing.T) {
+	h := &Handler{
+		Store:                   store.NewMemoryStore(),
+		AppDeploymentMode:       "single_tenant",
+		SingleTenantOwnerEmail:  "ops@partner.example.com",
+		SingleTenantAdminSecret: "admin-secret",
+	}
+	for _, body := range []string{`{"admin_secret":"wrong"}`, `{"admin_secret":""}`, `{}`} {
+		req := httptest.NewRequest(http.MethodPost, "/auth/single-tenant/login", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		rr := httptest.NewRecorder()
+		h.SingleTenantLogin(rr, req)
+		if rr.Code != http.StatusUnauthorized {
+			t.Fatalf("body %s expected status 401, got %d", body, rr.Code)
+		}
+	}
+}
+
+func TestSingleTenantLegacySetupTokenLoginIssuesLocalSession(t *testing.T) {
+	st := store.NewMemoryStore()
+	h := &Handler{
+		Store:                        st,
+		AppDeploymentMode:            "single_tenant",
+		SingleTenantOwnerEmail:       "ops@partner.example.com",
+		SingleTenantSetupTokenSHA256: security.HashValue("setup-secret"),
+	}
+	req := httptest.NewRequest(http.MethodPost, "/auth/single-tenant/login", strings.NewReader(`{"setup_token":"setup-secret"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+
+	h.SingleTenantLogin(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rr.Code, rr.Body.String())
 	}
 }
 
@@ -367,7 +445,7 @@ func TestSingleTenantLoginRejectsInvalidSetupToken(t *testing.T) {
 	}
 }
 
-func TestSingleTenantSetupTokenLoginDisabledWhenHashMissing(t *testing.T) {
+func TestSingleTenantAdminLoginDisabledWhenNoCredentialConfigured(t *testing.T) {
 	h := &Handler{
 		Store:                  store.NewMemoryStore(),
 		AppDeploymentMode:      "single_tenant",
@@ -433,7 +511,7 @@ func TestSingleTenantClaimIssuesLocalSession(t *testing.T) {
 		t.Fatalf("decode response: %v", err)
 	}
 	profile := body["app_profile"].(map[string]interface{})
-	if profile["auth_mode"] != "single_tenant_claim" {
+	if profile["auth_mode"] != "single_tenant_admin_secret" {
 		t.Fatalf("unexpected auth mode: %v", profile["auth_mode"])
 	}
 }

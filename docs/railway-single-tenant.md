@@ -19,6 +19,12 @@ The only value the template installer should need to enter is:
 SINGLE_TENANT_OWNER_EMAIL=ops@partner-domain.com
 ```
 
+The template should also preconfigure this generated secret without asking the installer to type it:
+
+```env
+SINGLE_TENANT_ADMIN_SECRET=${{ secret(32, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789") }}
+```
+
 When `SINGLE_TENANT_OWNER_EMAIL` is set, AgentHook infers single-tenant mode, defaults the plan to Enterprise, disables public registration, uses Railway MySQL, and derives the public base URL from the current request host unless `PUBLIC_BASE_URL` is explicitly set.
 
 `PUBLIC_BASE_URL` may still be set after deployment for a partner custom domain. The Railway-generated domain is fine for temporary smoke tests.
@@ -29,17 +35,19 @@ The default partner template should create Railway MySQL automatically. Advanced
 
 `USE_IN_MEMORY_STORE=true` is only for local development and temporary demos. It avoids database cost, but data is lost on restart or redeploy.
 
-## First Login
+## Login
 
-1. Open the `agenthook` service logs in Railway after the first deploy.
-2. Copy the one-time `claim_code` value printed by AgentHook.
-3. Open the service URL and enter the claim code.
-4. AgentHook creates or reuses `SINGLE_TENANT_OWNER_EMAIL`, consumes the claim, then sets the existing `htc_token` session cookie.
+1. Open the `agenthook` service variables in Railway after the first deploy.
+2. Copy the generated `SINGLE_TENANT_ADMIN_SECRET` value.
+3. Open the service URL and enter the admin secret.
+4. AgentHook creates or reuses `SINGLE_TENANT_OWNER_EMAIL`, then sets the existing `htc_token` session cookie.
 5. Create an `AGENTHOOK_TOKEN` from the home console for CLIs, scripts, and agents.
+
+`SINGLE_TENANT_ADMIN_SECRET` is an ongoing owner login method. To rotate it, update the variable in Railway and redeploy. Existing browser sessions and API tokens are not automatically revoked by rotation.
 
 ## Legacy Setup Token
 
-`SINGLE_TENANT_SETUP_TOKEN_SHA256` is still supported for older installs. If it is set, the app uses setup-token login instead of the one-time claim flow.
+`SINGLE_TENANT_SETUP_TOKEN_SHA256` is still supported for older installs. If `SINGLE_TENANT_ADMIN_SECRET` is not set and the setup hash is set, the app accepts setup-token login.
 
 ```bash
 printf '%s' 'new-setup-token' | shasum -a 256

@@ -111,6 +111,7 @@ func TestLoadSingleTenantConfig(t *testing.T) {
 	t.Setenv("APP_DEPLOYMENT_MODE", "single_tenant")
 	t.Setenv("SINGLE_TENANT_OWNER_EMAIL", "ops@example.com")
 	t.Setenv("SINGLE_TENANT_OWNER_ALIAS", "ops")
+	t.Setenv("SINGLE_TENANT_ADMIN_SECRET", "admin-secret")
 	t.Setenv("SINGLE_TENANT_SETUP_TOKEN_SHA256", "abc123")
 	t.Setenv("ALLOW_PUBLIC_REGISTRATION", "true")
 
@@ -123,6 +124,9 @@ func TestLoadSingleTenantConfig(t *testing.T) {
 	}
 	if cfg.SingleTenantSetupTokenSHA256 != "abc123" {
 		t.Fatalf("unexpected setup token hash: %q", cfg.SingleTenantSetupTokenSHA256)
+	}
+	if cfg.SingleTenantAdminSecret != "admin-secret" {
+		t.Fatalf("unexpected admin secret: %q", cfg.SingleTenantAdminSecret)
 	}
 	if !cfg.AllowPublicRegistration {
 		t.Fatalf("expected public registration override")

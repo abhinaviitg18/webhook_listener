@@ -22,6 +22,7 @@ type Config struct {
 
 	SingleTenantOwnerEmail       string
 	SingleTenantOwnerAlias       string
+	SingleTenantAdminSecret      string
 	SingleTenantSetupTokenSHA256 string
 	AllowPublicRegistration      bool
 
@@ -127,6 +128,7 @@ func Load() Config {
 
 		SingleTenantOwnerEmail:       ownerEmail,
 		SingleTenantOwnerAlias:       getenv("SINGLE_TENANT_OWNER_ALIAS", ""),
+		SingleTenantAdminSecret:      getenv("SINGLE_TENANT_ADMIN_SECRET", ""),
 		SingleTenantSetupTokenSHA256: getenv("SINGLE_TENANT_SETUP_TOKEN_SHA256", ""),
 		AllowPublicRegistration:      getbool("ALLOW_PUBLIC_REGISTRATION", false),
 

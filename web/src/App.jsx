@@ -705,7 +705,7 @@ function normalizeAppProfile(profile) {
     ...(profile || {}),
     plan: profile?.plan === 'enterprise' ? 'enterprise' : 'basic',
     deployment_mode: profile?.deployment_mode === 'single_tenant' ? 'single_tenant' : 'multitenant',
-    auth_mode: profile?.auth_mode || (profile?.deployment_mode === 'single_tenant' ? 'single_tenant_claim' : 'scalekit'),
+    auth_mode: profile?.auth_mode || (profile?.deployment_mode === 'single_tenant' ? 'single_tenant_admin_secret' : 'scalekit'),
     public_base_url: (profile?.public_base_url || DEFAULT_APP_PROFILE.public_base_url).replace(/\/+$/, ''),
     mail_domain: profile?.mail_domain || DEFAULT_APP_PROFILE.mail_domain,
   };
@@ -929,19 +929,20 @@ payload -> preprocess -> deterministic routing -> optional LLM routing -> select
 }
 
 function SingleTenantLogin({ login, error, appProfile }) {
-  const [claimCode, setClaimCode] = useState(() => new URLSearchParams(window.location.search).get('claim_code') || '');
+  const [credential, setCredential] = useState(() => new URLSearchParams(window.location.search).get('claim_code') || '');
   const [busy, setBusy] = useState(false);
   const [localError, setLocalError] = useState('');
   const usesLegacySetupToken = appProfile?.auth_mode === 'single_tenant_setup_token';
-  const credentialLabel = usesLegacySetupToken ? 'Setup Token' : 'One-time Claim Code';
+  const usesLegacyClaim = appProfile?.auth_mode === 'single_tenant_claim';
+  const credentialLabel = usesLegacySetupToken ? 'Setup Token' : usesLegacyClaim ? 'One-time Claim Code' : 'Admin Secret';
 
   const submit = async (event) => {
     event.preventDefault();
     setBusy(true);
     setLocalError('');
     try {
-      await login(claimCode);
-      setClaimCode('');
+      await login(credential);
+      setCredential('');
     } catch (err) {
       setLocalError(err.message);
     } finally {
@@ -958,13 +959,20 @@ function SingleTenantLogin({ login, error, appProfile }) {
           <p className="text-sm text-slate-300">
             {usesLegacySetupToken
               ? 'Enter the setup token configured for this Railway service to open the private operator console.'
-              : 'Enter the one-time owner claim code printed in the Railway service logs after first deploy.'}
+              : usesLegacyClaim
+                ? 'Enter the one-time owner claim code printed in the Railway service logs after first deploy.'
+                : 'Enter the admin secret configured for this Railway service to open the private operator console.'}
           </p>
         </div>
         <div className="rounded-2xl border border-slate-800 bg-slate-900/50 px-3 py-2 text-xs text-slate-400">
           Public base URL: <code className="text-indigo-300 break-all">{appBaseURL(appProfile)}</code>
         </div>
-        {!usesLegacySetupToken && (
+        {!usesLegacySetupToken && !usesLegacyClaim && (
+          <InlineNotice tone="info">
+            In Railway, open the <strong>agenthook</strong> service variables and copy <code>SINGLE_TENANT_ADMIN_SECRET</code>. This secret is reusable until you rotate it in Railway.
+          </InlineNotice>
+        )}
+        {usesLegacyClaim && (
           <InlineNotice tone="info">
             In Railway, open the <strong>agenthook</strong> service logs and copy the value after <code>claim_code=</code>. The code can be used once and expires automatically.
           </InlineNotice>
@@ -973,16 +981,16 @@ function SingleTenantLogin({ login, error, appProfile }) {
         <FormField label={credentialLabel}>
           <TextInput
             type="password"
-            value={claimCode}
-            onChange={(e) => setClaimCode(e.target.value)}
-            placeholder={usesLegacySetupToken ? 'Enter setup token' : 'Enter claim code from Railway logs'}
+            value={credential}
+            onChange={(e) => setCredential(e.target.value)}
+            placeholder={usesLegacySetupToken ? 'Enter setup token' : usesLegacyClaim ? 'Enter claim code from Railway logs' : 'Enter SINGLE_TENANT_ADMIN_SECRET'}
             autoComplete="current-password"
             autoFocus
           />
         </FormField>
         <button
           type="submit"
-          disabled={busy || !claimCode.trim()}
+          disabled={busy || !credential.trim()}
           className="w-full inline-flex items-center justify-center gap-2 bg-primary text-on-primary px-5 py-3 rounded-2xl font-bold active:scale-95 transition-transform disabled:opacity-50"
         >
           <LogIn size={18} />

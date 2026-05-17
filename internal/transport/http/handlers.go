@@ -43,6 +43,7 @@ type Handler struct {
 	PublicBaseURL                string
 	SingleTenantOwnerEmail       string
 	SingleTenantOwnerAlias       string
+	SingleTenantAdminSecret      string
 	SingleTenantSetupTokenSHA256 string
 	AllowPublicRegistration      bool
 }
@@ -294,10 +295,13 @@ func (h *Handler) appProfilePayload(r *http.Request) map[string]any {
 
 func (h *Handler) authMode() string {
 	if h.isSingleTenantMode() {
-		if strings.TrimSpace(h.SingleTenantSetupTokenSHA256) == "" {
-			return "single_tenant_claim"
+		if strings.TrimSpace(h.SingleTenantAdminSecret) != "" {
+			return "single_tenant_admin_secret"
 		}
-		return "single_tenant_setup_token"
+		if strings.TrimSpace(h.SingleTenantSetupTokenSHA256) != "" {
+			return "single_tenant_setup_token"
+		}
+		return "single_tenant_admin_secret"
 	}
 	return "scalekit"
 }
@@ -318,20 +322,20 @@ func (h *Handler) SingleTenantLogin(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusNotFound, "single-tenant login is not enabled")
 		return
 	}
-	if strings.TrimSpace(h.SingleTenantSetupTokenSHA256) == "" {
-		writeErr(w, http.StatusNotFound, "setup-token login is not configured")
+	if strings.TrimSpace(h.SingleTenantAdminSecret) == "" && strings.TrimSpace(h.SingleTenantSetupTokenSHA256) == "" {
+		writeErr(w, http.StatusNotFound, "single-tenant admin login is not configured")
 		return
 	}
 	var body struct {
-		SetupToken string `json:"setup_token"`
+		AdminSecret string `json:"admin_secret"`
+		SetupToken  string `json:"setup_token"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeErr(w, http.StatusBadRequest, "invalid json")
 		return
 	}
-	expectedHash := strings.TrimSpace(strings.ToLower(h.SingleTenantSetupTokenSHA256))
-	if expectedHash == "" || !hmac.Equal([]byte(security.HashValue(strings.TrimSpace(body.SetupToken))), []byte(expectedHash)) {
-		writeErr(w, http.StatusUnauthorized, "invalid setup token")
+	if !h.validSingleTenantAdminCredential(body.AdminSecret, body.SetupToken) {
+		writeErr(w, http.StatusUnauthorized, "invalid single-tenant admin secret")
 		return
 	}
 	ownerEmail := strings.TrimSpace(strings.ToLower(h.SingleTenantOwnerEmail))
@@ -357,6 +361,23 @@ func (h *Handler) SingleTenantLogin(w http.ResponseWriter, r *http.Request) {
 		"account":     acct,
 		"app_profile": h.appProfilePayload(r),
 	})
+}
+
+func (h *Handler) validSingleTenantAdminCredential(adminSecret, setupToken string) bool {
+	expectedSecret := strings.TrimSpace(h.SingleTenantAdminSecret)
+	if expectedSecret != "" && strings.TrimSpace(adminSecret) != "" {
+		expectedHash := security.HashValue(expectedSecret)
+		submittedHash := security.HashValue(strings.TrimSpace(adminSecret))
+		if hmac.Equal([]byte(submittedHash), []byte(expectedHash)) {
+			return true
+		}
+	}
+	expectedSetupHash := strings.TrimSpace(strings.ToLower(h.SingleTenantSetupTokenSHA256))
+	if expectedSetupHash != "" && strings.TrimSpace(setupToken) != "" {
+		submittedHash := security.HashValue(strings.TrimSpace(setupToken))
+		return hmac.Equal([]byte(submittedHash), []byte(expectedSetupHash))
+	}
+	return false
 }
 
 func (h *Handler) SingleTenantClaim(w http.ResponseWriter, r *http.Request) {
