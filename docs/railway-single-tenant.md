@@ -7,11 +7,11 @@ This mode runs AgentHook as a private operator console for one partner-owned Rai
 The production template should include a Railway MySQL service named `MySQL` and set:
 
 ```env
-COMMERCE_MYSQL_DSN=${{ MySQL.MYSQL_URL }}
+COMMERCE_MYSQL_DSN=root:${{ MySQL.MYSQL_ROOT_PASSWORD }}@tcp(${{ MySQL.RAILWAY_PRIVATE_DOMAIN }}:3306)/railway?parseTime=true
 ```
 
-AgentHook runs embedded schema migrations at startup before serving traffic. A fresh Railway MySQL database does not require any manual SQL setup.
-Railway's `mysql://...` URL is accepted directly and normalized internally for the Go MySQL driver.
+AgentHook creates the `railway` database when needed, then runs embedded schema migrations at startup before serving traffic. A fresh Railway MySQL database does not require any manual SQL setup.
+Railway's `mysql://...` URL is also accepted directly and normalized internally for the Go MySQL driver.
 
 The only value the template installer should need to enter is:
 

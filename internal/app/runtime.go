@@ -24,6 +24,11 @@ func BuildHTTPHandler(ctx context.Context, cfg config.Config) (http.Handler, err
 	if cfg.UseInMemoryStore {
 		st = store.NewMemoryStore()
 	} else {
+		if cfg.AppDeploymentMode == "single_tenant" {
+			if err := store.EnsureMySQLDatabase(ctx, cfg.TiDBDSN); err != nil {
+				return nil, err
+			}
+		}
 		if err := store.ApplyMigrations(ctx, cfg.TiDBDSN); err != nil {
 			return nil, err
 		}
